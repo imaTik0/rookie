@@ -1,0 +1,1 @@
+export type QdrantPointId = string&{__qdrantPointId: never};

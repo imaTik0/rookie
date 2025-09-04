@@ -1,0 +1,20 @@
+{
+  "imports": {
+    "@openai/openai": "jsr:@openai/openai@^5.16.0",
+    "@qdrant/js-client-rest": "npm:@qdrant/js-client-rest@^1.15.1",
+    "@std/fs": "jsr:@std/fs@^1.0.19",
+    "@std/path": "jsr:@std/path@^1.1.2",
+    "hono": "jsr:@hono/hono@^4.9.5",
+    "mongodb": "npm:mongodb@^6.19.0",
+    "pino": "npm:pino@^9.9.1"
+  },
+  "tasks": {
+    "start": "deno run --allow-all --env-file src/init.ts",
+    "watch": "deno run --watch --env-file --allow-all src/init.ts | pino-pretty -c -t 'SYS:HH:MM:ss.L'"
+  },
+  "compilerOptions": {
+    "jsx": "precompile",
+    "jsxImportSource": "hono/jsx"
+  },
+  "nodeModulesDir": "auto"
+}

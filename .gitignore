@@ -1,0 +1,5 @@
+.env
+samples
+.vscode
+conf
+node_modules
