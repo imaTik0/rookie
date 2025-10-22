@@ -1,28 +1,50 @@
 import * as path from "@std/path";
-import { IOC } from "./ioc/index.ts";
+import { IOC } from "./ioc/IOC.ts";
 import { Scanner } from "./ioc/Scanner.ts";
 import { Logger } from "./Logger.ts";
 import { App } from "./App.ts";
 import { MongoDbConnection } from "./db/mongo/MongoDbManager.ts";
 import { ConfigService } from "./service/ConfigService.ts";
 import { MigrationManager } from "./db/mongo/MigrationManager.ts";
-import { QdrantConnection } from "./db/qdrant/QdrantManger.ts";
-import { QdrantCollectionFactory } from "./db/qdrant/QdrantCollectionFactory.ts";
+import { VectorConnection } from "./db/vectordb/VectorManger.ts";
+import { VectorCollectionFactory } from "./db/vectordb/VectorCollectionFactory.ts";
+import { EmbeddingService } from "./service/EmbeddingService.ts";
+import OpenAI from "@openai/openai";
 
 export class Container extends IOC {
     constructor() {
-        super()
+        super();
     }
 
     async init() {
-        await Scanner.registerToIoc(this, path.resolve(Deno.cwd(), "src/service/"));
+        await Scanner.registerToIoc(
+            this,
+            path.resolve(Deno.cwd(), "src/service/"),
+        );
         this.register(App);
         this.register(MigrationManager);
-        this.register(QdrantCollectionFactory)
-        this.registerFactory("logger", (parentClass: unknown, parentObjectName: string|null, _propertyName: string) => {
-            const isClassConstructor = (typeof parentClass === "function" && parentClass !== null && "name" in parentClass && typeof parentClass.name === "string");
-            return new Logger(isClassConstructor ? parentClass.name : parentObjectName || "<unknown>");
-        })
+        this.register(VectorCollectionFactory);
+        this.registerFactory(
+            "logger",
+            (
+                parentClass: unknown,
+                parentObjectName: string | null,
+                _propertyName: string,
+            ) => {
+                const isClassConstructor = typeof parentClass === "function" &&
+                    parentClass !== null && "name" in parentClass &&
+                    typeof parentClass.name === "string";
+                return new Logger(
+                    isClassConstructor
+                        ? parentClass.name
+                        : parentObjectName || "<unknown>",
+                );
+            },
+        );
+        this.registerValue(
+            "embeddingService",
+            await EmbeddingService.init(this.getConfig()),
+        );
     }
 
     getConfig() {
@@ -33,8 +55,12 @@ export class Container extends IOC {
         this.registerValue("mongoDbConnection", mongoConnection);
     }
 
-    registerQdrantConnection(qdrantConnection: QdrantConnection) {
-        this.registerValue("qdrantConnection", qdrantConnection);
+    registerVectorConnection(vectorConnection: VectorConnection) {
+        this.registerValue("vectorConnection", vectorConnection);
+    }
+
+    registerOpenAIFetcher(openAI: OpenAI) {
+        this.registerValue("openai", openAI);
     }
 
     getMigrationManager() {

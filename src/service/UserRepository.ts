@@ -3,7 +3,7 @@ import * as types from "../types/index.ts";
 import * as db from "../db/mongo/Model.ts";
 import { BaseRepository } from "../db/mongo/BaseRepository.ts";
 
-export class UserRepository extends BaseRepository<types.user.UserId, db.User> { 
+export class UserRepository extends BaseRepository<types.user.UserId, db.User> {
     static readonly COLLECTION_NAME = "user";
 
     constructor(
@@ -15,8 +15,8 @@ export class UserRepository extends BaseRepository<types.user.UserId, db.User> {
     async createUser(userName: string) {
         await this.getCollection().insertOne({
             _id: this.generateId(),
-            name: userName
-        })
+            name: userName,
+        });
     }
 
     async getByName(username: string) {
