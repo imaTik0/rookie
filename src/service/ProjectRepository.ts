@@ -3,31 +3,31 @@ import * as types from "../types/index.ts";
 import * as db from "../db/mongo/Model.ts";
 import { BaseRepository } from "../db/mongo/BaseRepository.ts";
 
-export class UserRepository extends BaseRepository<types.user.UserId, db.User> {
-    static readonly COLLECTION_NAME = "user";
+export class ProjectRepository extends BaseRepository<types.project.ProjectId, db.Project> {
+    static readonly COLLECTION_NAME = "project";
 
     constructor(
         mongoDbConnection: MongoDbConnection,
     ) {
-        super(mongoDbConnection, UserRepository.COLLECTION_NAME);
+        super(mongoDbConnection, ProjectRepository.COLLECTION_NAME);
     }
 
-    async createUser(userName: string) {
+    async createproject(projectName: string) {
         await this.getCollection().insertOne({
             _id: this.generateId(),
-            name: userName,
+            name: projectName,
         });
     }
 
-    async getByName(username: string) {
+    async getByName(projectName: string) {
         return await this.getCollection().findOne({
-            name: username,
+            name: projectName,
         });
     }
 
-    async get(userId: types.user.UserId) {
+    async get(projectId: types.project.ProjectId) {
         return await this.getCollection().findOne({
-            _id: userId,
+            _id: projectId,
         });
     }
 }

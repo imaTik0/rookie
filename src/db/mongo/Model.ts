@@ -1,6 +1,6 @@
 import * as types from "../../types/index.ts";
 
-export interface User {
-    _id: types.user.UserId;
+export interface Project {
+    _id: types.project.ProjectId;
     name: string;
 }

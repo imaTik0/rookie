@@ -1,6 +1,6 @@
 import { z } from "@hono/zod-openapi";
 
-export const UserSchema = z.object({
+export const ProjectSchema = z.object({
     id: z.string().openapi({
         example: "",
     }),
@@ -12,4 +12,4 @@ export const UserSchema = z.object({
     }),
 });
 
-export const CreateUserSchema = UserSchema.omit({ id: true });
+export const CreateProjectSchema = ProjectSchema.omit({ id: true });

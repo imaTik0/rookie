@@ -1,16 +1,10 @@
-import { Hono } from "hono";
-import { PromptService } from "./service/PromptService.ts";
 import { Logger } from "./Logger.ts";
-import * as path from "@std/path";
-import { Executor } from "./service/WorkerPool.ts";
-import { VectorCollectionFactory } from "./db/vectordb/VectorCollectionFactory.ts";
-import { EmbeddingService } from "./service/EmbeddingService.ts";
-import { FileLoaderService } from "./service/FileLoaderService.ts";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { registerController } from "./api/Decorator.ts";
-import { UserController } from "./api/user/UserController.ts";
+import { ProjectController } from "./api/user/ProjectController.ts";
 import { Scalar } from "@scalar/hono-api-reference";
 import { ConfigService } from "./service/ConfigService.ts";
+import { Container } from "./Container.ts";
 
 export class App {
     private honoServer?: OpenAPIHono;
@@ -18,27 +12,25 @@ export class App {
     constructor(
         private logger: Logger,
         private configService: ConfigService,
+        private container: Container,
     ) {}
 
     init() {
         this.honoServer = new OpenAPIHono();
-
-        registerController(this.honoServer, UserController, this.logger);
-
+        registerController(this.honoServer, this.container.resolve<ProjectController>("projectController"), this.logger);
         this.honoServer.doc("/docs", {
             openapi: "3.0.0",
             info: {
-                title: "Users API",
+                title: "Rookie API",
                 version: "1.0.0",
             },
         });
-
         this.honoServer.get(
             "/",
             Scalar({
                 url: "/docs",
-                layout: "modern", // options: 'modern' | 'classic' | 'minimal'
-                theme: "default", // or 'dark'
+                layout: "modern",
+                theme: "solarized",
             }),
         );
         const port = this.configService.values.port;

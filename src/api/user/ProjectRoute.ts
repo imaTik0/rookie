@@ -1,14 +1,14 @@
 import { createRoute } from "@hono/zod-openapi";
-import { CreateUserSchema, UserSchema } from "./UserSchema.ts";
+import { CreateProjectSchema, ProjectSchema } from "./ProjectSchema.ts";
 
-export const CreateUserRoute = createRoute({
+export const CreateProjectRoute = createRoute({
     method: "post",
-    path: "/users",
+    path: "/projects",
     request: {
         body: {
             content: {
                 "application/json": {
-                    schema: CreateUserSchema,
+                    schema: CreateProjectSchema,
                 },
             },
             required: true,
@@ -16,10 +16,10 @@ export const CreateUserRoute = createRoute({
     },
     responses: {
         201: {
-            description: "User created",
+            description: "Project created",
             content: {
                 "application/json": {
-                    schema: UserSchema,
+                    schema: ProjectSchema,
                 },
             },
         },

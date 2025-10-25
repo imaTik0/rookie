@@ -21,6 +21,10 @@ export class Container extends IOC {
             this,
             path.resolve(Deno.cwd(), "src/service/"),
         );
+        await Scanner.registerToIoc(
+            this,
+            path.resolve(Deno.cwd(), "src/api/"),
+        );
         this.register(App);
         this.register(MigrationManager);
         this.register(VectorCollectionFactory);
@@ -45,6 +49,7 @@ export class Container extends IOC {
             "embeddingService",
             await EmbeddingService.init(this.getConfig()),
         );
+        this.registerValue("container", this);
     }
 
     getConfig() {

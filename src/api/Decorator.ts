@@ -1,5 +1,4 @@
 // deno-lint-ignore-file no-explicit-any
-// src/api/Decorator.ts
 import "reflect-metadata";
 import { OpenAPIHono, RouteConfig } from "@hono/zod-openapi";
 import { Logger } from "../Logger.ts";
@@ -28,27 +27,22 @@ export function Post(route: RouteConfig) {
 
 export function registerController(
     app: OpenAPIHono,
-    ControllerClass: any,
+    controllerInstance: any,
     logger?: Logger,
 ) {
-    const instance = new ControllerClass();
-    const prefix = Reflect.getMetadata("prefix", ControllerClass) || "";
-    const routes = Reflect.getMetadata("routes", ControllerClass) || [];
+    const prefix = Reflect.getMetadata("prefix", controllerInstance.constructor) || "";
+    const routes = Reflect.getMetadata("routes", controllerInstance.constructor) || [];
 
     for (const { _method, route, handlerName } of routes) {
-        // Ensure handler is bound correctly to instance
-        const handler = instance[handlerName].bind(instance);
-
-        // Register the OpenAPI route dynamically
+        const handler = controllerInstance[handlerName].bind(controllerInstance);
         app.openapi(route, async (c: any) => {
-            // Allow handler to use 'this'
             return await handler(c);
         });
     }
 
     if (logger) {
         logger.log(
-            `✅ Registered controller: ${prefix} (${routes.length} route${
+            `Registered controller: ${prefix} (${routes.length} route${
                 routes.length === 1 ? "" : "s"
             })`,
         );
