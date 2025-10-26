@@ -28,7 +28,7 @@
     "nodeModulesDir": "auto",
     "fmt": {
         "useTabs": false,
-        "lineWidth": 80,
+        "lineWidth": 100,
         "indentWidth": 4,
         "singleQuote": false,
         "proseWrap": "preserve"

@@ -1,6 +1,1 @@
-export type ProjectId = string & { __userId: never };
-
-export interface User {
-    id: ProjectId;
-    name: string;
-}
+export type ProjectId = string & { __projectId: never };

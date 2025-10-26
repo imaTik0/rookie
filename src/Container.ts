@@ -39,9 +39,7 @@ export class Container extends IOC {
                     parentClass !== null && "name" in parentClass &&
                     typeof parentClass.name === "string";
                 return new Logger(
-                    isClassConstructor
-                        ? parentClass.name
-                        : parentObjectName || "<unknown>",
+                    isClassConstructor ? parentClass.name : parentObjectName || "<unknown>",
                 );
             },
         );

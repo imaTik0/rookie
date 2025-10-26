@@ -25,6 +25,22 @@ export function Post(route: RouteConfig) {
     };
 }
 
+export function Delete(route: RouteConfig) {
+    return function (target: any, propertyKey: string) {
+        const routes = Reflect.getMetadata("routes", target.constructor) || [];
+        routes.push({ method: "delete", route, handlerName: propertyKey });
+        Reflect.defineMetadata("routes", routes, target.constructor);
+    };
+}
+
+export function Patch(route: RouteConfig) {
+    return function (target: any, propertyKey: string) {
+        const routes = Reflect.getMetadata("routes", target.constructor) || [];
+        routes.push({ method: "patch", route, handlerName: propertyKey });
+        Reflect.defineMetadata("routes", routes, target.constructor);
+    };
+}
+
 export function registerController(
     app: OpenAPIHono,
     controllerInstance: any,
@@ -34,7 +50,9 @@ export function registerController(
     const routes = Reflect.getMetadata("routes", controllerInstance.constructor) || [];
 
     for (const { _method, route, handlerName } of routes) {
-        const handler = controllerInstance[handlerName].bind(controllerInstance);
+        const handler = controllerInstance[handlerName].bind(
+            controllerInstance,
+        );
         app.openapi(route, async (c: any) => {
             return await handler(c);
         });

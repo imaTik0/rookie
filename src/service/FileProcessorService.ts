@@ -21,9 +21,7 @@ export class FileProcessorService {
                 );
                 if (!embeddingResult || embeddingResult.length === 0) {
                     throw new Error(
-                        `Embedding failed for file with metadata: ${
-                            JSON.stringify(file.metadata)
-                        }`,
+                        `Embedding failed for file with metadata: ${JSON.stringify(file.metadata)}`,
                     );
                 }
                 const vector = embeddingResult[0];

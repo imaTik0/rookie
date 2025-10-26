@@ -17,11 +17,9 @@ export class ReflectUtils {
             const baseClass = fnStr.match(
                 /class\s([a-zA-Z0-9]*)\sextends\s([a-zA-Z0-9]*)/,
             );
-            return baseClass == null
-                ? []
-                : ReflectUtils.getClassConstructorParametersNamesCore(
-                    Object.getPrototypeOf(func),
-                );
+            return baseClass == null ? [] : ReflectUtils.getClassConstructorParametersNamesCore(
+                Object.getPrototypeOf(func),
+            );
         }
         const constructorPostIndex = constructorIndex + 12;
         const result = fnStr.slice(
@@ -133,9 +131,7 @@ export class IOC {
         const params: unknown[] = [];
         for (const param of parameters) {
             params.push(
-                props && param in props
-                    ? props[param]
-                    : this.resolveFor(param, clazz, clazzName),
+                props && param in props ? props[param] : this.resolveFor(param, clazz, clazzName),
             );
         }
         if (
@@ -207,9 +203,7 @@ export class IOC {
         if (entry.type) {
             return entry.type;
         }
-        return entry.value
-            ? (<{ constructor: Function }> entry.value).constructor
-            : null;
+        return entry.value ? (<{ constructor: Function }> entry.value).constructor : null;
     }
 }
 
