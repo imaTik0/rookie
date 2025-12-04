@@ -18,17 +18,27 @@ export class PromptService {
     private createPromptTemplate(
         userInput: string,
         startingContext: string,
+        functionTemplate?: string,
+        minimalLength?: number,
+        maximalLength?: number,
     ): string {
         const jsonStructure: StructuredResponse = {
             calls: [{
                 fetch:
                     `There should be ready to eval javascript code calling api function with fetch API that is encapsulated in function with template:  
-                        export default async (ctx) => {
-                            const response = await fetch(ctx.url, {});
-                            const result = await response.json();
-                            ctx.$$VARIABLE.foo = bar
-                            return {result, ctx};
-                        }
+                        ${
+                        functionTemplate || `
+                            export default async (ctx) => {
+                                const response = await fetch(ctx.url, {});
+                                const result = await response.json();
+                                if (result.error) {
+                                    throw new Error(result.error);
+                                }
+                                ctx.$$VARIABLE.foo = bar
+                                return {result, ctx};
+                            }    
+                        `
+                    }
                     `,
                 stepExplanation: "Description of action",
                 returnValueName:
@@ -37,7 +47,9 @@ export class PromptService {
         };
 
         return `
-      Analyze the following documentation. Prepare user story in form of 10 to 20 api method calls that resemble
+      Analyze the following documentation. Prepare user story in form of ${
+            minimalLength || 10
+        } to ${maximalLength || 20} api method calls that resemble
       potenial usage of following API. Your response MUST be a valid JSON object that strictly
       adheres to the structure shown below. Do not include any explanations or markdown
       formatting outside of the JSON object itself. You MUST follow JSON RPC 2.0 Protocol and response with VALID json
@@ -64,8 +76,17 @@ export class PromptService {
     public async promptForApiUsageScenario(
         docs: string,
         startingContext: string,
+        functionTemplate?: string,
+        minimalLength?: number,
+        maximalLength?: number,
     ): Promise<StructuredResponse> {
-        const prompt = this.createPromptTemplate(docs, startingContext);
+        const prompt = this.createPromptTemplate(
+            docs,
+            startingContext,
+            functionTemplate,
+            minimalLength,
+            maximalLength,
+        );
 
         try {
             this.logger.log("Prompting gpt...");

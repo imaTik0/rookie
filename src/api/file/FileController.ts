@@ -17,18 +17,41 @@ export class FileController {
     uploadFile: RouteHandler<typeof FileRoutes.UploadFileRoute> = async (c) => {
         const formData = await c.req.formData();
         const file = formData.get("file");
-
         if (!(file instanceof File)) {
             return c.json({ code: 400, message: "No 'file' field in form-data" }, 400);
         }
-
         try {
             const arrayBuffer = await file.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
             const dbMetadata = await this.fileService.uploadFile(file, buffer);
             const apiFile = this.fileConverter.mapDbFileToApi(dbMetadata);
-
             return c.json(apiFile, 201);
+        } catch (error: any) {
+            return c.json({ code: 400, message: error.message }, 400);
+        }
+    };
+
+    @Post(FileRoutes.UploadManyFilesRoute)
+    uploadManyFiles: RouteHandler<typeof FileRoutes.UploadManyFilesRoute> = async (c) => {
+        const formData = await c.req.formData();
+        const formFiles = formData.getAll("files");
+        const files = formFiles.filter((f): f is File => f instanceof File);
+        if (files.length === 0) {
+            return c.json(
+                { code: 400, message: "No 'files' field provided or files are empty" },
+                400,
+            );
+        }
+        try {
+            const apiFiles = await Promise.all(
+                files.map(async (file) => {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const buffer = Buffer.from(arrayBuffer);
+                    const dbMetadata = await this.fileService.uploadFile(file, buffer);
+                    return this.fileConverter.mapDbFileToApi(dbMetadata);
+                }),
+            );
+            return c.json(apiFiles, 201);
         } catch (error: any) {
             return c.json({ code: 400, message: error.message }, 400);
         }
@@ -38,13 +61,11 @@ export class FileController {
     getFileMetadata: RouteHandler<typeof FileRoutes.GetFileMetadataRoute> = async (c) => {
         const { id } = c.req.valid("param");
         const dbMetadata = await this.fileService.getFileMetadata(id as types.file.FileId);
-
         if (!dbMetadata) {
             return c.json({ code: 404, message: "File not found" }, 404);
         }
-
         const apiFile = this.fileConverter.mapDbFileToApi(dbMetadata);
-        return c.json(apiFile, 200); // 3. Send converted data
+        return c.json(apiFile, 200);
     };
 
     @Get(FileRoutes.DownloadFileRoute)

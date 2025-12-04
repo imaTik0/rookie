@@ -3,6 +3,7 @@ import { EmbeddingService } from "./EmbeddingService.ts";
 import { Point } from "../db/vectordb/VectorCollection.ts";
 import * as types from "../types/index.ts";
 import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
+import { Buffer } from "node:buffer";
 
 export class FileProcessorService {
     constructor(
@@ -11,10 +12,10 @@ export class FileProcessorService {
     ) {}
 
     async processAndStore(
-        files: types.core.FileShard[],
+        files: types.file.FileShard[],
         vectorCollectionName: string,
     ): Promise<void> {
-        const points: Point<types.core.FileShard>[] = await Promise.all(
+        const points: Point<types.file.FileShard>[] = await Promise.all(
             files.map(async (file) => {
                 const embeddingResult = await this.embeddingService.embed(
                     file.content,
@@ -25,7 +26,7 @@ export class FileProcessorService {
                     );
                 }
                 const vector = embeddingResult[0];
-                const point: Point<types.core.FileShard> = {
+                const point: Point<types.file.FileShard> = {
                     id: uuidv4() as types.core.VectorPointId,
                     vector,
                     payload: file,
@@ -34,7 +35,14 @@ export class FileProcessorService {
             }),
         );
         const vectorCollection = await this.vectorCollectionFactory
-            .createCollection<types.core.FileShard>(vectorCollectionName);
+            .createCollection<types.file.FileShard>(vectorCollectionName);
         vectorCollection.upsertPoints(points);
+    }
+
+    sanitizeWhiteCharsInText(text: string | Buffer): string {
+        return (Buffer.isBuffer(text) ? text.toString() : text).replace(/\u00A0/g, " ").replace(
+            /[ \t]+/g,
+            " ",
+        ).replace(/&nbsp;/g, " ");
     }
 }

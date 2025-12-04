@@ -71,3 +71,10 @@ export const DeleteProjectResponseSchema = z
         }),
     })
     .openapi("DeleteProjectResponse");
+
+export type ProjectSchema = z.infer<typeof ProjectSchema>;
+export type CreateProjectSchema = z.infer<typeof CreateProjectSchema>;
+export type UpdateProjectSchema = z.infer<typeof UpdateProjectSchema>;
+export type ParamsSchema = z.infer<typeof ParamsSchema>;
+export type PaginatedProjectsResponseSchema = z.infer<typeof PaginatedProjectsResponseSchema>;
+export type DeleteProjectResponseSchema = z.infer<typeof DeleteProjectResponseSchema>;

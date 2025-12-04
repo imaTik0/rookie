@@ -1,4 +1,5 @@
 import { ConfigService } from "../../service/ConfigService.ts";
+import { FileShard } from "../../types/file.ts";
 import { VectorCollection } from "./VectorCollection.ts";
 import { VectorConnection } from "./VectorManger.ts";
 
@@ -8,7 +9,7 @@ export class VectorCollectionFactory {
         private configService: ConfigService,
     ) {}
 
-    async createCollection<T>(
+    async createCollection<T = FileShard>(
         name: string,
         vectorSize?: number,
     ): Promise<VectorCollection<T>> {

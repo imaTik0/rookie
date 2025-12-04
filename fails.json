@@ -1,0 +1,18 @@
+[
+    {
+        "stepExplanation": "Bind the obtained access token to the current websocket/session context (bind access token).",
+        "error": "{}"
+    },
+    {
+        "stepExplanation": "List inboxes for the created context to show usage of the inbox APIs.",
+        "error": "{}"
+    },
+    {
+        "stepExplanation": "Retrieve list of threads in the created context to demonstrate thread APIs.",
+        "error": "{}"
+    },
+    {
+        "stepExplanation": "List stores for the created context to show store-related API usage.",
+        "error": "{}"
+    }
+]

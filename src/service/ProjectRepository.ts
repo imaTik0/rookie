@@ -58,7 +58,7 @@ export class ProjectRepository extends BaseRepository<types.project.ProjectId, d
 
     async listPopulated(
         pagination: { page: number; limit: number },
-    ): Promise<{ projects: any[]; total: number }> {
+    ) {
         const { page, limit } = pagination;
         const skip = (page - 1) * limit;
         const collection = this.getCollection();
@@ -87,7 +87,7 @@ export class ProjectRepository extends BaseRepository<types.project.ProjectId, d
             collection.countDocuments(),
         ]);
 
-        return { projects, total };
+        return { projects: projects as db.PopulatedProject[], total };
     }
 
     async update(
@@ -95,26 +95,21 @@ export class ProjectRepository extends BaseRepository<types.project.ProjectId, d
         data: { projectName?: string; fileIds?: types.file.FileId[] },
     ): Promise<db.Project | null> {
         const updateDoc: { $set: { [key: string]: unknown } } = { $set: {} };
-
         if (data.projectName) {
             updateDoc.$set.projectName = data.projectName;
         }
         if (data.fileIds) {
             updateDoc.$set.files = data.fileIds;
         }
-
         if (Object.keys(updateDoc.$set).length === 0) {
             return this.get(projectId);
         }
-
         updateDoc.$set.updatedAt = new Date();
-
         const result = await this.getCollection().findOneAndUpdate(
             { _id: projectId },
             updateDoc,
             { returnDocument: "after" },
         );
-
         return result;
     }
 

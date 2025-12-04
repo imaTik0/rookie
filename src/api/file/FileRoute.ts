@@ -6,6 +6,7 @@ import {
     FileSchema,
     PaginatedFilesResponseSchema,
     UploadFileRequestSchema,
+    UploadManyFilesRequestSchema,
 } from "./FileSchema.ts";
 import { ErrorSchema, PaginationQuerySchema } from "../CommonSchema.ts";
 
@@ -31,6 +32,37 @@ const UploadFileRoute = createRoute({
         },
         400: {
             description: "Bad Request (e.g., no file, file too large)",
+            content: { "application/json": { schema: ErrorSchema } },
+        },
+    },
+});
+
+const UploadManyFilesRoute = createRoute({
+    method: "post",
+    path: "/files/upload-many", // Zmieniona ścieżka
+    tags: ["Files"],
+    summary: "Upload multiple files (max 10MB total)",
+    request: {
+        body: {
+            content: {
+                "multipart/form-data": {
+                    schema: UploadManyFilesRequestSchema,
+                },
+            },
+            required: true,
+        },
+    },
+    responses: {
+        201: {
+            description: "Files uploaded successfully",
+            content: {
+                "application/json": {
+                    schema: z.array(FileSchema),
+                },
+            },
+        },
+        400: {
+            description: "Bad Request (e.g., no files, total size too large)",
             content: { "application/json": { schema: ErrorSchema } },
         },
     },
@@ -131,6 +163,7 @@ const ListFilesRoute = createRoute({
 
 export const FileRoutes = {
     UploadFileRoute,
+    UploadManyFilesRoute,
     GetFileMetadataRoute,
     DownloadFileRoute,
     DeleteFileRoute,

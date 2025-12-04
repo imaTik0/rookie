@@ -41,6 +41,16 @@ export const UploadFileRequestSchema = z.object({
         }),
 });
 
+export const UploadManyFilesRequestSchema = z.object({
+    files: z.array(
+        z.custom<File>((v) => v instanceof File)
+            .openapi({
+                type: "string",
+                format: "binary",
+            }),
+    ),
+});
+
 export const FileIDsSchema = z.object({
     fileIds: z
         .array(z.string().min(1, "File ID cannot be empty"))
@@ -73,3 +83,10 @@ export const DeleteFileResponseSchema = z
         }),
     })
     .openapi("DeleteFileResponse");
+
+export type FileSchema = z.infer<typeof FileSchema>;
+export type FileParamsSchema = z.infer<typeof FileParamsSchema>;
+export type UploadFileRequestSchema = z.infer<typeof UploadFileRequestSchema>;
+export type FileIDsSchema = z.infer<typeof FileIDsSchema>;
+export type PaginatedFilesResponseSchema = z.infer<typeof PaginatedFilesResponseSchema>;
+export type DeleteFileResponseSchema = z.infer<typeof DeleteFileResponseSchema>;
