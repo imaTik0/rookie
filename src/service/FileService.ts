@@ -3,22 +3,24 @@ import { ProjectRepository } from "./ProjectRepository.ts";
 import * as types from "../types/index.ts";
 import * as db from "../db/mongo/Model.ts";
 import { Buffer } from "node:buffer";
+import { FileProcessorService } from "./FileProcessorService.ts";
 
 export class FileService {
     constructor(
         private fileRepository: FileRepository,
         private projectRepository: ProjectRepository,
+        private fileProcessorService: FileProcessorService,
     ) {}
 
     async uploadFile(file: File, fileBuffer: Buffer): Promise<Omit<db.File, "data">> {
-        if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        if (file.size > 10 * 1024 * 1024) {
             throw new Error("File exceeds 10MB limit");
         }
         const newFile = await this.fileRepository.create({
             filename: file.name,
             mimetype: file.type,
             size: file.size,
-            data: fileBuffer,
+            data: Buffer.from(this.fileProcessorService.sanitizeWhiteCharsInText(fileBuffer)),
         });
         const { data: _data, ...metadata } = newFile;
         return metadata;

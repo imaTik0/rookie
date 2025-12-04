@@ -18,9 +18,9 @@ export class FileRepository extends BaseRepository<types.file.FileId, db.File> {
         fileData: { filename: string; mimetype: string; size: number; data: Buffer },
     ): Promise<db.File> {
         const newFile: db.File = {
-            _id: this.generateId(), // ID is generated here
+            _id: this.generateId(),
             ...fileData,
-            data: new Binary(fileData.data), // Convert Buffer to BSON Binary
+            data: new Binary(fileData.data),
             createdAt: new Date(),
             updatedAt: new Date(),
         };
@@ -58,7 +58,7 @@ export class FileRepository extends BaseRepository<types.file.FileId, db.File> {
             collection.find(
                 {},
                 {
-                    projection: { data: 0 }, // <-- CRITICAL: Exclude binary data
+                    projection: { data: 0 },
                     sort: { createdAt: -1 },
                     skip: skip,
                     limit: limit,

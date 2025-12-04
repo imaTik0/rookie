@@ -19,3 +19,6 @@ export const PaginationQuerySchema = z.object({
         description: "Number of results per page (max 100)",
     }),
 });
+
+export type ErrorSchema = z.infer<typeof ErrorSchema>;
+export type PaginationQuerySchema = z.infer<typeof PaginationQuerySchema>;

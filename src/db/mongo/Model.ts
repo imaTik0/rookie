@@ -10,10 +10,42 @@ export interface File {
     createdAt: Date;
     updatedAt: Date;
 }
+
 export interface Project {
     _id: types.project.ProjectId;
     projectName: string;
     files: types.file.FileId[];
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface PopulatedProject {
+    _id: types.project.ProjectId;
+    projectName: string;
+    files: Omit<File, "data">[];
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface ReportModel {
+    _id: types.report.ReportId;
+    testSuiteId: types.test.TestSuiteId;
+    projectId: types.project.ProjectId;
+    status: types.report.ReportStatus;
+    initialContext: string;
+    executionPlan: unknown; // The raw JSON plan from LLM
+    steps: types.report.StepResult[];
+    createdAt: Date;
+    durationMs?: number;
+}
+
+export interface TestSuite {
+    _id: string;
+    projectId: types.project.ProjectId;
+    initialContext: string;
+    functionTemplate: string;
+    minimalStoryLength: number;
+    maximalStoryLength: number;
     createdAt: Date;
     updatedAt: Date;
 }

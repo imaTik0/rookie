@@ -13,9 +13,11 @@ export class ProjectController {
     @Post(ProjectRoutes.CreateProjectRoute)
     createProject: RouteHandler<typeof ProjectRoutes.CreateProjectRoute> = async (c) => {
         const createProjectDto = c.req.valid("json");
-
         try {
-            const newProject = await this.projectService.createProject(createProjectDto);
+            const newProject = await this.projectService.createProject(
+                createProjectDto.projectName,
+                createProjectDto.fileIds as types.file.FileId[],
+            );
             return c.json(newProject, 201);
         } catch (error: any) {
             return c.json({ code: 400, message: error.message }, 400);
@@ -25,22 +27,17 @@ export class ProjectController {
     @Get(ProjectRoutes.GetProjectRoute)
     getProject: RouteHandler<typeof ProjectRoutes.GetProjectRoute> = async (c) => {
         const { id } = c.req.valid("param");
-
         const project = await this.projectService.getProjectById(id as types.project.ProjectId);
-
         if (!project) {
             return c.json({ code: 404, message: "Project not found" }, 404);
         }
-
         return c.json(project, 200);
     };
 
     @Get(ProjectRoutes.ListProjectsRoute)
     listProjects: RouteHandler<typeof ProjectRoutes.ListProjectsRoute> = async (c) => {
         const { page, limit } = c.req.valid("query");
-
         const response = await this.projectService.listProjects({ page, limit });
-
         return c.json(response, 200);
     };
 
@@ -48,17 +45,17 @@ export class ProjectController {
     updateProject: RouteHandler<typeof ProjectRoutes.UpdateProjectRoute> = async (c) => {
         const { id } = c.req.valid("param");
         const updateProjectDto = c.req.valid("json");
-
         try {
             const updatedProject = await this.projectService.updateProject(
                 id as types.project.ProjectId,
-                updateProjectDto,
+                {
+                    projectName: updateProjectDto.projectName,
+                    fileIds: updateProjectDto.fileIds as types.file.FileId[],
+                },
             );
-
             if (!updatedProject) {
                 return c.json({ code: 404, message: "Project not found" }, 404);
             }
-
             return c.json(updatedProject, 200);
         } catch (error: any) {
             return c.json({ code: 400, message: error.message }, 400);
@@ -87,17 +84,14 @@ export class ProjectController {
     addFilesToProject: RouteHandler<typeof ProjectRoutes.AddFilesToProjectRoute> = async (c) => {
         const { id } = c.req.valid("param");
         const { fileIds } = c.req.valid("json");
-
         try {
             const updatedProject = await this.projectService.addFilesToProject(
                 id as types.project.ProjectId,
                 fileIds as types.file.FileId[],
             );
-
             if (!updatedProject) {
                 return c.json({ code: 404, message: "Project not found" }, 404);
             }
-
             return c.json(updatedProject, 200);
         } catch (error: any) {
             return c.json({ code: 400, message: error.message }, 400);
@@ -110,16 +104,13 @@ export class ProjectController {
     ) => {
         const { id } = c.req.valid("param");
         const { fileIds } = c.req.valid("json");
-
         const updatedProject = await this.projectService.removeFilesFromProject(
             id as types.project.ProjectId,
             fileIds as types.file.FileId[],
         );
-
         if (!updatedProject) {
             return c.json({ code: 404, message: "Project not found" }, 404);
         }
-
         return c.json(updatedProject, 200);
     };
 }

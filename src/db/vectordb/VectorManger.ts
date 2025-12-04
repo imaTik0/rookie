@@ -1,6 +1,6 @@
 import { QdrantClient } from "@qdrant/js-client-rest";
 
-export class VectorConnection { // TODO make interface for vector db of this
+export class VectorConnection {
     constructor(
         private _vectorClient: QdrantClient,
     ) {}

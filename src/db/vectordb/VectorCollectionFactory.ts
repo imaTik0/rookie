@@ -1,4 +1,5 @@
 import { ConfigService } from "../../service/ConfigService.ts";
+import { FileShard } from "../../types/file.ts";
 import { VectorCollection } from "./VectorCollection.ts";
 import { VectorConnection } from "./VectorManger.ts";
 
@@ -8,7 +9,7 @@ export class VectorCollectionFactory {
         private configService: ConfigService,
     ) {}
 
-    async createCollection<T>(
+    async createCollection<T = FileShard>(
         name: string,
         vectorSize?: number,
     ): Promise<VectorCollection<T>> {
@@ -20,17 +21,24 @@ export class VectorCollectionFactory {
     }
 
     private async ensureCollectionExists(name: string, vectorSize: number) {
-        const { collections } = await this.vectorConnection.vectorClient
-            .getCollections();
-        const collectionExists = collections.some((c) => c.name === name);
-        if (collectionExists) {
-            return;
+        try {
+            const { collections } = await this.vectorConnection.vectorClient
+                .getCollections();
+
+            const collectionExists = collections.some((c) => c.name === name);
+            if (collectionExists) return;
+
+            await this.vectorConnection.vectorClient.createCollection(name, {
+                vectors: {
+                    size: vectorSize,
+                    distance: "Cosine",
+                },
+            });
+        } catch (error: any) {
+            if (error?.status === 409 || error?.message?.includes("Conflict")) {
+                return;
+            }
+            throw error;
         }
-        await this.vectorConnection.vectorClient.recreateCollection(name, {
-            vectors: {
-                size: vectorSize,
-                distance: "Cosine",
-            },
-        });
     }
 }

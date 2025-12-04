@@ -41,6 +41,14 @@ export function Patch(route: RouteConfig) {
     };
 }
 
+export function Put(route: RouteConfig) {
+    return function (target: any, propertyKey: string) {
+        const routes = Reflect.getMetadata("routes", target.constructor) || [];
+        routes.push({ method: "put", route, handlerName: propertyKey });
+        Reflect.defineMetadata("routes", routes, target.constructor);
+    };
+}
+
 export function registerController(
     app: OpenAPIHono,
     controllerInstance: any,

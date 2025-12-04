@@ -134,7 +134,7 @@ const AddFilesToProjectRoute = createRoute({
             description: "Files associated",
             content: { "application/json": { schema: ProjectSchema } },
         },
-        400: { // <-- ADD THIS
+        400: {
             description: "Bad Request (e.g., invalid file IDs)",
             content: { "application/json": { schema: ErrorSchema } },
         },
