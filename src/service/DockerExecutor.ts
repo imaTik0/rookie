@@ -7,6 +7,7 @@ export interface ExecutorConfig {
     cpuLimit: string;
     timeoutMs: number;
     networkAccess: boolean;
+    networkName?: string;
 }
 
 export interface ExecutionResult {
@@ -65,6 +66,9 @@ export class DockerExecutor {
         if (!langDef) throw new Error(`Language '${lang}' not supported.`);
 
         const startTime = Date.now();
+        const networkArg = this.config.networkName
+            ? `--network=${this.config.networkName}`
+            : (this.config.networkAccess ? "" : "--network=none");
 
         const args = [
             "run",
@@ -72,7 +76,7 @@ export class DockerExecutor {
             "--rm",
             `--memory=${this.config.memoryLimit}`,
             `--cpus=${this.config.cpuLimit}`,
-            this.config.networkAccess ? "" : "--network=none",
+            networkArg,
             langDef.image,
             ...langDef.command,
         ].filter(Boolean);

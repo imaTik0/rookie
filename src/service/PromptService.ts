@@ -32,7 +32,7 @@ export class PromptService {
                                 const response = await fetch(ctx.url, {});
                                 const result = await response.json();
                                 if (result.error) {
-                                    throw new Error(result.error);
+                                    throw new Error(JSON.stringify(result.error, null, 2));
                                 }
                                 ctx.$$VARIABLE.foo = bar
                                 return {result, ctx};
