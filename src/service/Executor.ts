@@ -7,9 +7,9 @@ import { ProjectRepository } from "./ProjectRepository.ts";
 import { PromptService } from "./PromptService.ts";
 import { TestSuiteRepository } from "./TestSuiteRepository.ts";
 import { DockerExecutor } from "./DockerExecutor.ts";
+import { ReportRepository } from "./ReportRepository.ts";
 
 export class Executor {
-    // 1. We keep a single instance of DockerExecutor
     private dockerExecutor: DockerExecutor;
 
     constructor(
@@ -20,7 +20,7 @@ export class Executor {
         private logger: Logger,
         private vectorCollectionFactory: VectorCollectionFactory,
         private embeddingService: EmbeddingService,
-        // Optional: Allow injecting config, otherwise defaults
+        private reportRepository: ReportRepository, // <--- Injected Repository
         // dockerConfig?: any
     ) {
         this.dockerExecutor = new DockerExecutor({
@@ -31,88 +31,100 @@ export class Executor {
         });
     }
 
-    /**
-     * Executes a single script file path (Optional: adapt to Docker if needed,
-     * but usually this is for internal tool scripts, so local import might remain).
-     */
-    async executeScript(path: string, ctx: any) {
-        const module = await import(path);
-        return await module.default(ctx);
-    }
-
     async executeTestSuite(testSuiteId: types.test.TestSuiteId) {
+        const startTime = Date.now();
         const testSuite = await this.testSuiteRepository.get(testSuiteId);
         if (!testSuite) return null;
 
         const project = await this.projectRepository.get(testSuite.projectId);
         if (!project) return null;
 
-        // 1. Prepare Data
+        // 1. Prepare Files
         const files = await Promise.all(
             project.files.map((file) => this.fileService.downloadFile(file)),
         );
 
-        // 2. Generate Plan (Prompt)
-        const result = await this.promptService.promptForApiUsageScenario(
+        // 2. Generate Plan
+        const plan = await this.promptService.promptForApiUsageScenario(
             files.filter((file) => !!file).map((file) => file.buffer.toString()).join("\n"),
             testSuite.initialContext,
         );
 
-        // Debug output
-        await Deno.writeTextFile("result.json", JSON.stringify(result, null, 2));
-
-        const fails = [];
-        // Initialize Context
+        // Initialize Report Data
         let context = JSON.parse(testSuite.initialContext);
-        let i = 0;
+        const stepsResults: types.report.StepResult[] = [];
+        let hasFailures = false;
 
         // 3. Execution Loop
-        for (const call of result.calls) {
+        let i = 0;
+        for (const call of plan.calls) {
             i++;
-            await Deno.writeTextFile(`./f${i}.js`, call.fetch);
+            this.logger.log(`Executing step ${i}: ${call.stepExplanation}`);
 
-            const stepResult = await this.runStepInDocker(call.fetch, context);
+            // Run in Docker
+            const execResult = await this.runStepInDocker(call.fetch, context);
 
-            if (stepResult.success && stepResult.result) {
-                context = stepResult.result.ctx;
-                this.logger.log(`Step ${i} success.`);
+            // Prepare Step Report
+            const stepReport: types.report.StepResult = {
+                stepIndex: i,
+                stepDescription: call.stepExplanation,
+                scriptContent: call.fetch,
+                status: execResult.success ? "SUCCESS" : "FAILED",
+                logs: execResult.logs, // Full execution logs
+                contextAfter: execResult.result?.ctx || null,
+            };
+
+            if (execResult.success && execResult.result) {
+                // Update Context
+                context = execResult.result.ctx;
             } else {
-                // --- ZMIANA: Bezpieczne logowanie błędu ---
-                const errorToLog = typeof stepResult.error === "object"
-                    ? JSON.stringify(stepResult.error, null, 2)
-                    : stepResult.error;
+                hasFailures = true;
+                stepReport.error = typeof execResult.error === "object"
+                    ? JSON.stringify(execResult.error)
+                    : String(execResult.error);
 
-                this.logger.error(`Step ${i} failed: ${errorToLog}`);
-
-                fails.push({
-                    stepExplanation: call.stepExplanation,
-                    error: errorToLog, // Zapisujemy jako string w raporcie
-                });
+                // --- Vector Search for Failure Analysis ---
+                try {
+                    const vCollection = await this.vectorCollectionFactory.createCollection(
+                        testSuite.projectId,
+                    );
+                    const embededFail = await this.embeddingService.embed(call.stepExplanation);
+                    const related = await vCollection.search(embededFail[0], 3);
+                    stepReport.relatedKnowledge = [related];
+                } catch (err) {
+                    this.logger.error(err, "Failed to perform vector search for failed step");
+                }
             }
+
+            stepsResults.push(stepReport);
         }
 
-        // 4. Handle Failures (Vector Search)
-        if (fails.length > 0) {
-            const vCollection = await this.vectorCollectionFactory.createCollection(
-                testSuite.projectId,
-            );
-            const failsRelatedDocs = [];
-            for (const fail of fails) {
-                const embededFail = await this.embeddingService.embed(fail.stepExplanation);
-                const related = await vCollection.search(embededFail[0], 3);
-                failsRelatedDocs.push(related);
-            }
-            await Deno.writeTextFile("fails.json", JSON.stringify(fails, null, 2));
-            await Deno.writeTextFile("related.json", JSON.stringify(failsRelatedDocs, null, 2));
-        }
+        // 4. Create and Save Report
+        const reportData: Omit<types.report.Report, "id" | "createdAt"> = {
+            testSuiteId: testSuiteId,
+            projectId: testSuite.projectId,
+            status: hasFailures ? "FAILED" : "SUCCESS",
+            initialContext: testSuite.initialContext,
+            executionPlan: plan, // Storing the full plan prompt result
+            steps: stepsResults,
+            durationMs: Date.now() - startTime,
+        };
 
-        return result;
+        const savedReport = await this.reportRepository.create(reportData);
+        this.logger.log(`Report saved with ID: ${savedReport._id}`);
+
+        return savedReport;
     }
 
     private async runStepInDocker(
         userCode: string,
         currentCtx: unknown,
-    ): Promise<{ success: boolean; result?: { ctx: unknown; result: unknown }; error?: unknown }> {
+    ): Promise<{
+        success: boolean;
+        result?: { ctx: unknown; result: unknown };
+        error?: unknown;
+        logs: string; // <-- Added logs to return type
+    }> {
         const cleanedUserCode = userCode.replace("export default", "const runStep =");
 
         const script = `
@@ -129,34 +141,22 @@ export class Executor {
                     console.log("___RESULT_END___");
                 } catch (e) {
                     let serializableError = {};
-
                     if (e instanceof Error) {
-                        // 1. Pobierz standardowe pola (które nie są 'enumerable' i nie wchodzą same do JSON)
                         serializableError = {
                             message: e.message,
                             name: e.name,
                             stack: e.stack,
-                            cause: e.cause // Często zawiera przyczynę błędów sieciowych
+                            cause: e.cause
                         };
-
-                        // 2. Pobierz WSZYSTKIE dodatkowe pola doklejone do obiektu Error
-                        // (np. e.code, e.response, e.data - częste w bibliotekach HTTP)
                         Object.assign(serializableError, e);
-
-                        // 3. Ratunek dla "[object Object]"
-                        // Jeśli wiadomość jest zepsuta, użyj util.inspect, aby podejrzeć surowy obiekt w logach
                         if (e.message === '[object Object]') {
                             serializableError.debug_inspect = inspect(e, { depth: 3, colors: false });
                         }
                     } else if (typeof e === 'object' && e !== null) {
-                        // Jeśli rzucono czysty obiekt (throw { error: ... })
                         serializableError = e;
                     } else {
-                        // Stringi i inne typy proste
                         serializableError = { message: String(e) };
                     }
-
-                    // Wypisz jako JSON na stderr
                     console.error(JSON.stringify(serializableError));
                     process.exit(1);
                 }
@@ -166,15 +166,20 @@ export class Executor {
         try {
             const execResult = await this.dockerExecutor.execute("node", script);
 
+            // Combine stdout and stderr for the log report
+            const fullLogs = `STDOUT:\n${execResult.stdout}\n\nSTDERR:\n${execResult.stderr}`;
+
             if (execResult.exitCode !== 0) {
                 let parsedError = execResult.stderr;
                 try {
-                    // Próbujemy sparsować JSON z stderr
                     parsedError = JSON.parse(execResult.stderr);
-                } catch {
-                    // Fallback jeśli stderr to jednak zwykły tekst
-                }
-                return { success: false, error: parsedError };
+                } catch {}
+
+                return {
+                    success: false,
+                    error: parsedError,
+                    logs: fullLogs,
+                };
             }
 
             const stdout = execResult.stdout;
@@ -187,17 +192,26 @@ export class Executor {
             if (startIndex === -1 || endIndex === -1) {
                 return {
                     success: false,
-                    error: "Script executed but returned no result structure. Output: " + stdout,
+                    error: "Script executed but returned no result structure.",
+                    logs: fullLogs,
                 };
             }
 
             const jsonStr = stdout.substring(startIndex + startMarker.length, endIndex).trim();
             const resultData = JSON.parse(jsonStr);
 
-            return { success: true, result: resultData };
+            return {
+                success: true,
+                result: resultData,
+                logs: fullLogs,
+            };
         } catch (error: any) {
             this.logger.error(error, "Docker execution system exception:");
-            return { success: false, error: error.message };
+            return {
+                success: false,
+                error: error.message,
+                logs: `System Error: ${error.message}`,
+            };
         }
     }
 }

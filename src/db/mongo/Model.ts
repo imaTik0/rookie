@@ -29,11 +29,14 @@ export interface PopulatedProject {
 
 export interface ReportModel {
     _id: types.report.ReportId;
-    testSuiteId: types.report.TestSuiteId;
+    testSuiteId: types.test.TestSuiteId;
+    projectId: types.project.ProjectId;
     status: types.report.ReportStatus;
-    summary?: string;
-    detailedResults?: types.report.DetailedResults;
+    initialContext: string;
+    executionPlan: unknown; // The raw JSON plan from LLM
+    steps: types.report.StepResult[];
     createdAt: Date;
+    durationMs?: number;
 }
 
 export interface TestSuite {

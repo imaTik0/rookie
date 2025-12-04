@@ -1,9 +1,12 @@
-// src/repository/ReportRepository.ts
-
 import { MongoDbConnection } from "../db/mongo/MongoDbManager.ts";
-import * as db from "../db/mongo/Model.ts";
+import * as db from "../db/mongo/Model.ts"; // Assuming Model exports ReportModel interface
 import { BaseRepository } from "../db/mongo/BaseRepository.ts";
 import * as types from "../types/index.ts";
+
+// Define the DB Model interface if not already in Model.ts
+// export interface ReportModel extends Omit<types.report.Report, "id"> {
+//     _id: string;
+// }
 
 export class ReportRepository extends BaseRepository<types.report.ReportId, db.ReportModel> {
     static readonly COLLECTION_NAME = "reports";
@@ -18,12 +21,15 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
         data: Omit<types.report.Report, "id" | "createdAt">,
     ): Promise<db.ReportModel> {
         const newReport: db.ReportModel = {
-            _id: this.generateId() as types.report.ReportId,
+            _id: this.generateId(), // BaseRepository likely provides this or use new ObjectId()
             testSuiteId: data.testSuiteId,
+            projectId: data.projectId,
             status: data.status,
-            summary: data.summary,
-            detailedResults: data.detailedResults,
+            initialContext: data.initialContext,
+            executionPlan: data.executionPlan,
+            steps: data.steps,
             createdAt: new Date(),
+            durationMs: data.durationMs || 0,
         };
 
         await this.getCollection().insertOne(newReport);
@@ -38,14 +44,21 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
 
     async listSlim(
         pagination: { page: number; limit: number },
-    ): Promise<{ reports: Omit<db.ReportModel, "detailedResults" | "summary">[]; total: number }> {
+    ): Promise<
+        {
+            reports: Pick<db.ReportModel, "_id" | "status" | "createdAt" | "testSuiteId">[];
+            total: number;
+        }
+    > {
         const { page, limit } = pagination;
         const skip = (page - 1) * limit;
         const collection = this.getCollection();
 
-        const projection: Record<string, 0 | 1> = {
-            detailedResults: 0,
-            summary: 0,
+        // Only fetch metadata, not the heavy steps/logs
+        const projection = {
+            steps: 0,
+            executionPlan: 0,
+            initialContext: 0,
         };
 
         const [reports, total] = await Promise.all([
@@ -54,7 +67,7 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
             collection.countDocuments(),
         ]);
 
-        return { reports: reports as Omit<db.ReportModel, "detailedResults" | "summary">[], total };
+        return { reports: reports as any, total };
     }
 
     async delete(reportId: types.report.ReportId): Promise<boolean> {

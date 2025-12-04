@@ -10,11 +10,14 @@ export class ReportService {
     private toApiReport(model: db.ReportModel): types.report.Report {
         return {
             id: model._id,
+            projectId: model.projectId,
             testSuiteId: model.testSuiteId,
             status: model.status,
-            summary: model.summary,
-            detailedResults: model.detailedResults,
-            createdAt: model.createdAt.toISOString(),
+            executionPlan: model.executionPlan,
+            initialContext: model.initialContext,
+            steps: model.steps,
+            durationMs: model.durationMs,
+            createdAt: model.createdAt,
         };
     }
 

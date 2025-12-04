@@ -67,7 +67,7 @@ export class DockerExecutor {
 
         const startTime = Date.now();
         const networkArg = this.config.networkName
-            ? `--network=${this.config.networkName}`
+            ? `--network=${this.config.networkName}` // Łączymy do konkretnej sieci
             : (this.config.networkAccess ? "" : "--network=none");
 
         const args = [
