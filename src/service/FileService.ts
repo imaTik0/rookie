@@ -16,7 +16,6 @@ export class FileService {
         if (file.size > 10 * 1024 * 1024) {
             throw new Error("File exceeds 10MB limit");
         }
-        console.log(this.fileProcessorService.sanitizeWhiteCharsInText(fileBuffer));
         const newFile = await this.fileRepository.create({
             filename: file.name,
             mimetype: file.type,

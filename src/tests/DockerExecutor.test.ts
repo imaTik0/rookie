@@ -89,7 +89,6 @@ Deno.test("DockerExecutor - Configuration limits", async () => {
 });
 
 Deno.test("DockerExecutor - Node.js (Interpreted)", async (t) => {
-    // Timeout 10s jest bezpieczny dla node:alpine
     const executor = new DockerExecutor({ timeoutMs: 10000 });
 
     await t.step("should execute simple console.log successfully", async () => {

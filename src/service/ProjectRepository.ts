@@ -17,7 +17,7 @@ export class ProjectRepository extends BaseRepository<types.project.ProjectId, d
         data: { projectName: string; fileIds?: types.file.FileId[] },
     ): Promise<db.Project> {
         const newProject: db.Project = {
-            _id: this.generateId(), // ID is generated here
+            _id: this.generateId(),
             projectName: data.projectName,
             files: data.fileIds || [],
             createdAt: new Date(),

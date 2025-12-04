@@ -36,7 +36,7 @@ export class FileProcessorService {
         );
         const vectorCollection = await this.vectorCollectionFactory
             .createCollection<types.file.FileShard>(vectorCollectionName);
-        vectorCollection.upsertPoints(points);
+        await vectorCollection.upsertPoints(points);
     }
 
     sanitizeWhiteCharsInText(text: string | Buffer): string {

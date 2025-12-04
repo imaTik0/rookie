@@ -14,7 +14,6 @@ export class ReportController {
 
     @Get(ReportRoutes.ListReportsRoute)
     listReports: RouteHandler<typeof ReportRoutes.ListReportsRoute> = async (c) => {
-        // Parse pagination query params with defaults
         const page = Number(c.req.query("page") || 1);
         const limit = Number(c.req.query("limit") || 10);
 

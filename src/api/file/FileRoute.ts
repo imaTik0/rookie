@@ -39,7 +39,7 @@ const UploadFileRoute = createRoute({
 
 const UploadManyFilesRoute = createRoute({
     method: "post",
-    path: "/files/upload-many", // Zmieniona ścieżka
+    path: "/files/upload-many",
     tags: ["Files"],
     summary: "Upload multiple files (max 10MB total)",
     request: {

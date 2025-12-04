@@ -35,7 +35,7 @@ export class ConfigService {
                     "mongodb://localhost:27017",
             },
             qdrantVectorDb: {
-                host: Deno.env.get("ROOKIE_QDRANT_HOST") || "localhost",
+                host: Deno.env.get("ROOKIE_QDRANT_HOST") || "127.0.0.1",
                 port: Number.parseInt(
                     Deno.env.get("ROOKIE_QDRANT_PORT") || "6333",
                     10,

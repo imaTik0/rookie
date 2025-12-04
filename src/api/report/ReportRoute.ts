@@ -8,7 +8,7 @@ export const ListReportsRoute = createRoute({
     tags: ["Reports"],
     summary: "List all reports (slim version)",
     request: {
-        query: PaginationQuerySchema, // Reusing pagination query schema
+        query: PaginationQuerySchema,
     },
     responses: {
         200: {

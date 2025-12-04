@@ -1,12 +1,7 @@
 import { MongoDbConnection } from "../db/mongo/MongoDbManager.ts";
-import * as db from "../db/mongo/Model.ts"; // Assuming Model exports ReportModel interface
+import * as db from "../db/mongo/Model.ts";
 import { BaseRepository } from "../db/mongo/BaseRepository.ts";
 import * as types from "../types/index.ts";
-
-// Define the DB Model interface if not already in Model.ts
-// export interface ReportModel extends Omit<types.report.Report, "id"> {
-//     _id: string;
-// }
 
 export class ReportRepository extends BaseRepository<types.report.ReportId, db.ReportModel> {
     static readonly COLLECTION_NAME = "reports";
@@ -21,7 +16,7 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
         data: Omit<types.report.Report, "id" | "createdAt">,
     ): Promise<db.ReportModel> {
         const newReport: db.ReportModel = {
-            _id: this.generateId(), // BaseRepository likely provides this or use new ObjectId()
+            _id: this.generateId(),
             testSuiteId: data.testSuiteId,
             projectId: data.projectId,
             status: data.status,
@@ -54,7 +49,6 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
         const skip = (page - 1) * limit;
         const collection = this.getCollection();
 
-        // Only fetch metadata, not the heavy steps/logs
         const projection = {
             steps: 0,
             executionPlan: 0,

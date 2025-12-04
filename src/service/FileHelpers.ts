@@ -89,9 +89,8 @@ export class FileHelpers {
     ): types.file.FileShard[] {
         const chunks: types.file.FileShard[] = [];
         let chunkNumber = 1;
-        let globalPosition = 0; // Tracks our position in the original content string
+        let globalPosition = 0;
 
-        // Helper to push a finalized chunk
         const pushChunk = (
             chunkContent: string,
             startPosition: number,
@@ -119,17 +118,12 @@ export class FileHelpers {
             const para = paragraphs[i];
             const paraStartPosition = globalPosition;
 
-            // Advance global position. Add 1 for the '\n' if it's not the last paragraph.
             globalPosition += para.length;
             if (i < paragraphs.length - 1) {
-                globalPosition++; // Account for the '\n'
+                globalPosition++;
             }
 
-            // --- CASE 1: Single paragraph is longer than chunkSize ---
-            // This is the exception for a very long line with no breaks.
-            // We must split this paragraph using the original sliding window logic.
             if (para.length > options.chunkSize) {
-                // First, finalize any chunk we were building.
                 if (currentChunkParas.length > 0) {
                     pushChunk(
                         currentChunkParas.join("\n"),
@@ -139,7 +133,6 @@ export class FileHelpers {
                     currentChunkLength = 0;
                 }
 
-                // Now, split the long paragraph using the sliding window
                 let subPos = 0;
                 while (subPos < para.length) {
                     const end = Math.min(
@@ -153,78 +146,56 @@ export class FileHelpers {
                         break;
                     }
 
-                    // Apply overlap, but ensure we don't get stuck in a loop
                     const nextPos = subPos + options.chunkSize - options.chunkOverlap;
-                    subPos = Math.max(nextPos, subPos + 1); // Ensure progress
+                    subPos = Math.max(nextPos, subPos + 1);
                 }
 
-                // This paragraph is fully processed, set start for the next
                 currentChunkStartPosition = globalPosition;
                 continue;
             }
 
-            // --- Calculate potential new chunk size ---
-            // Add 1 for the newline if this is not the first paragraph in the chunk
             const lengthWithNewPara = currentChunkLength +
                 (currentChunkParas.length > 0 ? 1 : 0) +
                 para.length;
 
-            // --- CASE 2: Adding this paragraph makes the chunk too big ---
             if (lengthWithNewPara > options.chunkSize) {
-                // We've gone over. We need to decide:
-                // 1. Finalize the old chunk and start a new one?
-                // 2. Or, create a "too-big" chunk to avoid a "too-small" one?
-
-                // "Too small" = less than 50% of chunk size.
                 const currentIsTooSmall = currentChunkLength < options.chunkSize * 0.5;
-                // "Too big" = more than 150% of chunk size.
                 const potentialIsTooBig = lengthWithNewPara > options.chunkSize * 1.5;
 
                 if (
-                    currentChunkParas.length > 0 && // We have a chunk to finalize
+                    currentChunkParas.length > 0 &&
                     (!currentIsTooSmall || potentialIsTooBig)
                 ) {
-                    // Finalize the current chunk IF:
-                    // 1. It's NOT "too small". (It's a good size).
-                    // 2. OR, adding the new para would make it "too big".
                     pushChunk(
                         currentChunkParas.join("\n"),
                         currentChunkStartPosition,
                     );
 
-                    // Start new chunk with the current paragraph
                     currentChunkParas = [para];
                     currentChunkLength = para.length;
                     currentChunkStartPosition = paraStartPosition;
                 } else {
-                    // Create an "exception" chunk (either "too small" or "too big")
-                    // This happens if:
-                    // 1. The current chunk is empty.
-                    // 2. The current chunk is "too small" AND the new one is NOT "too big".
                     if (currentChunkParas.length === 0) {
                         currentChunkStartPosition = paraStartPosition;
                     }
                     currentChunkParas.push(para);
                     currentChunkLength = lengthWithNewPara - (currentChunkParas.length > 1 ? 1 : 0);
                     if (currentChunkParas.length === 1) {
-                        currentChunkLength = para.length; // No newline
+                        currentChunkLength = para.length;
                     }
                 }
-            } // --- CASE 3: Paragraph fits perfectly ---
-            else {
-                // The paragraph fits, just add it.
+            } else {
                 if (currentChunkParas.length === 0) {
                     currentChunkStartPosition = paraStartPosition;
                 }
                 currentChunkParas.push(para);
                 currentChunkLength = lengthWithNewPara - (currentChunkParas.length > 1 ? 1 : 0);
                 if (currentChunkParas.length === 1) {
-                    currentChunkLength = para.length; // No newline
+                    currentChunkLength = para.length;
                 }
             }
         }
 
-        // After the loop, push any remaining chunk
         if (currentChunkParas.length > 0) {
             pushChunk(
                 currentChunkParas.join("\n"),
@@ -232,14 +203,12 @@ export class FileHelpers {
             );
         }
 
-        // If content was empty or just newlines, we might have no chunks.
         if (chunks.length === 0 && content.length > 0) {
             pushChunk(content, 0);
         } else if (chunks.length === 0 && content.length === 0) {
-            return []; // Return empty array for empty content
+            return [];
         }
 
-        // Final pass to add totalChunks metadata
         const totalChunks = chunks.length;
         return chunks.map((chunk) => ({
             ...chunk,

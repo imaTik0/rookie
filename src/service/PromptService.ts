@@ -1,4 +1,5 @@
 import OpenAI from "@openai/openai";
+
 import { Logger } from "../Logger.ts";
 
 export interface StructuredResponse {

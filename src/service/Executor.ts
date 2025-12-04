@@ -20,8 +20,7 @@ export class Executor {
         private logger: Logger,
         private vectorCollectionFactory: VectorCollectionFactory,
         private embeddingService: EmbeddingService,
-        private reportRepository: ReportRepository, // <--- Injected Repository
-        // dockerConfig?: any
+        private reportRepository: ReportRepository,
     ) {
         this.dockerExecutor = new DockerExecutor({
             timeoutMs: 10000,
@@ -39,43 +38,36 @@ export class Executor {
         const project = await this.projectRepository.get(testSuite.projectId);
         if (!project) return null;
 
-        // 1. Prepare Files
         const files = await Promise.all(
             project.files.map((file) => this.fileService.downloadFile(file)),
         );
 
-        // 2. Generate Plan
         const plan = await this.promptService.promptForApiUsageScenario(
             files.filter((file) => !!file).map((file) => file.buffer.toString()).join("\n"),
             testSuite.initialContext,
         );
 
-        // Initialize Report Data
         let context = JSON.parse(testSuite.initialContext);
         const stepsResults: types.report.StepResult[] = [];
         let hasFailures = false;
 
-        // 3. Execution Loop
         let i = 0;
         for (const call of plan.calls) {
             i++;
             this.logger.log(`Executing step ${i}: ${call.stepExplanation}`);
 
-            // Run in Docker
             const execResult = await this.runStepInDocker(call.fetch, context);
 
-            // Prepare Step Report
             const stepReport: types.report.StepResult = {
                 stepIndex: i,
                 stepDescription: call.stepExplanation,
                 scriptContent: call.fetch,
                 status: execResult.success ? "SUCCESS" : "FAILED",
-                logs: execResult.logs, // Full execution logs
+                logs: execResult.logs,
                 contextAfter: execResult.result?.ctx || null,
             };
 
             if (execResult.success && execResult.result) {
-                // Update Context
                 context = execResult.result.ctx;
             } else {
                 hasFailures = true;
@@ -83,7 +75,6 @@ export class Executor {
                     ? JSON.stringify(execResult.error)
                     : String(execResult.error);
 
-                // --- Vector Search for Failure Analysis ---
                 try {
                     const vCollection = await this.vectorCollectionFactory.createCollection(
                         testSuite.projectId,
@@ -99,13 +90,12 @@ export class Executor {
             stepsResults.push(stepReport);
         }
 
-        // 4. Create and Save Report
         const reportData: Omit<types.report.Report, "id" | "createdAt"> = {
             testSuiteId: testSuiteId,
             projectId: testSuite.projectId,
             status: hasFailures ? "FAILED" : "SUCCESS",
             initialContext: testSuite.initialContext,
-            executionPlan: plan, // Storing the full plan prompt result
+            executionPlan: plan,
             steps: stepsResults,
             durationMs: Date.now() - startTime,
         };
@@ -123,7 +113,7 @@ export class Executor {
         success: boolean;
         result?: { ctx: unknown; result: unknown };
         error?: unknown;
-        logs: string; // <-- Added logs to return type
+        logs: string;
     }> {
         const cleanedUserCode = userCode.replace("export default", "const runStep =");
 
@@ -166,7 +156,6 @@ export class Executor {
         try {
             const execResult = await this.dockerExecutor.execute("node", script);
 
-            // Combine stdout and stderr for the log report
             const fullLogs = `STDOUT:\n${execResult.stdout}\n\nSTDERR:\n${execResult.stderr}`;
 
             if (execResult.exitCode !== 0) {

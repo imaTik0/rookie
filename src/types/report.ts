@@ -7,12 +7,12 @@ export type DetailedResults = unknown;
 export interface StepResult {
     stepIndex: number;
     stepDescription: string;
-    scriptContent: string; // The code that was executed
-    status: "SUCCESS" | "FAILED";
-    logs: string; // Captured stdout/stderr from Docker
-    contextAfter?: unknown; // The context state after execution
-    error?: string; // Error message if failed
-    relatedKnowledge?: unknown[]; // Results from VectorDB if failed
+    scriptContent: string;
+    status: ReportStatus;
+    logs: string;
+    contextAfter?: unknown;
+    error?: string;
+    relatedKnowledge?: unknown[];
 }
 
 export interface Report {
@@ -21,7 +21,7 @@ export interface Report {
     projectId: types.project.ProjectId;
     status: ReportStatus;
     initialContext: string;
-    executionPlan: unknown; // The raw JSON plan from LLM
+    executionPlan: unknown;
     steps: StepResult[];
     createdAt: Date;
     durationMs?: number;

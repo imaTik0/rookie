@@ -1,7 +1,5 @@
 import { z } from "@hono/zod-openapi";
 
-// --- 1. Sub-schemas for Detailed Results ---
-
 const StepStatus = z.enum(["SUCCESS", "FAILED"])
     .openapi({ example: "SUCCESS" });
 
@@ -40,8 +38,6 @@ const DetailedResultsSchema = z.object({
         .describe("Total execution time in milliseconds."),
 });
 
-// --- 2. Main Report Fields ---
-
 const ReportId = z.string()
     .describe("Unique ID of the report.")
     .openapi({ example: "rep-d9a7f1" });
@@ -50,7 +46,6 @@ const TestSuiteId = z.string()
     .describe("The ID of the test suite that generated this report.")
     .openapi({ example: "ts-8f3b2e" });
 
-// Updated to match Executor logic + standard async states
 const ReportStatus = z.enum(["PENDING", "RUNNING", "SUCCESS", "FAILED", "PARTIAL_FAILURE"])
     .describe("Current status of the test run.")
     .openapi({ example: "SUCCESS" });
@@ -63,14 +58,11 @@ const CreatedAt = z.string().datetime()
     .describe("Timestamp of creation.")
     .openapi({ example: "2025-10-27T11:00:00Z" });
 
-// --- 3. Exported Schemas ---
-
 export const ReportSchema = z.object({
     id: ReportId,
     testSuiteId: TestSuiteId,
     status: ReportStatus,
     summary: ReportSummary,
-    // Here we use the strict schema instead of z.any()
     detailedResults: DetailedResultsSchema.optional(),
     createdAt: CreatedAt,
 }).openapi("Report");
@@ -79,13 +71,10 @@ export const ReportIdParam = z.object({
     reportId: ReportId.describe("The unique ID of the Report for URL path."),
 });
 
-// For list endpoints, we omit the heavy details
 export const ListReportSchema = z.array(ReportSchema.omit({
     detailedResults: true,
-    summary: true, // You can keep summary if you want to show it on the list
+    summary: true,
 }));
-
-// --- 4. Types Inference ---
 
 export type Report = z.infer<typeof ReportSchema>;
 export type ReportDetailedResults = z.infer<typeof DetailedResultsSchema>;
