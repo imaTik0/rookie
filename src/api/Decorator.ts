@@ -52,7 +52,7 @@ export function Put(route: RouteConfig) {
 export function registerController(
     app: OpenAPIHono,
     controllerInstance: any,
-    logger?: Logger,
+    logger: Logger,
 ) {
     const prefix = Reflect.getMetadata("prefix", controllerInstance.constructor) || "";
     const routes = Reflect.getMetadata("routes", controllerInstance.constructor) || [];
@@ -66,11 +66,9 @@ export function registerController(
         });
     }
 
-    if (logger) {
-        logger.log(
-            `Registered controller: ${prefix} (${routes.length} route${
-                routes.length === 1 ? "" : "s"
-            })`,
-        );
-    }
+    logger.log(
+        `Registered controller: ${prefix} (${routes.length} route${
+            routes.length === 1 ? "" : "s"
+        })`,
+    );
 }

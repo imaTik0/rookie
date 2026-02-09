@@ -1,4 +1,4 @@
-// docker_executor.ts
+// src/service/DockerExecutor.ts
 
 export interface ExecutorConfig {
     memoryLimit: string;
@@ -36,6 +36,10 @@ export const LANGUAGES: Record<string, LanguageDefinition> = {
         image: "rust:1.70-alpine",
         command: ["sh", "-c", "cat > main.rs && rustc main.rs && ./main"],
     },
+    puppeteer: {
+        image: "ghcr.io/puppeteer/puppeteer:latest",
+        command: ["node", "-"],
+    },
 };
 
 export class DockerExecutor {
@@ -63,6 +67,9 @@ export class DockerExecutor {
             ? `--network=${this.config.networkName}`
             : (this.config.networkAccess ? "" : "--network=none");
 
+        // Chrome typically requires SYS_ADMIN capability to run in Docker
+        const capAddArg = lang === "puppeteer" ? "--cap-add=SYS_ADMIN" : "";
+
         const args = [
             "run",
             "-i",
@@ -70,6 +77,7 @@ export class DockerExecutor {
             `--memory=${this.config.memoryLimit}`,
             `--cpus=${this.config.cpuLimit}`,
             networkArg,
+            capAddArg, 
             langDef.image,
             ...langDef.command,
         ].filter(Boolean);

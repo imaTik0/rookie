@@ -22,6 +22,7 @@ export class App {
     init() {
         this.honoServer = new OpenAPIHono();
         this.honoServer.use(logger((...args) => this.logger.log(...args)));
+        
         registerController(
             this.honoServer,
             this.container.resolve<ProjectController>("projectController"),
@@ -57,8 +58,10 @@ export class App {
                 theme: "solarized",
             }),
         );
+
         const port = this.configService.values.port;
         const hostname = this.configService.values.host;
+
         Deno.serve({
             port: port,
             hostname: hostname,

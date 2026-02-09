@@ -131,3 +131,52 @@ Deno.test("DockerExecutor - Node.js (Interpreted)", async (t) => {
         assertStringIncludes(result.stdout, "Async Hello");
     });
 });
+
+
+Deno.test("DockerExecutor - Puppeteer (Browser)", async (t) => {
+    const executor = new DockerExecutor({ 
+        timeoutMs: 60000, 
+        memoryLimit: "1g",
+        cpuLimit: "4"
+    });
+
+    await t.step("should launch chrome and evaluate DOM", async () => {
+        const script = `
+            const puppeteer = require('puppeteer');
+
+            (async () => {
+                try {
+                    const browser = await puppeteer.launch({
+                        args: [
+                            '--no-sandbox', 
+                            '--disable-setuid-sandbox',
+                            '--disable-dev-shm-usage'
+                        ]
+                    });
+                    const page = await browser.newPage();
+                    
+                    // Wstrzykujemy prosty HTML
+                    await page.setContent('<html><body><div id="target">Hello World from Chrome</div></body></html>');
+                    
+                    // Używamy Puppeteera do wyciągnięcia tekstu z DOM
+                    const text = await page.$eval('#target', el => el.textContent);
+                    
+                    console.log(text);
+                    await browser.close();
+                } catch (err) {
+                    console.error(err);
+                    process.exit(1);
+                }
+            })();
+        `;
+
+        const result = await executor.execute("puppeteer", script);
+
+        if (result.exitCode !== 0) {
+            console.error("Puppeteer Failed:", result.stderr);
+        }
+
+        assertEquals(result.exitCode, 0);
+        assertStringIncludes(result.stdout, "Hello World from Chrome");
+    });
+});
