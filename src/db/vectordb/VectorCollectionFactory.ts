@@ -50,8 +50,9 @@ export class VectorCollectionFactory {
             });
 
             this.existingCollections.add(name);
-        } catch (error: any) {
-            if (error?.status === 409 || error?.message?.includes("Conflict")) {
+        } catch (error) {
+            const err = error as { status?: number; message?: string };
+            if (err?.status === 409 || err?.message?.includes("Conflict")) {
                 this.existingCollections.add(name);
                 return;
             }

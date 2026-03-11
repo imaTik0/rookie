@@ -19,8 +19,9 @@ export class ProjectController {
                 createProjectDto.fileIds as types.file.FileId[],
             );
             return c.json(newProject, 201);
-        } catch (error: any) {
-            return c.json({ code: 400, message: error.message }, 400);
+        } catch (error) {
+            const err = error as { message?: string };
+            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
         }
     };
 
@@ -57,8 +58,9 @@ export class ProjectController {
                 return c.json({ code: 404, message: "Project not found" }, 404);
             }
             return c.json(updatedProject, 200);
-        } catch (error: any) {
-            return c.json({ code: 400, message: error.message }, 400);
+        } catch (error) {
+            const err = error as { message?: string };
+            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
         }
     };
 
@@ -93,8 +95,9 @@ export class ProjectController {
                 return c.json({ code: 404, message: "Project not found" }, 404);
             }
             return c.json(updatedProject, 200);
-        } catch (error: any) {
-            return c.json({ code: 400, message: error.message }, 400);
+        } catch (error) {
+            const err = error as { message?: string };
+            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
         }
     };
 

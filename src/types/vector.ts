@@ -30,3 +30,34 @@ export interface SearchResult<T> {
     payload?: T;
     vector?: Vector;
 }
+
+export interface QdrantErrorStatus {
+    error: string;
+}
+
+export interface QdrantResponseStatus {
+    status: QdrantErrorStatus;
+}
+
+export interface QdrantPoint {
+    id: string | number;
+    version: number;
+    score: number;
+    payload?: Record<string, unknown>;
+    vector?: Record<string, unknown>;
+}
+
+export interface QdrantQueryResponse {
+    points: QdrantPoint[];
+}
+
+export type QdrantError = {
+    type: string;
+    message: string;
+    stack?: string;
+    headers: Record<string, string>;
+    url: string;
+    status: number;
+    statusText: string;
+    data: QdrantResponseStatus;
+};

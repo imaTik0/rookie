@@ -10,14 +10,16 @@ export class VectorCollection<T extends Record<string, unknown>> {
         this.collectionName = collectionName;
     }
 
-    async upsertPoints(points: types.vector.VectorPoint<T>[]) {
+    async upsertPoints(points: types.vector.VectorPoint<T>[]): Promise<void> {
         try {
             await this.client.vectorClient.upsert(this.collectionName, {
                 wait: true,
-                points: points as any,
+                points: points as never,
             });
-        } catch (error: any) {
-            if (error?.data?.status?.error?.includes("not configured")) {
+        } catch (error) {
+            const err = error as types.vector.QdrantError;
+            const errorMsg = err?.data?.status?.error || err?.message || String(error);
+            if (errorMsg.includes("not configured")) {
                 const defaultPoints = points.map((point) => {
                     const nv = point.vector as types.vector.NamedVectors;
                     return {
@@ -28,7 +30,7 @@ export class VectorCollection<T extends Record<string, unknown>> {
                 });
                 await this.client.vectorClient.upsert(this.collectionName, {
                     wait: true,
-                    points: defaultPoints as any,
+                    points: defaultPoints as never,
                 });
                 return;
             }
@@ -46,9 +48,10 @@ export class VectorCollection<T extends Record<string, unknown>> {
                 limit,
                 with_payload: true,
             });
-            return (results as any).points || [];
-        } catch (error: any) {
-            const errorMsg = error?.data?.status?.error || error?.message || String(error);
+            return (results as unknown as types.vector.QdrantQueryResponse).points as types.vector.SearchResult<T>[];
+        } catch (error) {
+            const err = error as types.vector.QdrantError;
+            const errorMsg = err?.data?.status?.error || err?.message || String(error);
             if (errorMsg.includes("requires specified vector name")) {
                 const results = await this.client.vectorClient.query(this.collectionName, {
                     query: vector,
@@ -56,7 +59,7 @@ export class VectorCollection<T extends Record<string, unknown>> {
                     with_payload: true,
                     using: "dense",
                 });
-                return (results as any).points || [];
+                return (results as unknown as types.vector.QdrantQueryResponse).points as types.vector.SearchResult<T>[];
             }
             throw error;
         }
@@ -81,17 +84,21 @@ export class VectorCollection<T extends Record<string, unknown>> {
                 limit,
                 with_payload: true,
             });
-            return (results as any).points || [];
-        } catch (error: any) {
-            const errorMsg = error?.data?.status?.error || error?.message || String(error);
-            if (errorMsg.includes("not configured") || errorMsg.includes("Bad Request") || errorMsg.includes("Wrong input") || errorMsg.includes("requires specified vector name")) {
+            return (results as unknown as types.vector.QdrantQueryResponse).points as types.vector.SearchResult<T>[];
+        } catch (error) {
+            const err = error as types.vector.QdrantError;
+            const errorMsg = err?.data?.status?.error || err?.message || String(error);
+            if (
+                errorMsg.includes("not configured") || errorMsg.includes("Bad Request") ||
+                errorMsg.includes("Wrong input") || errorMsg.includes("requires specified vector name")
+            ) {
                 const results = await this.client.vectorClient.query(this.collectionName, {
                     query: denseVector,
                     limit,
                     with_payload: true,
                     using: "dense",
                 });
-                return (results as any).points || [];
+                return (results as unknown as types.vector.QdrantQueryResponse).points as types.vector.SearchResult<T>[];
             }
             throw error;
         }

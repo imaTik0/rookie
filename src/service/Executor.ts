@@ -51,7 +51,7 @@ export class Executor {
     }
 
     private async executeCodeGeneration(
-        testSuite: any,
+        testSuite: types.test.TestSuite,
         _files: { buffer: Uint8Array }[],
         startTime: number,
     ) {
@@ -117,7 +117,7 @@ export class Executor {
     }
 
     private async executeTestScenario(
-        testSuite: any,
+        testSuite: types.test.TestSuite,
         files: { buffer: Uint8Array }[],
         startTime: number,
     ) {
@@ -263,7 +263,9 @@ export class Executor {
                 let parsedError = execResult.stderr;
                 try {
                     parsedError = JSON.parse(execResult.stderr);
-                } catch {}
+                } catch {
+                    // Ignore JSON parse errors
+                }
                 return { success: false, error: parsedError, logs: fullLogs };
             }
 
@@ -280,9 +282,10 @@ export class Executor {
             const jsonStr = stdout.substring(startIndex + startMarker.length, endIndex).trim();
             const resultData = JSON.parse(jsonStr);
             return { success: true, result: resultData, logs: fullLogs };
-        } catch (error: any) {
+        } catch (error) {
+            const err = error as { message?: string };
             this.logger.error(error, "Docker execution system exception:");
-            return { success: false, error: error.message, logs: `System Error: ${error.message}` };
+            return { success: false, error: err?.message || "Unknown error", logs: `System Error: ${err?.message || "Unknown error"}` };
         }
     }
 }

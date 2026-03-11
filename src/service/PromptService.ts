@@ -325,8 +325,9 @@ ${userGoal}
             const sparse = this.embeddingService.sparseEmbed(query);
 
             return await collection.searchHybrid(dense[0] as types.vector.DenseVector, sparse, limit);
-        } catch (error: any) {
-            const errorData = error?.data?.status?.error || error?.message || String(error);
+        } catch (error) {
+            const err = error as types.vector.QdrantError;
+            const errorData = err?.data?.status?.error || err?.message || String(error);
             this.logger.error(
                 `RAG search failed for collection "${collectionName}": ${JSON.stringify(errorData).substring(0, 300)}`,
             );

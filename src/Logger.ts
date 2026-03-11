@@ -4,6 +4,8 @@ const baseLogger = pino({
     level: "info",
 });
 
+type LoggerParams = Parameters<PinoLogger["info"]>;
+
 export class Logger {
     private readonly logger: PinoLogger;
 
@@ -11,28 +13,32 @@ export class Logger {
         this.logger = baseLogger.child({ name: this.name });
     }
 
-    private trimArgs<T extends unknown[]>(args: T): T {
+    private trimArgs(args: LoggerParams): LoggerParams {
         return args.map((arg) => {
             if (typeof arg === "string" && arg.length > 1000) {
                 return arg.substring(0, 1000) + "... [TRUNCATED]";
             }
             return arg;
-        }) as T;
+        }) as LoggerParams;
     }
 
-    log(...args: Parameters<PinoLogger["info"]>) {
-        this.logger.info(...(this.trimArgs(args) as any));
+    log(...args: LoggerParams) {
+        const trimmed = this.trimArgs(args);
+        this.logger.info(trimmed[0], ...trimmed.slice(1));
     }
 
-    warn(...args: Parameters<PinoLogger["warn"]>) {
-        this.logger.warn(...(this.trimArgs(args) as any));
+    warn(...args: LoggerParams) {
+        const trimmed = this.trimArgs(args);
+        this.logger.warn(trimmed[0], ...trimmed.slice(1));
     }
 
-    error(...args: Parameters<PinoLogger["error"]>) {
-        this.logger.error(...(this.trimArgs(args) as any));
+    error(...args: LoggerParams) {
+        const trimmed = this.trimArgs(args);
+        this.logger.error(trimmed[0], ...trimmed.slice(1));
     }
 
-    debug(...args: Parameters<PinoLogger["debug"]>) {
-        this.logger.debug(...(this.trimArgs(args) as any));
+    debug(...args: LoggerParams) {
+        const trimmed = this.trimArgs(args);
+        this.logger.debug(trimmed[0], ...trimmed.slice(1));
     }
 }

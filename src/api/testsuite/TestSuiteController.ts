@@ -18,14 +18,14 @@ export class TestSuiteController {
     createTestSuite: RouteHandler<typeof TestSuiteRoutes.CreateTestSuiteRoute> = async (c) => {
         const data = c.req.valid("json");
         const newTestSuite = await this.testSuiteService.createTestSuite(data);
-        return c.json(newTestSuite as any, 201);
+        return c.json(newTestSuite as unknown as object, 201);
     };
 
     @Get(TestSuiteRoutes.ListTestSuitesRoute)
     listTestSuites: RouteHandler<typeof TestSuiteRoutes.ListTestSuitesRoute> = async (c) => {
         const { page, limit } = c.req.valid("query");
         const result = await this.testSuiteService.listTestSuites({ page, limit });
-        return c.json(result as any, 200);
+        return c.json(result as unknown as object, 200);
     };
 
     @Get(TestSuiteRoutes.GetTestSuiteRoute)
@@ -37,7 +37,7 @@ export class TestSuiteController {
         if (!testSuite) {
             return c.json({ code: 404, message: "TestSuite not found" }, 404);
         }
-        return c.json(testSuite as any, 200);
+        return c.json(testSuite as unknown as object, 200);
     };
 
     @Put(TestSuiteRoutes.UpdateTestSuiteRoute)
@@ -51,7 +51,7 @@ export class TestSuiteController {
         if (!updatedSuite) {
             return c.json({ code: 404, message: "TestSuite not found" }, 404);
         }
-        return c.json(updatedSuite as any, 200);
+        return c.json(updatedSuite as unknown as object, 200);
     };
 
     @Delete(TestSuiteRoutes.DeleteTestSuiteRoute)
@@ -76,6 +76,6 @@ export class TestSuiteController {
             return c.json({ code: 404, message: "TestSuite or Project not found" }, 404);
         }
         const apiReport = this.reportService.mapReportToApi(executionResult);
-        return c.json(apiReport as any, 202);
+        return c.json(apiReport as unknown as object, 202);
     };
 }

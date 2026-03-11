@@ -26,8 +26,9 @@ export class FileController {
             const dbMetadata = await this.fileService.uploadFile(file, buffer);
             const apiFile = this.fileConverter.mapDbFileToApi(dbMetadata);
             return c.json(apiFile, 201);
-        } catch (error: any) {
-            return c.json({ code: 400, message: error.message }, 400);
+        } catch (error) {
+            const err = error as { message?: string };
+            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
         }
     };
 
@@ -52,8 +53,9 @@ export class FileController {
                 }),
             );
             return c.json(apiFiles, 201);
-        } catch (error: any) {
-            return c.json({ code: 400, message: error.message }, 400);
+        } catch (error) {
+            const err = error as { message?: string };
+            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
         }
     };
 

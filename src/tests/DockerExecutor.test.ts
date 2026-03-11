@@ -10,7 +10,7 @@ async function checkDockerAvailability() {
             console.error("SKIPPING: Docker returned error code.");
             Deno.exit(0);
         }
-    } catch (e) {
+    } catch (_e) {
         console.error("SKIPPING: Docker not found.");
         Deno.exit(0);
     }

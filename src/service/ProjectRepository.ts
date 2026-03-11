@@ -34,7 +34,7 @@ export class ProjectRepository extends BaseRepository<types.project.ProjectId, d
         });
     }
 
-    async getPopulated(projectId: types.project.ProjectId): Promise<any | null> {
+    async getPopulated(projectId: types.project.ProjectId): Promise<db.PopulatedProject | null> {
         const pipeline = [
             { $match: { _id: projectId } },
             {
