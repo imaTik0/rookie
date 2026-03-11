@@ -1,10 +1,14 @@
-# Rookie API 🚀
+<div align="center">
+  <img src="rookielogo.png" alt="Rookie API Logo" width="200"/>
+</div>
 
-**Rookie API** is an AI-driven platform designed to **evaluate and validate the quality of technical documentation**. By treating Large Language Models (LLMs) as "Virtual Developers," the system tests whether your API documentation is clear, accurate, and complete enough for an automated agent to understand and interact with your services.
+# Rookie API
+
+Rookie API is an AI-driven platform designed to evaluate and validate the quality of technical documentation. By treating Large Language Models (LLMs) as "Virtual Developers," the system tests whether your API documentation is clear, accurate, and complete enough for an automated agent to understand and interact with your services.
 
 The primary goal is not just to automate tests, but to use AI as a litmus test for documentation: if a "Senior Virtual Engineer" can't write a working test based on your docs, your documentation needs improvement.
 
-## ✨ Key Features
+## Key Features
 
 - **Documentation Quality Testing**: Uses LLMs as surrogate developers to verify if documentation is sufficient for real-world integration.
 - **AI-Native Test Generation**: Test scenarios are dynamically planned and coded by LLMs by reading your provided API specifications.
@@ -12,7 +16,7 @@ The primary goal is not just to automate tests, but to use AI as a litmus test f
 - **RAG-based Diagnosis**: If a test fails because of a documentation gap, the system uses Retrieval-Augmented Generation (RAG) to identify the missing or confusing information.
 - **Local Embeddings**: Uses `@xenova/transformers` for local embedding generation, keeping your sensitive documentation on-premise.
 
-## 🛠 Tech Stack
+## Tech Stack
 
 - **Runtime**: [Deno](https://deno.land/)
 - **Web Framework**: [Hono](https://hono.dev/) (with `zod-openapi`)
@@ -24,7 +28,7 @@ The primary goal is not just to automate tests, but to use AI as a litmus test f
   - **Xenova Transformers**: For local text embedding generation.
 - **Isolation**: **Docker** for running untrusted, AI-generated test scripts.
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -69,7 +73,7 @@ deno task start
 deno task watch
 ```
 
-## 🔄 Workflow
+## Workflow
 
 1. **Upload Documentation**: Upload API specifications or text descriptions to a project.
 2. **Indexing**: The system processes files, generates embeddings, and stores them in Qdrant.
@@ -80,7 +84,7 @@ deno task watch
    - Code runs in a Docker container; state (`ctx`) is passed between steps.
 5. **Reporting**: Review detailed execution logs and results.
 
-## 📖 API Documentation
+## API Documentation
 
 Once the server is running, you can access the interactive API documentation at:
 `http://localhost:3000/reference` (Scalar) or `http://localhost:3000/ui` (Swagger UI).
