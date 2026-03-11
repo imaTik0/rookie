@@ -82,16 +82,17 @@ export class ProjectService {
         }
         await this.validateFileIds(fileIds);
         await this.projectRepository.addFiles(projectId, fileIds);
-        for (const fileId of fileIds) {
+        
+        const processingTasks = fileIds.map(async (fileId) => {
             const file = await this.fileRepository.get(fileId);
-            if (!file) {
-                return null;
-            }
-            void this.fileProcessorService.processAndStore(
+            if (!file) return;
+            await this.fileProcessorService.processAndStore(
                 this.fileHelpers.chunkDbFile(file),
                 projectId,
             );
-        }
+        });
+        
+        await Promise.all(processingTasks);
         return this.projectRepository.getPopulated(projectId);
     }
 
@@ -109,16 +110,15 @@ export class ProjectService {
         fileIds: types.file.FileId[],
     ) {
         await this.projectRepository.addFiles(projectId, fileIds);
-        for (const fileId of fileIds) {
+        const processingTasks = fileIds.map(async (fileId) => {
             const file = await this.fileRepository.get(fileId);
-            if (!file) {
-                return null;
-            }
-            void this.fileProcessorService.processAndStore(
+            if (!file) return;
+            await this.fileProcessorService.processAndStore(
                 this.fileHelpers.chunkDbFile(file),
                 projectId,
             );
-        }
+        });
+        await Promise.all(processingTasks);
         return this.projectRepository.getPopulated(projectId);
     }
 

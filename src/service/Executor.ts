@@ -41,10 +41,92 @@ export class Executor {
         const files = await Promise.all(
             project.files.map((file) => this.fileService.downloadFile(file)),
         );
+        const validFiles = files.filter((file): file is NonNullable<typeof file> => !!file);
 
+        if (testSuite.mode === "CODE_GENERATION") {
+            return await this.executeCodeGeneration(testSuite, validFiles, startTime);
+        } else {
+            return await this.executeTestScenario(testSuite, validFiles, startTime);
+        }
+    }
+
+    private async executeCodeGeneration(
+        testSuite: any,
+        files: { buffer: Uint8Array }[],
+        startTime: number,
+    ) {
+        const initialDocs = files.map((f) => new TextDecoder().decode(f.buffer));
+        const finalMarkdown = await this.promptService.promptForCodeGenerationWithAgenticRAG(
+            initialDocs,
+            testSuite.projectId,
+            testSuite.userGoal || "No goal specified",
+        );
+
+        // For code generation, we treat code blocks as "steps" to execute/validate
+        const codeBlocks = this.extractCodeBlocks(finalMarkdown);
+        const stepsResults: types.report.StepResult[] = [];
+        let hasFailures = false;
+
+        let i = 0;
+        for (const code of codeBlocks) {
+            i++;
+            this.logger.log(`Executing generated code block ${i}`);
+            const execResult = await this.runStepInDocker(code, JSON.parse(testSuite.initialContext));
+
+            const stepReport: types.report.StepResult = {
+                stepIndex: i,
+                stepDescription: `Generated Example ${i}`,
+                scriptContent: code,
+                status: execResult.success ? "SUCCESS" : "FAILED",
+                logs: execResult.logs,
+                contextAfter: execResult.result?.ctx || null,
+            };
+
+            if (!execResult.success) {
+                hasFailures = true;
+                stepReport.error = typeof execResult.error === "object"
+                    ? JSON.stringify(execResult.error)
+                    : String(execResult.error);
+                
+                stepReport.relatedKnowledge = await this.findRelatedKnowledge(testSuite.projectId, `Error in code: ${code}`);
+            }
+            stepsResults.push(stepReport);
+        }
+
+        const reportData: Omit<types.report.Report, "id" | "createdAt"> = {
+            testSuiteId: testSuite._id,
+            projectId: testSuite.projectId,
+            status: hasFailures ? "FAILED" : "SUCCESS",
+            type: "CODE_GENERATION",
+            initialContext: testSuite.initialContext,
+            executionPlan: { markdown: finalMarkdown },
+            steps: stepsResults,
+            durationMs: Date.now() - startTime,
+            detailedResults: {
+                executionPlan: { markdown: finalMarkdown },
+                initialContext: testSuite.initialContext,
+                steps: stepsResults,
+                durationMs: Date.now() - startTime,
+                finalOutput: finalMarkdown,
+            }
+        };
+
+        return await this.reportRepository.create(reportData);
+    }
+
+    private async executeTestScenario(
+        testSuite: any,
+        files: { buffer: Uint8Array }[],
+        startTime: number,
+    ) {
+        const docs = files.map((f) => new TextDecoder().decode(f.buffer)).join("\n");
         const plan = await this.promptService.promptForApiUsageScenario(
-            files.filter((file) => !!file).map((file) => file.buffer.toString()).join("\n"),
+            docs,
             testSuite.initialContext,
+            {
+                minimalLength: testSuite.minimalStoryLength,
+                maximalLength: testSuite.maximalStoryLength,
+            }
         );
 
         let context = JSON.parse(testSuite.initialContext);
@@ -55,7 +137,6 @@ export class Executor {
         for (const call of plan.calls) {
             i++;
             this.logger.log(`Executing step ${i}: ${call.stepExplanation}`);
-
             const execResult = await this.runStepInDocker(call.fetch, context);
 
             const stepReport: types.report.StepResult = {
@@ -75,35 +156,53 @@ export class Executor {
                     ? JSON.stringify(execResult.error)
                     : String(execResult.error);
 
-                try {
-                    const vCollection = await this.vectorCollectionFactory.createCollection(
-                        testSuite.projectId,
-                    );
-                    const embededFail = await this.embeddingService.embed(call.stepExplanation);
-                    const related = await vCollection.search(embededFail[0], 3);
-                    stepReport.relatedKnowledge = [related];
-                } catch (err) {
-                    this.logger.error(err, "Failed to perform vector search for failed step");
-                }
+                stepReport.relatedKnowledge = await this.findRelatedKnowledge(testSuite.projectId, call.stepExplanation);
             }
-
             stepsResults.push(stepReport);
         }
 
         const reportData: Omit<types.report.Report, "id" | "createdAt"> = {
-            testSuiteId: testSuiteId,
+            testSuiteId: testSuite._id,
             projectId: testSuite.projectId,
             status: hasFailures ? "FAILED" : "SUCCESS",
+            type: "TEST_SCENARIO",
             initialContext: testSuite.initialContext,
             executionPlan: plan,
             steps: stepsResults,
             durationMs: Date.now() - startTime,
+            detailedResults: {
+                executionPlan: plan,
+                initialContext: testSuite.initialContext,
+                steps: stepsResults,
+                durationMs: Date.now() - startTime,
+            }
         };
 
-        const savedReport = await this.reportRepository.create(reportData);
-        this.logger.log(`Report saved with ID: ${savedReport._id}`);
+        return await this.reportRepository.create(reportData);
+    }
 
-        return savedReport;
+    private async findRelatedKnowledge(projectId: string, query: string) {
+        try {
+            const vCollection = await this.vectorCollectionFactory.createCollection(projectId);
+            const [dense, sparse] = await Promise.all([
+                this.embeddingService.embed(query),
+                this.embeddingService.sparseEmbed(query)
+            ]);
+            return await vCollection.searchHybrid(dense[0], sparse, 3);
+        } catch (err) {
+            this.logger.error(err, "Failed to perform hybrid search for related knowledge");
+            return [];
+        }
+    }
+
+    private extractCodeBlocks(markdown: string): string[] {
+        const regex = /```javascript\n([\s\S]*?)\n```/g;
+        const blocks = [];
+        let match;
+        while ((match = regex.exec(markdown)) !== null) {
+            blocks.push(match[1]);
+        }
+        return blocks;
     }
 
     private async runStepInDocker(
@@ -125,9 +224,10 @@ export class Executor {
 
             (async () => {
                 try {
-                    const output = await runStep(ctx);
+                    const runFunc = typeof runStep === 'function' ? runStep : (ctx) => { /* no-op if no default export */ };
+                    const output = await runFunc(ctx);
                     console.log("___RESULT_START___");
-                    console.log(JSON.stringify(output));
+                    console.log(JSON.stringify(output || { result: null, ctx }));
                     console.log("___RESULT_END___");
                 } catch (e) {
                     let serializableError = {};
@@ -139,9 +239,6 @@ export class Executor {
                             cause: e.cause
                         };
                         Object.assign(serializableError, e);
-                        if (e.message === '[object Object]') {
-                            serializableError.debug_inspect = inspect(e, { depth: 3, colors: false });
-                        }
                     } else if (typeof e === 'object' && e !== null) {
                         serializableError = e;
                     } else {
@@ -155,52 +252,30 @@ export class Executor {
 
         try {
             const execResult = await this.dockerExecutor.execute("node", script);
-
             const fullLogs = `STDOUT:\n${execResult.stdout}\n\nSTDERR:\n${execResult.stderr}`;
 
             if (execResult.exitCode !== 0) {
                 let parsedError = execResult.stderr;
-                try {
-                    parsedError = JSON.parse(execResult.stderr);
-                } catch {}
-
-                return {
-                    success: false,
-                    error: parsedError,
-                    logs: fullLogs,
-                };
+                try { parsedError = JSON.parse(execResult.stderr); } catch {}
+                return { success: false, error: parsedError, logs: fullLogs };
             }
 
             const stdout = execResult.stdout;
             const startMarker = "___RESULT_START___";
             const endMarker = "___RESULT_END___";
-
             const startIndex = stdout.indexOf(startMarker);
             const endIndex = stdout.indexOf(endMarker);
 
             if (startIndex === -1 || endIndex === -1) {
-                return {
-                    success: false,
-                    error: "Script executed but returned no result structure.",
-                    logs: fullLogs,
-                };
+                return { success: true, result: { ctx: currentCtx, result: null }, logs: fullLogs };
             }
 
             const jsonStr = stdout.substring(startIndex + startMarker.length, endIndex).trim();
             const resultData = JSON.parse(jsonStr);
-
-            return {
-                success: true,
-                result: resultData,
-                logs: fullLogs,
-            };
+            return { success: true, result: resultData, logs: fullLogs };
         } catch (error: any) {
             this.logger.error(error, "Docker execution system exception:");
-            return {
-                success: false,
-                error: error.message,
-                logs: `System Error: ${error.message}`,
-            };
+            return { success: false, error: error.message, logs: `System Error: ${error.message}` };
         }
     }
 }

@@ -1,5 +1,8 @@
 import OpenAI from "@openai/openai";
 import { Logger } from "../Logger.ts";
+import { EmbeddingService } from "./EmbeddingService.ts";
+import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
+import * as types from "../types/index.ts";
 
 export interface StructuredResponse {
     calls: {
@@ -20,6 +23,8 @@ export class PromptService {
     constructor(
         private openai: OpenAI,
         private logger: Logger,
+        private embeddingService: EmbeddingService,
+        private vectorCollectionFactory: VectorCollectionFactory,
     ) {}
 
     private createSystemPrompt(mandatoryImports: string = ""): string {
@@ -142,7 +147,7 @@ ${JSON.stringify(jsonStructureExample, null, 2)}
             );
 
             const response = await this.openai.chat.completions.create({
-                model: "gpt-5-mini",
+                model: "gpt-4o-mini",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt },
@@ -158,6 +163,136 @@ ${JSON.stringify(jsonStructureExample, null, 2)}
         } catch (error) {
             this.logger.error(error, "Error communicating with OpenAI");
             throw new Error("Failed to get response from OpenAI.");
+        }
+    }
+
+    public async promptForCodeGenerationWithAgenticRAG(
+        initialDocs: string[],
+        vectorCollectionName: string,
+        userGoal: string,
+        _options: PromptOptions = {},
+    ): Promise<string> {
+        const systemPrompt = `
+### ROLE
+You are a Senior Software Engineer specializing in creating high-quality, executable code examples.
+
+### CONTEXT
+You are given a set of initial documents to analyze. Your goal is to create several example programs based on these documents and the user's specific goal.
+
+### TOOLS
+You have access to 'search_knowledge_base' tool. 
+CRITICAL: If the initial documents are insufficient or you need more details about specific APIs, functions, or patterns, you MUST use this tool to search the vector database.
+
+### OUTPUT FORMAT
+Provide the final response as a clear, well-documented set of code examples in Markdown.
+`;
+
+        const initialDocsContent = initialDocs.map((doc, i) => `--- DOCUMENT ${i + 1} ---\n${doc}\n`).join("\n");
+        const userPrompt = `
+### INITIAL DOCUMENTS
+${initialDocsContent}
+
+### USER GOAL
+${userGoal}
+
+### INSTRUCTIONS
+1. Analyze the initial documents.
+2. Use the 'search_knowledge_base' tool if you need more context or examples.
+3. Create 3-5 high-quality, executable example programs.
+4. Explain each example.
+`;
+
+        const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+        ];
+
+        const tools: OpenAI.Chat.ChatCompletionTool[] = [
+            {
+                type: "function",
+                function: {
+                    name: "search_knowledge_base",
+                    description: "Search for additional code fragments, documentation, or examples in the vector database using hybrid search (dense + sparse).",
+                    parameters: {
+                        type: "object",
+                        properties: {
+                            query: {
+                                type: "string",
+                                description: "The search query in natural language.",
+                            },
+                            limit: {
+                                type: "number",
+                                description: "Number of results to return.",
+                                default: 5,
+                            },
+                        },
+                        required: ["query"],
+                    },
+                },
+            },
+        ];
+
+        let iterations = 0;
+        const maxIterations = 5;
+
+        while (iterations < maxIterations) {
+            this.logger.log(`Agentic RAG Iteration ${iterations + 1}...`);
+            const response = await this.openai.chat.completions.create({
+                model: "gpt-4o",
+                messages,
+                tools,
+                tool_choice: "auto",
+            });
+
+            const message = response.choices[0].message;
+            messages.push(message);
+
+            if (message.tool_calls && message.tool_calls.length > 0) {
+                for (const toolCall of message.tool_calls) {
+                    if (toolCall.function.name === "search_knowledge_base") {
+                        const args = JSON.parse(toolCall.function.arguments);
+                        this.logger.log(`Searching knowledge base for: "${args.query}"`);
+                        const searchResults = await this.performRAGSearch(
+                            vectorCollectionName,
+                            args.query,
+                            args.limit,
+                        );
+                        messages.push({
+                            role: "tool",
+                            tool_call_id: toolCall.id,
+                            content: JSON.stringify(searchResults),
+                        });
+                    }
+                }
+                iterations++;
+            } else {
+                return message.content || "No content generated.";
+            }
+        }
+
+        return "Maximum iterations reached without a final response.";
+    }
+
+    private async performRAGSearch(
+        collectionName: string,
+        query: string,
+        limit: number = 5,
+    ): Promise<types.vector.SearchResult<types.file.FileShard>[]> {
+        try {
+            const denseEmbedding = await this.embeddingService.embed(query);
+            const sparseEmbedding = this.embeddingService.sparseEmbed(query);
+            const collection = await this.vectorCollectionFactory.createCollection<types.file.FileShard>(
+                collectionName,
+            );
+
+            return await collection.searchHybrid(
+                denseEmbedding[0],
+                sparseEmbedding,
+                limit,
+            );
+        } catch (error) {
+            this.logger.error(error, "Error during RAG search");
+            return [];
         }
     }
 }

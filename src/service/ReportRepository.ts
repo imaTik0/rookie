@@ -20,9 +20,11 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
             testSuiteId: data.testSuiteId,
             projectId: data.projectId,
             status: data.status,
+            type: data.type,
             initialContext: data.initialContext,
             executionPlan: data.executionPlan,
             steps: data.steps,
+            finalOutput: data.detailedResults?.finalOutput,
             createdAt: new Date(),
             durationMs: data.durationMs || 0,
         };

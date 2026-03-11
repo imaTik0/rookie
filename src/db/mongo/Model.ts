@@ -32,9 +32,11 @@ export interface ReportModel {
     testSuiteId: types.test.TestSuiteId;
     projectId: types.project.ProjectId;
     status: types.report.ReportStatus;
+    type: types.report.ReportType;
     initialContext: string;
-    executionPlan: unknown; // The raw JSON plan from LLM
+    executionPlan: unknown; // The raw JSON plan or code from LLM
     steps: types.report.StepResult[];
+    finalOutput?: string;
     createdAt: Date;
     durationMs?: number;
 }
@@ -43,9 +45,11 @@ export interface TestSuite {
     _id: string;
     projectId: types.project.ProjectId;
     initialContext: string;
-    functionTemplate: string;
+    functionTemplate?: string;
     minimalStoryLength: number;
     maximalStoryLength: number;
+    mode: types.test.TestSuiteMode;
+    userGoal?: string;
     createdAt: Date;
     updatedAt: Date;
 }

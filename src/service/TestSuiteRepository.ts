@@ -26,6 +26,8 @@ export class TestSuiteRepository extends BaseRepository<types.test.TestSuiteId, 
             functionTemplate: data.functionTemplate,
             minimalStoryLength: data.minimalStoryLength,
             maximalStoryLength: data.maximalStoryLength,
+            mode: data.mode,
+            userGoal: data.userGoal,
             createdAt: now,
             updatedAt: now,
         };

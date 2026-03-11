@@ -3,3 +3,4 @@ export * as core from "./core.ts";
 export * as file from "./file.ts";
 export * as report from "./report.ts";
 export * as test from "./test.ts";
+export * as vector from "./vector.ts";

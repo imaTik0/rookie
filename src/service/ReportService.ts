@@ -13,11 +13,19 @@ export class ReportService {
             projectId: model.projectId,
             testSuiteId: model.testSuiteId,
             status: model.status,
+            type: model.type,
             executionPlan: model.executionPlan,
             initialContext: model.initialContext,
             steps: model.steps,
             durationMs: model.durationMs,
-            createdAt: model.createdAt,
+            createdAt: model.createdAt.toISOString(),
+            detailedResults: {
+                executionPlan: model.executionPlan,
+                initialContext: model.initialContext,
+                steps: model.steps,
+                durationMs: model.durationMs,
+                finalOutput: model.finalOutput,
+            }
         };
     }
 
@@ -26,6 +34,7 @@ export class ReportService {
             id: model._id,
             testSuiteId: model.testSuiteId,
             status: model.status,
+            type: model.type,
             createdAt: model.createdAt.toISOString(),
         };
     }

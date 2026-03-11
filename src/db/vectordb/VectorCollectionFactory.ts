@@ -4,6 +4,8 @@ import { VectorCollection } from "./VectorCollection.ts";
 import { VectorConnection } from "./VectorManger.ts";
 
 export class VectorCollectionFactory {
+    private existingCollections = new Set<string>();
+
     constructor(
         private vectorConnection: VectorConnection,
         private configService: ConfigService,
@@ -21,21 +23,33 @@ export class VectorCollectionFactory {
     }
 
     private async ensureCollectionExists(name: string, vectorSize: number) {
+        if (this.existingCollections.has(name)) {
+            return;
+        }
+
         try {
             const { collections } = await this.vectorConnection.vectorClient
                 .getCollections();
 
             const collectionExists = collections.some((c) => c.name === name);
-            if (collectionExists) return;
+            if (collectionExists) {
+                this.existingCollections.add(name);
+                return;
+            }
 
             await this.vectorConnection.vectorClient.createCollection(name, {
                 vectors: {
                     size: vectorSize,
                     distance: "Cosine",
                 },
+                sparse_vectors: {
+                    sparse: {}
+                }
             });
+            this.existingCollections.add(name);
         } catch (error: any) {
             if (error?.status === 409 || error?.message?.includes("Conflict")) {
+                this.existingCollections.add(name);
                 return;
             }
             throw error;
