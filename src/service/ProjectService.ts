@@ -82,17 +82,20 @@ export class ProjectService {
         }
         await this.validateFileIds(fileIds);
         await this.projectRepository.addFiles(projectId, fileIds);
-        
-        const processingTasks = fileIds.map(async (fileId) => {
-            const file = await this.fileRepository.get(fileId);
-            if (!file) return;
-            await this.fileProcessorService.processAndStore(
-                this.fileHelpers.chunkDbFile(file),
-                projectId,
-            );
-        });
-        
-        await Promise.all(processingTasks);
+
+        for (const fileId of fileIds) {
+            try {
+                const file = await this.fileRepository.get(fileId);
+                if (!file) continue;
+                await this.fileProcessorService.processAndStore(
+                    this.fileHelpers.chunkDbFile(file),
+                    projectId,
+                );
+            } catch (error) {
+                console.error(`Failed to process file ${fileId} for project ${projectId}:`, error);
+            }
+        }
+
         return this.projectRepository.getPopulated(projectId);
     }
 
@@ -110,15 +113,18 @@ export class ProjectService {
         fileIds: types.file.FileId[],
     ) {
         await this.projectRepository.addFiles(projectId, fileIds);
-        const processingTasks = fileIds.map(async (fileId) => {
+
+        const allChunks: types.file.FileShard[] = [];
+        for (const fileId of fileIds) {
             const file = await this.fileRepository.get(fileId);
-            if (!file) return;
-            await this.fileProcessorService.processAndStore(
-                this.fileHelpers.chunkDbFile(file),
-                projectId,
-            );
-        });
-        await Promise.all(processingTasks);
+            if (!file) continue;
+            allChunks.push(...this.fileHelpers.chunkDbFile(file));
+        }
+
+        if (allChunks.length > 0) {
+            await this.fileProcessorService.processAndStore(allChunks, projectId);
+        }
+
         return this.projectRepository.getPopulated(projectId);
     }
 

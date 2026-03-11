@@ -64,12 +64,21 @@ const CreatedAt = z.string().datetime()
     .describe("Timestamp of creation.")
     .openapi({ example: "2025-10-27T11:00:00Z" });
 
+const ProjectId = z.string()
+    .describe("The ID of the project.")
+    .openapi({ example: "proj-a4c1d" });
+
 export const ReportSchema = z.object({
     id: ReportId,
     testSuiteId: TestSuiteId,
+    projectId: ProjectId,
     status: ReportStatus,
     type: ReportType.default("TEST_SCENARIO"),
     summary: ReportSummary,
+    initialContext: z.string().describe("Initial context"),
+    executionPlan: z.any().describe("Execution plan"),
+    steps: z.array(StepResultSchema).describe("Execution steps"),
+    durationMs: z.number().optional().describe("Duration in ms"),
     detailedResults: DetailedResultsSchema.optional(),
     createdAt: CreatedAt,
 }).openapi("Report");

@@ -7,8 +7,13 @@ export interface SparseVector {
 
 export type DenseVector = number[];
 
+export interface TextVector {
+    text: string;
+    model: string;
+}
+
 export interface NamedVectors {
-    [name: string]: DenseVector | SparseVector;
+    [name: string]: DenseVector | SparseVector | TextVector;
 }
 
 export type Vector = DenseVector | NamedVectors;

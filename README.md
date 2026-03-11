@@ -47,17 +47,17 @@ Ensure your MongoDB and Qdrant instances are accessible.
 
 The application can be configured via environment variables or a configuration file.
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `ROOKIE_HOST` | Server host | `localhost` |
-| `ROOKIE_PORT` | Server port | `3000` |
-| `ROOKIE_MONGO_DB_URL` | MongoDB connection string | `mongodb://localhost:27017` |
-| `ROOKIE_MONGO_DB_NAME` | MongoDB database name | `rookie_db` |
-| `ROOKIE_QDRANT_HOST` | Qdrant host | `127.0.0.1` |
-| `ROOKIE_QDRANT_PORT` | Qdrant port | `6333` |
-| `ROOKIE_OPEAN_AI_KEY` | OpenAI API Key | (Required for AI features) |
-| `ROOKIE_EMBEDDING_MODEL` | Model for embeddings | `Xenova/all-MiniLM-L6-v2` |
-| `ROOKIE_EMBEDDING_VECTOR_SIZE` | Vector size for the model | `384` |
+| Variable                       | Description               | Default                     |
+| ------------------------------ | ------------------------- | --------------------------- |
+| `ROOKIE_HOST`                  | Server host               | `localhost`                 |
+| `ROOKIE_PORT`                  | Server port               | `3000`                      |
+| `ROOKIE_MONGO_DB_URL`          | MongoDB connection string | `mongodb://localhost:27017` |
+| `ROOKIE_MONGO_DB_NAME`         | MongoDB database name     | `rookie_db`                 |
+| `ROOKIE_QDRANT_HOST`           | Qdrant host               | `127.0.0.1`                 |
+| `ROOKIE_QDRANT_PORT`           | Qdrant port               | `6333`                      |
+| `ROOKIE_OPEAN_AI_KEY`          | OpenAI API Key            | (Required for AI features)  |
+| `ROOKIE_EMBEDDING_MODEL`       | Model for embeddings      | `Xenova/all-MiniLM-L6-v2`   |
+| `ROOKIE_EMBEDDING_VECTOR_SIZE` | Vector size for the model | `384`                       |
 
 ### Running the App
 
@@ -75,9 +75,9 @@ deno task watch
 2. **Indexing**: The system processes files, generates embeddings, and stores them in Qdrant.
 3. **Define Test Suite**: Specify the testing goals and initial context (e.g., auth tokens).
 4. **Execution**:
-    - LLM analyzes the documentation and plans a sequence of API calls.
-    - Each step is converted into JavaScript code.
-    - Code runs in a Docker container; state (`ctx`) is passed between steps.
+   - LLM analyzes the documentation and plans a sequence of API calls.
+   - Each step is converted into JavaScript code.
+   - Code runs in a Docker container; state (`ctx`) is passed between steps.
 5. **Reporting**: Review detailed execution logs and results.
 
 ## 📖 API Documentation

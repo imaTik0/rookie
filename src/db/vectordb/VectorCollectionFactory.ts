@@ -39,13 +39,16 @@ export class VectorCollectionFactory {
 
             await this.vectorConnection.vectorClient.createCollection(name, {
                 vectors: {
-                    size: vectorSize,
-                    distance: "Cosine",
+                    dense: {
+                        size: vectorSize,
+                        distance: "Cosine",
+                    }
                 },
                 sparse_vectors: {
                     sparse: {}
                 }
             });
+
             this.existingCollections.add(name);
         } catch (error: any) {
             if (error?.status === 409 || error?.message?.includes("Conflict")) {

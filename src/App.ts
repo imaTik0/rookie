@@ -22,7 +22,7 @@ export class App {
     init() {
         this.honoServer = new OpenAPIHono();
         this.honoServer.use(logger((...args) => this.logger.log(...args)));
-        
+
         registerController(
             this.honoServer,
             this.container.resolve<ProjectController>("projectController"),

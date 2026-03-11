@@ -12,6 +12,15 @@ export interface StructuredResponse {
     }[];
 }
 
+export interface CodeGenerationResponse {
+    examples: {
+        title: string;
+        explanation: string;
+        fullProgram: string;
+    }[];
+    finalMarkdownSummary: string;
+}
+
 export interface PromptOptions {
     minimalLength?: number;
     maximalLength?: number;
@@ -167,39 +176,72 @@ ${JSON.stringify(jsonStructureExample, null, 2)}
     }
 
     public async promptForCodeGenerationWithAgenticRAG(
-        initialDocs: string[],
         vectorCollectionName: string,
         userGoal: string,
-        _options: PromptOptions = {},
-    ): Promise<string> {
+    ): Promise<CodeGenerationResponse> {
+        this.logger.log(`Starting Agentic RAG for goal: "${userGoal}"`);
+
+        // 1. Initial search to populate starting context
+        const initialSearchResults = await this.performRAGSearch(vectorCollectionName, userGoal, 5);
+        const initialDocsContent = initialSearchResults
+            .map((res, i) =>
+                `--- DOCUMENT ${i + 1} (Score: ${res.score}) ---\n${
+                    res.payload?.content || "No content"
+                }\n`
+            )
+            .join("\n");
+
         const systemPrompt = `
 ### ROLE
 You are a Senior Software Engineer specializing in creating high-quality, executable code examples.
 
-### CONTEXT
-You are given a set of initial documents to analyze. Your goal is to create several example programs based on these documents and the user's specific goal.
+### TASK
+Create 3-5 high-quality, executable example programs based on the provided documentation and the user's goal.
+Each program MUST be a standalone JavaScript file that follows the execution contract.
+
+### EXECUTION CONTRACT (CRITICAL)
+1. **Universal JavaScript:** Your code must be compatible with **BOTH Node.js and Browser** environments.
+2. **Context ('ctx'):** - State passed between steps. 
+3. **Return Signature:** Return an object: \`{ result: <api_response>, ctx: <updated_context> }\`.
+4. **Structure:** Export a default async function that accepts \`ctx\`.
+
+\`\`\`javascript
+export default async (ctx) => {
+    // ... logic ...
+    return { result: response, ctx };
+}
+\`\`\`
 
 ### TOOLS
 You have access to 'search_knowledge_base' tool. 
-CRITICAL: If the initial documents are insufficient or you need more details about specific APIs, functions, or patterns, you MUST use this tool to search the vector database.
+CRITICAL: You are given a small set of initial search results. If they are insufficient or you need more details about other APIs, functions, or patterns, you MUST use this tool to search the vector database.
 
 ### OUTPUT FORMAT
-Provide the final response as a clear, well-documented set of code examples in Markdown.
+You MUST respond with a valid JSON object.
+Structure:
+{
+    "examples": [
+        {
+            "title": "Example Title",
+            "explanation": "What this example does",
+            "fullProgram": "The complete JS code starting with exports/imports"
+        }
+    ],
+    "finalMarkdownSummary": "Overall summary of all examples in Markdown"
+}
 `;
 
-        const initialDocsContent = initialDocs.map((doc, i) => `--- DOCUMENT ${i + 1} ---\n${doc}\n`).join("\n");
         const userPrompt = `
-### INITIAL DOCUMENTS
+### INITIAL CONTEXT (TOP RELEVANT FRAGMENTS)
 ${initialDocsContent}
 
 ### USER GOAL
 ${userGoal}
 
 ### INSTRUCTIONS
-1. Analyze the initial documents.
-2. Use the 'search_knowledge_base' tool if you need more context or examples.
-3. Create 3-5 high-quality, executable example programs.
-4. Explain each example.
+1. Analyze the initial context. 
+2. Use the 'search_knowledge_base' tool if you need more information from the documentation to fulfill the goal.
+3. Generate the JSON response with executable programs.
 `;
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -212,19 +254,13 @@ ${userGoal}
                 type: "function",
                 function: {
                     name: "search_knowledge_base",
-                    description: "Search for additional code fragments, documentation, or examples in the vector database using hybrid search (dense + sparse).",
+                    description:
+                        "Search for additional code fragments in the vector database using hybrid search.",
                     parameters: {
                         type: "object",
                         properties: {
-                            query: {
-                                type: "string",
-                                description: "The search query in natural language.",
-                            },
-                            limit: {
-                                type: "number",
-                                description: "Number of results to return.",
-                                default: 5,
-                            },
+                            query: { type: "string" },
+                            limit: { type: "number", default: 5 },
                         },
                         required: ["query"],
                     },
@@ -242,6 +278,7 @@ ${userGoal}
                 messages,
                 tools,
                 tool_choice: "auto",
+                response_format: { type: "json_object" },
             });
 
             const message = response.choices[0].message;
@@ -251,7 +288,6 @@ ${userGoal}
                 for (const toolCall of message.tool_calls) {
                     if (toolCall.function.name === "search_knowledge_base") {
                         const args = JSON.parse(toolCall.function.arguments);
-                        this.logger.log(`Searching knowledge base for: "${args.query}"`);
                         const searchResults = await this.performRAGSearch(
                             vectorCollectionName,
                             args.query,
@@ -266,11 +302,11 @@ ${userGoal}
                 }
                 iterations++;
             } else {
-                return message.content || "No content generated.";
+                return JSON.parse(message.content || "{}") as CodeGenerationResponse;
             }
         }
 
-        return "Maximum iterations reached without a final response.";
+        throw new Error("Maximum iterations reached without a final JSON response.");
     }
 
     private async performRAGSearch(
@@ -279,19 +315,21 @@ ${userGoal}
         limit: number = 5,
     ): Promise<types.vector.SearchResult<types.file.FileShard>[]> {
         try {
-            const denseEmbedding = await this.embeddingService.embed(query);
-            const sparseEmbedding = this.embeddingService.sparseEmbed(query);
-            const collection = await this.vectorCollectionFactory.createCollection<types.file.FileShard>(
+            const collection = await this.vectorCollectionFactory.createCollection<
+                types.file.FileShard
+            >(
                 collectionName,
             );
 
-            return await collection.searchHybrid(
-                denseEmbedding[0],
-                sparseEmbedding,
-                limit,
+            const dense = await this.embeddingService.embed(query);
+            const sparse = this.embeddingService.sparseEmbed(query);
+
+            return await collection.searchHybrid(dense[0] as types.vector.DenseVector, sparse, limit);
+        } catch (error: any) {
+            const errorData = error?.data?.status?.error || error?.message || String(error);
+            this.logger.error(
+                `RAG search failed for collection "${collectionName}": ${JSON.stringify(errorData).substring(0, 300)}`,
             );
-        } catch (error) {
-            this.logger.error(error, "Error during RAG search");
             return [];
         }
     }

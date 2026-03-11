@@ -132,12 +132,11 @@ Deno.test("DockerExecutor - Node.js (Interpreted)", async (t) => {
     });
 });
 
-
 Deno.test("DockerExecutor - Puppeteer (Browser)", async (t) => {
-    const executor = new DockerExecutor({ 
-        timeoutMs: 60000, 
+    const executor = new DockerExecutor({
+        timeoutMs: 60000,
         memoryLimit: "1g",
-        cpuLimit: "4"
+        cpuLimit: "4",
     });
 
     await t.step("should launch chrome and evaluate DOM", async () => {

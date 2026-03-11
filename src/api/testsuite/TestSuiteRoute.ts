@@ -6,7 +6,7 @@ import {
     TestSuiteSchema,
     UpdateTestSuiteSchema,
 } from "./TestSuiteSchema.ts";
-import { ListReportSchema } from "../report/ReportSchema.ts";
+import { ReportSchema } from "../report/ReportSchema.ts";
 import { z } from "@hono/zod-openapi";
 import { ErrorSchema, PaginationQuerySchema } from "../CommonSchema.ts";
 
@@ -119,8 +119,8 @@ const ExecuteTestSuiteRoute = createRoute({
     request: { params: TestSuiteIdParam },
     responses: {
         202: {
-            description: "Execution accepted. Report creation initiated.",
-            content: { "application/json": { schema: ListReportSchema } }, // Assuming ListReportSchema is correct per your import
+            description: "Execution accepted. Report created.",
+            content: { "application/json": { schema: ReportSchema } },
         },
         404: commonResponses["404"],
     },

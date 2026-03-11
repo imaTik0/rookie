@@ -7,6 +7,10 @@ export class ReportService {
         private reportRepository: ReportRepository,
     ) {}
 
+    public mapReportToApi(model: db.ReportModel): types.report.Report {
+        return this.toApiReport(model);
+    }
+
     private toApiReport(model: db.ReportModel): types.report.Report {
         return {
             id: model._id,
@@ -25,7 +29,7 @@ export class ReportService {
                 steps: model.steps,
                 durationMs: model.durationMs,
                 finalOutput: model.finalOutput,
-            }
+            },
         };
     }
 

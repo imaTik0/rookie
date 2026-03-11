@@ -1,1 +1,0 @@
-import { QdrantClient } from "./node_modules/.deno/@qdrant+js-client-rest@1.15.1/node_modules/@qdrant/js-client-rest/dist/esm/index.js"; const client = new QdrantClient({ host: "127.0.0.1", port: 6333 }); const res = await client.getCollections(); console.log(res);

@@ -77,7 +77,7 @@ export class DockerExecutor {
             `--memory=${this.config.memoryLimit}`,
             `--cpus=${this.config.cpuLimit}`,
             networkArg,
-            capAddArg, 
+            capAddArg,
             langDef.image,
             ...langDef.command,
         ].filter(Boolean);
