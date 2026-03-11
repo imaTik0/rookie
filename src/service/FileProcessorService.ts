@@ -20,15 +20,15 @@ export class FileProcessorService {
 
         for (let i = 0; i < files.length; i += BATCH_SIZE) {
             const batch = files.slice(i, i + BATCH_SIZE);
-            
+
             const points: types.vector.VectorPoint<types.file.FileShard>[] = [];
-            
+
             for (const file of batch) {
                 const [dense, sparse] = await Promise.all([
                     this.embeddingService.embed(file.content),
                     Promise.resolve(this.embeddingService.sparseEmbed(file.content)),
                 ]);
-                
+
                 const point: types.vector.VectorPoint<types.file.FileShard> = {
                     id: uuidv4() as types.core.VectorPointId,
                     vector: {

@@ -1,6 +1,7 @@
 import * as path from "@std/path";
 import * as types from "../types/index.ts";
 import * as db from "../db/mongo/Model.ts";
+import striptags from "striptags";
 
 interface ChunkingOptions {
     chunkSize: number;
@@ -35,7 +36,8 @@ export class FileHelpers {
             );
         }
 
-        const content = this.textDecoder.decode(dbFile.data.buffer);
+        let content = this.textDecoder.decode(dbFile.data.buffer);
+        content = striptags(content);
 
         return this._chunkText(content, dbFile.filename, options);
     }
@@ -44,7 +46,8 @@ export class FileHelpers {
         filePath: string,
         options: ChunkingOptions = { chunkSize: 1000, chunkOverlap: 200 },
     ): Promise<types.file.FileShard[]> {
-        const content = await Deno.readTextFile(filePath);
+        let content = await Deno.readTextFile(filePath);
+        content = striptags(content);
         const fileName = path.basename(filePath);
         return this._chunkText(content, fileName, options);
     }

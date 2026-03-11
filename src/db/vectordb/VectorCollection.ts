@@ -48,7 +48,8 @@ export class VectorCollection<T extends Record<string, unknown>> {
                 limit,
                 with_payload: true,
             });
-            return (results as unknown as types.vector.QdrantQueryResponse).points as types.vector.SearchResult<T>[];
+            return (results as unknown as types.vector.QdrantQueryResponse)
+                .points as types.vector.SearchResult<T>[];
         } catch (error) {
             const err = error as types.vector.QdrantError;
             const errorMsg = err?.data?.status?.error || err?.message || String(error);
@@ -59,7 +60,8 @@ export class VectorCollection<T extends Record<string, unknown>> {
                     with_payload: true,
                     using: "dense",
                 });
-                return (results as unknown as types.vector.QdrantQueryResponse).points as types.vector.SearchResult<T>[];
+                return (results as unknown as types.vector.QdrantQueryResponse)
+                    .points as types.vector.SearchResult<T>[];
             }
             throw error;
         }
@@ -84,13 +86,15 @@ export class VectorCollection<T extends Record<string, unknown>> {
                 limit,
                 with_payload: true,
             });
-            return (results as unknown as types.vector.QdrantQueryResponse).points as types.vector.SearchResult<T>[];
+            return (results as unknown as types.vector.QdrantQueryResponse)
+                .points as types.vector.SearchResult<T>[];
         } catch (error) {
             const err = error as types.vector.QdrantError;
             const errorMsg = err?.data?.status?.error || err?.message || String(error);
             if (
                 errorMsg.includes("not configured") || errorMsg.includes("Bad Request") ||
-                errorMsg.includes("Wrong input") || errorMsg.includes("requires specified vector name")
+                errorMsg.includes("Wrong input") ||
+                errorMsg.includes("requires specified vector name")
             ) {
                 const results = await this.client.vectorClient.query(this.collectionName, {
                     query: denseVector,
@@ -98,7 +102,8 @@ export class VectorCollection<T extends Record<string, unknown>> {
                     with_payload: true,
                     using: "dense",
                 });
-                return (results as unknown as types.vector.QdrantQueryResponse).points as types.vector.SearchResult<T>[];
+                return (results as unknown as types.vector.QdrantQueryResponse)
+                    .points as types.vector.SearchResult<T>[];
             }
             throw error;
         }

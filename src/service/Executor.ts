@@ -285,7 +285,11 @@ export class Executor {
         } catch (error) {
             const err = error as { message?: string };
             this.logger.error(error, "Docker execution system exception:");
-            return { success: false, error: err?.message || "Unknown error", logs: `System Error: ${err?.message || "Unknown error"}` };
+            return {
+                success: false,
+                error: err?.message || "Unknown error",
+                logs: `System Error: ${err?.message || "Unknown error"}`,
+            };
         }
     }
 }

@@ -63,7 +63,13 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
             collection.countDocuments(),
         ]);
 
-        return { reports: reports as unknown as Pick<db.ReportModel, "_id" | "status" | "createdAt" | "testSuiteId">[], total };
+        return {
+            reports: reports as unknown as Pick<
+                db.ReportModel,
+                "_id" | "status" | "createdAt" | "testSuiteId"
+            >[],
+            total,
+        };
     }
 
     async delete(reportId: types.report.ReportId): Promise<boolean> {

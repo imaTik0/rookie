@@ -42,11 +42,11 @@ export class VectorCollectionFactory {
                     dense: {
                         size: vectorSize,
                         distance: "Cosine",
-                    }
+                    },
                 },
                 sparse_vectors: {
-                    sparse: {}
-                }
+                    sparse: {},
+                },
             });
 
             this.existingCollections.add(name);

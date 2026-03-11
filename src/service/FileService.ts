@@ -50,7 +50,17 @@ export class FileService {
 
     async listFiles(
         pagination: { page: number; limit: number },
-    ): Promise<{ files: Omit<db.File, "data">[]; meta: { totalItems: number; totalPages: number; currentPage: number; itemsPerPage: number } }> {
+    ): Promise<
+        {
+            files: Omit<db.File, "data">[];
+            meta: {
+                totalItems: number;
+                totalPages: number;
+                currentPage: number;
+                itemsPerPage: number;
+            };
+        }
+    > {
         const { files, total } = await this.fileRepository.listPaginated(pagination);
 
         const totalPages = Math.ceil(total / pagination.limit);
