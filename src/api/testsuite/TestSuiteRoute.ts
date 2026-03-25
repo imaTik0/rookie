@@ -126,6 +126,20 @@ const ExecuteTestSuiteRoute = createRoute({
     },
 });
 
+const StreamExecuteTestSuiteRoute = createRoute({
+    method: "get",
+    path: "/testsuites/{testSuiteId}/execute/stream",
+    tags: ["Test suites"],
+    summary: "Execute a Test Suite and stream logs via SSE",
+    request: { params: TestSuiteIdParam },
+    responses: {
+        200: {
+            description: "SSE Stream",
+        },
+        404: commonResponses["404"],
+    },
+});
+
 export const TestSuiteRoutes = {
     CreateTestSuiteRoute,
     ListTestSuitesRoute,
@@ -133,4 +147,5 @@ export const TestSuiteRoutes = {
     UpdateTestSuiteRoute,
     DeleteTestSuiteRoute,
     ExecuteTestSuiteRoute,
+    StreamExecuteTestSuiteRoute,
 };

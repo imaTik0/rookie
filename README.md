@@ -63,7 +63,7 @@ The application can be configured via environment variables or a configuration f
 | `ROOKIE_EMBEDDING_MODEL`       | Model for embeddings      | `Xenova/all-MiniLM-L6-v2`   |
 | `ROOKIE_EMBEDDING_VECTOR_SIZE` | Vector size for the model | `384`                       |
 
-### Running the App
+### Running the App (Backend)
 
 ```bash
 # Start the production server
@@ -72,6 +72,18 @@ deno task start
 # Start in development mode with hot-reload and pretty logging
 deno task watch
 ```
+
+### Running the Frontend (Agentic RAG Monitor)
+
+The project includes a modern React frontend Built with Vite to monitor the LLM execution in real-time.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend will be available at `http://localhost:5173`. You can enter a Test Suite ID and watch the Agentic RAG execute with token-by-token streaming.
 
 ## Workflow
 

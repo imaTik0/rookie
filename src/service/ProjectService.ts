@@ -5,6 +5,7 @@ import { ProjectRepository } from "./ProjectRepository.ts";
 import { FileProcessorService } from "./FileProcessorService.ts";
 import { FileHelpers } from "./FileHelpers.ts";
 import * as db from "../db/mongo/Model.ts";
+import { Buffer } from "node:buffer";
 
 export class ProjectService {
     constructor(
@@ -38,6 +39,29 @@ export class ProjectService {
             this.addFilesToProjectNoCheck(newProject._id, fileIds);
         }
         return this.projectRepository.getPopulated(newProject._id);
+    }
+
+    async createProjectFromUrl(projectName: string, url: string) {
+        const jinaUrl = `https://r.jina.ai/${url}`;
+        const response = await fetch(jinaUrl);
+        
+        if (!response.ok) {
+            throw new Error(`Failed to fetch documentation from ${url}`);
+        }
+        
+        // Jina API returns optimal Markdown representation of the URL
+        const markdownContent = await response.text();
+        const textBuffer = Buffer.from(markdownContent, "utf-8");
+        const sanitizedBuffer = Buffer.from(this.fileProcessorService.sanitizeWhiteCharsInText(textBuffer));
+
+        const newFile = await this.fileRepository.create({
+            filename: "documentation.md",
+            mimetype: "text/markdown",
+            size: sanitizedBuffer.length,
+            data: sanitizedBuffer,
+        });
+
+        return this.createProject(projectName, [newFile._id]);
     }
 
     async getProjectById(projectId: types.project.ProjectId) {

@@ -144,16 +144,14 @@ ${JSON.stringify(jsonStructureExample, null, 2)}
         docs: string,
         startingContext: string,
         options: PromptOptions = {},
+        onProgress?: (msg: string) => void,
     ): Promise<StructuredResponse> {
         const systemPrompt = this.createSystemPrompt(options.mandatoryImports);
         const userPrompt = this.createUserPrompt(docs, startingContext, options);
 
         try {
-            this.logger.log(
-                `Prompting OpenAI (Steps: ${options.minimalLength || 10}-${
-                    options.maximalLength || 20
-                })...`,
-            );
+            this.logger.log(`Prompting OpenAI (Steps: ${options.minimalLength || 10}-${options.maximalLength || 20})...`);
+            onProgress?.(JSON.stringify({ type: "log", content: `Prompting OpenAI (Steps: ${options.minimalLength || 10}-${options.maximalLength || 20})...` }));
 
             const response = await this.openai.chat.completions.create({
                 model: "gpt-5-mini",
@@ -178,8 +176,10 @@ ${JSON.stringify(jsonStructureExample, null, 2)}
     public async promptForCodeGenerationWithAgenticRAG(
         vectorCollectionName: string,
         userGoal: string,
+        onProgress?: (msg: string) => void,
     ): Promise<CodeGenerationResponse> {
         this.logger.log(`Starting Agentic RAG for goal: "${userGoal}"`);
+        onProgress?.(JSON.stringify({ type: "log", content: `Starting Agentic RAG for goal: "${userGoal}"` }));
 
         // 1. Initial search to populate starting context
         const initialSearchResults = await this.performRAGSearch(vectorCollectionName, userGoal, 25);
@@ -253,6 +253,7 @@ ${userGoal}
 
         while (iterations < maxIterations && !isReady) {
             this.logger.log(`Agentic RAG Research Iteration ${iterations + 1}...`);
+            onProgress?.(JSON.stringify({ type: "log", content: `Agentic RAG Research Iteration ${iterations + 1}...` }));
             const response = await this.openai.chat.completions.create({
                 model: "gpt-5-mini",
                 messages,
@@ -267,6 +268,7 @@ ${userGoal}
                 for (const toolCall of message.tool_calls) {
                     if (toolCall.function.name === "search_knowledge_base") {
                         const args = JSON.parse(toolCall.function.arguments);
+                        onProgress?.(JSON.stringify({ type: "log", content: `Agent RAG searching knowledge base for: "${args.query}"` }));
                         const searchResults = await this.performRAGSearch(
                             vectorCollectionName,
                             args.query,
@@ -287,6 +289,7 @@ ${userGoal}
 
         // PHASE 2: GENERATION
         this.logger.log(`Agentic RAG Generation Phase...`);
+        onProgress?.(JSON.stringify({ type: "log", content: `Agentic RAG Generation Phase... Writing actual code solutions based on collected context.` }));
         const generationPrompt = `
 ### ROLE
 You are a Senior Software Engineer specializing in creating high-quality, executable code examples.
@@ -322,15 +325,36 @@ Structure:
     "finalMarkdownSummary": "Overall summary of all examples in Markdown"
 }
 `;
-        messages.push({ role: "system", content: generationPrompt });
+        // Filter out the initial context and build a clean context payload
+        const contextFound = messages
+            .filter(m => m.role === "tool")
+            .map(m => m.content)
+            .join("\n\n");
+
+        const phase2Messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+            { role: "system", content: generationPrompt },
+            { 
+                role: "user", 
+                content: `### INITIAL CONTEXT:\n${initialDocsContent}\n\n### RESEARCHED CONTEXT:\n${contextFound}\n\n### USER GOAL:\n${userGoal}`
+            }
+        ];
 
         const genResponse = await this.openai.chat.completions.create({
             model: "gpt-5-mini",
-            messages,
+            messages: phase2Messages,
             response_format: { type: "json_object" },
+            stream: true,
         });
 
-        const jsonString = genResponse.choices[0].message?.content || "{}";
+        let jsonString = "";
+        for await (const chunk of genResponse) {
+            const content = chunk.choices[0]?.delta?.content || "";
+            if (content) {
+                jsonString += content;
+                onProgress?.(JSON.stringify({ type: "token", content }));
+            }
+        }
+        
         return JSON.parse(jsonString) as CodeGenerationResponse;
     }
 

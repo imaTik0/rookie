@@ -41,6 +41,13 @@ export const UpdateProjectSchema = CreateProjectSchema.partial().openapi(
     "UpdateProject",
 );
 
+export const CreateProjectFromUrlSchema = z
+    .object({
+        projectName: z.string().min(3, "Name must be at least 3 characters").openapi({ example: "Docs Project" }),
+        url: z.string().url().openapi({ example: "https://docs.example.com" }),
+    })
+    .openapi("CreateProjectFromUrl");
+
 export const ParamsSchema = z.object({
     id: z.string().min(1, "Project ID is required").openapi({
         param: { name: "id", in: "path" },

@@ -9,6 +9,7 @@ import { FileController } from "./api/file/FileController.ts";
 import { ReportController } from "./api/report/ReportController.ts";
 import { TestSuiteController } from "./api/testsuite/TestSuiteController.ts";
 import { logger } from "hono/logger";
+import { cors } from "hono/cors";
 
 export class App {
     private honoServer?: OpenAPIHono;
@@ -21,6 +22,7 @@ export class App {
 
     init() {
         this.honoServer = new OpenAPIHono();
+        this.honoServer.use("/*", cors());
         this.honoServer.use(logger((...args) => this.logger.log(...args)));
 
         registerController(

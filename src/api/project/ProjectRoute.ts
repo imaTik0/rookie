@@ -1,6 +1,7 @@
 import { createRoute } from "@hono/zod-openapi";
 import {
     CreateProjectSchema,
+    CreateProjectFromUrlSchema,
     DeleteProjectResponseSchema,
     PaginatedProjectsResponseSchema,
     ParamsSchema,
@@ -172,8 +173,32 @@ const RemoveFilesFromProjectRoute = createRoute({
         },
     },
 });
+const CreateProjectFromUrlRoute = createRoute({
+    method: "post",
+    path: "/projects/from-url",
+    tags: ["Projects"],
+    summary: "Create a new project from a documentation URL",
+    request: {
+        body: {
+            content: { "application/json": { schema: CreateProjectFromUrlSchema } },
+            required: true,
+        },
+    },
+    responses: {
+        201: {
+            description: "Project created",
+            content: { "application/json": { schema: ProjectSchema } },
+        },
+        400: {
+            description: "Bad Request",
+            content: { "application/json": { schema: ErrorSchema } },
+        },
+    },
+});
+
 export const ProjectRoutes = {
     CreateProjectRoute,
+    CreateProjectFromUrlRoute,
     GetProjectRoute,
     ListProjectsRoute,
     UpdateProjectRoute,

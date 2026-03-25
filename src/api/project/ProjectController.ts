@@ -25,6 +25,18 @@ export class ProjectController {
         }
     };
 
+    @Post(ProjectRoutes.CreateProjectFromUrlRoute)
+    createProjectFromUrl: RouteHandler<typeof ProjectRoutes.CreateProjectFromUrlRoute> = async (c) => {
+        const { projectName, url } = c.req.valid("json");
+        try {
+            const newProject = await this.projectService.createProjectFromUrl(projectName, url);
+            return c.json(newProject, 201);
+        } catch (error) {
+            const err = error as { message?: string };
+            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
+        }
+    };
+
     @Get(ProjectRoutes.GetProjectRoute)
     getProject: RouteHandler<typeof ProjectRoutes.GetProjectRoute> = async (c) => {
         const { id } = c.req.valid("param");
