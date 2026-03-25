@@ -4,6 +4,7 @@ import { FileRepository } from "./FileRepository.ts";
 import { ProjectRepository } from "./ProjectRepository.ts";
 import { FileProcessorService } from "./FileProcessorService.ts";
 import { FileHelpers } from "./FileHelpers.ts";
+import { DocCrawler } from "./DocCrawler.ts";
 import * as db from "../db/mongo/Model.ts";
 import { Buffer } from "node:buffer";
 
@@ -13,6 +14,7 @@ export class ProjectService {
         private fileRepository: FileRepository,
         private fileProcessorService: FileProcessorService,
         private fileHelpers: FileHelpers,
+        private docCrawler: DocCrawler,
     ) {}
 
     private async validateFileIds(fileIds: types.file.FileId[]): Promise<void> {
@@ -41,27 +43,46 @@ export class ProjectService {
         return this.projectRepository.getPopulated(newProject._id);
     }
 
-    async createProjectFromUrl(projectName: string, url: string) {
-        const jinaUrl = `https://r.jina.ai/${url}`;
-        const response = await fetch(jinaUrl);
-        
-        if (!response.ok) {
-            throw new Error(`Failed to fetch documentation from ${url}`);
+    async createProjectFromUrl(
+        projectName: string,
+        url: string,
+        maxPages: number = 50,
+        onProgress?: (msg: string) => void,
+    ) {
+        onProgress?.(`Starting documentation crawl for: ${url}`);
+
+        const crawledPages = await this.docCrawler.crawl(url, onProgress, { maxPages });
+
+        if (crawledPages.length === 0) {
+            throw new Error(`No pages could be crawled from ${url}`);
         }
-        
-        // Jina API returns optimal Markdown representation of the URL
-        const markdownContent = await response.text();
-        const textBuffer = Buffer.from(markdownContent, "utf-8");
-        const sanitizedBuffer = Buffer.from(this.fileProcessorService.sanitizeWhiteCharsInText(textBuffer));
 
-        const newFile = await this.fileRepository.create({
-            filename: "documentation.md",
-            mimetype: "text/markdown",
-            size: sanitizedBuffer.length,
-            data: sanitizedBuffer,
-        });
+        const fileIds: types.file.FileId[] = [];
 
-        return this.createProject(projectName, [newFile._id]);
+        for (const page of crawledPages) {
+            const slug = page.url
+                .replace(/^https?:\/\//, "")
+                .replace(/[^a-zA-Z0-9._-]/g, "_")
+                .substring(0, 100);
+            const filename = `${slug}.md`;
+
+            const textBuffer = Buffer.from(page.markdown, "utf-8");
+            const sanitizedBuffer = Buffer.from(
+                this.fileProcessorService.sanitizeWhiteCharsInText(textBuffer),
+            );
+
+            const newFile = await this.fileRepository.create({
+                filename,
+                mimetype: "text/markdown",
+                size: sanitizedBuffer.length,
+                data: sanitizedBuffer,
+            });
+
+            fileIds.push(newFile._id);
+        }
+
+        onProgress?.(`Stored ${fileIds.length} pages. Creating project and indexing...`);
+        return this.createProject(projectName, fileIds);
     }
 
     async getProjectById(projectId: types.project.ProjectId) {

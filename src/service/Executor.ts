@@ -111,10 +111,24 @@ export class Executor {
                     ? JSON.stringify(execResult.error)
                     : String(execResult.error);
 
+                // Search using the actual error, not just the description
+                const errorQuery = `${stepReport.error} ${example.explanation}`.substring(0, 500);
                 stepReport.relatedKnowledge = await this.findRelatedKnowledge(
                     testSuite.projectId,
-                    `Error in example ${example.title}: ${example.explanation}`,
+                    errorQuery,
                 );
+
+                // LLM failure classification
+                const relatedDocsText = (stepReport.relatedKnowledge || [])
+                    .map((k: any) => k.payload?.content || JSON.stringify(k))
+                    .join("\n---\n");
+                stepReport.failureAnalysis = await this.promptService.classifyFailure(
+                    stepReport.error,
+                    example.fullProgram,
+                    relatedDocsText,
+                    `${example.title}: ${example.explanation}`,
+                );
+                onProgress?.(JSON.stringify({ type: "log", content: `Failure classified as: ${stepReport.failureAnalysis.documentationGap} - ${stepReport.failureAnalysis.reasoning}` }));
             }
             stepsResults.push(stepReport);
         }
@@ -187,10 +201,24 @@ export class Executor {
                     ? JSON.stringify(execResult.error)
                     : String(execResult.error);
 
+                // Search using the actual error, not just the description
+                const errorQuery = `${stepReport.error} ${call.stepExplanation}`.substring(0, 500);
                 stepReport.relatedKnowledge = await this.findRelatedKnowledge(
                     testSuite.projectId,
+                    errorQuery,
+                );
+
+                // LLM failure classification
+                const relatedDocsText = (stepReport.relatedKnowledge || [])
+                    .map((k: any) => k.payload?.content || JSON.stringify(k))
+                    .join("\n---\n");
+                stepReport.failureAnalysis = await this.promptService.classifyFailure(
+                    stepReport.error,
+                    call.fetch,
+                    relatedDocsText,
                     call.stepExplanation,
                 );
+                onProgress?.(JSON.stringify({ type: "log", content: `Failure classified as: ${stepReport.failureAnalysis.documentationGap} - ${stepReport.failureAnalysis.reasoning}` }));
             }
             stepsResults.push(stepReport);
         }

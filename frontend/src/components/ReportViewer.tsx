@@ -104,6 +104,7 @@ const StepDetail = ({ step }: { step: any }) => {
   }, [step.relatedKnowledge]);
 
   const hasRelated = relatedItems.length > 0;
+  const hasAnalysis = !!step.failureAnalysis;
   const isFailed = step.status === "FAILED";
 
   return (
@@ -127,8 +128,9 @@ const StepDetail = ({ step }: { step: any }) => {
       {isOpen && (
         <div className="border-t border-gray-200 bg-gray-50">
           <div className="flex border-b border-gray-200 px-2 pt-2">
-            {["logs", "script", "context", "related"].map(tab => {
+            {["logs", "analysis", "script", "context", "related"].map(tab => {
               if (tab === "related" && !hasRelated) return null;
+              if (tab === "analysis" && !hasAnalysis) return null;
               return (
                 <button
                   key={tab}
@@ -154,6 +156,38 @@ const StepDetail = ({ step }: { step: any }) => {
                   </div>
                 )}
                 <CodeBlock code={step.logs || "No logs captured."} language="bash" />
+              </div>
+            )}
+            {activeTab === "analysis" && step.failureAnalysis && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Documentation Gap</p>
+                    <p className={`text-lg font-bold ${
+                      step.failureAnalysis.documentationGap === 'MISSING' ? 'text-rose-600' :
+                      step.failureAnalysis.documentationGap === 'AMBIGUOUS' ? 'text-amber-600' :
+                      step.failureAnalysis.documentationGap === 'INCORRECT' ? 'text-red-600' :
+                      step.failureAnalysis.documentationGap === 'CONFIG' ? 'text-blue-600' :
+                      'text-gray-600'
+                    }`}>{step.failureAnalysis.documentationGap}</p>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Failed Function</p>
+                    <p className="text-sm font-mono font-semibold text-gray-900">{step.failureAnalysis.failedFunction}</p>
+                  </div>
+                </div>
+                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Reasoning</p>
+                  <p className="text-sm text-gray-700 leading-relaxed">{step.failureAnalysis.reasoning}</p>
+                </div>
+                <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
+                  <p className="text-xs text-orange-600 uppercase tracking-wider mb-2">Suggested Documentation Fix</p>
+                  <p className="text-sm text-gray-800 leading-relaxed">{step.failureAnalysis.suggestedDocsFix}</p>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Error Message</p>
+                  <pre className="text-xs text-rose-600 font-mono whitespace-pre-wrap">{step.failureAnalysis.errorMessage}</pre>
+                </div>
               </div>
             )}
             {activeTab === "script" && <CodeBlock code={step.scriptContent} />}

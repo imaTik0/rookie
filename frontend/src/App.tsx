@@ -1,10 +1,11 @@
 import React from 'react';
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, PlusCircle, Play } from 'lucide-react';
+import { LayoutDashboard, PlusCircle, Play, FileText } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ProjectCreator from './pages/ProjectCreator';
 import TestSuiteCreator from './pages/TestSuiteCreator';
 import ExecutionConsole from './pages/ExecutionConsole';
+import Reports from './pages/Reports';
 
 export default function App() {
   const location = useLocation();
@@ -39,6 +40,7 @@ export default function App() {
           {navItem('/project/new', <PlusCircle size={18} />, 'New Project')}
           {navItem('/testsuite/new', <PlusCircle size={18} />, 'New Test Suite')}
           {navItem('/execute', <Play size={18} />, 'Execute Tests')}
+          {navItem('/reports', <FileText size={18} />, 'Reports')}
         </nav>
       </aside>
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-white relative">
@@ -48,6 +50,7 @@ export default function App() {
           <Route path="/testsuite/new" element={<TestSuiteCreator />} />
           <Route path="/execute" element={<ExecutionConsole />} />
           <Route path="/execute/:id" element={<ExecutionConsole />} />
+          <Route path="/reports" element={<Reports />} />
         </Routes>
       </main>
     </div>

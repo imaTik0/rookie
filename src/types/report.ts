@@ -4,6 +4,16 @@ export type ReportId = string & { __reportId: never };
 export type ReportStatus = "SUCCESS" | "FAILED";
 export type DetailedResults = unknown;
 
+export type DocumentationGap = "MISSING" | "AMBIGUOUS" | "INCORRECT" | "CONFIG" | "UNKNOWN";
+
+export interface FailureAnalysis {
+    errorMessage: string;
+    failedFunction: string;
+    documentationGap: DocumentationGap;
+    reasoning: string;
+    suggestedDocsFix: string;
+}
+
 export interface StepResult {
     stepIndex: number;
     stepDescription: string;
@@ -13,6 +23,7 @@ export interface StepResult {
     contextAfter?: unknown;
     error?: string;
     relatedKnowledge?: unknown[];
+    failureAnalysis?: FailureAnalysis;
 }
 
 export interface Report {

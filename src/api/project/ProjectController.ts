@@ -27,9 +27,9 @@ export class ProjectController {
 
     @Post(ProjectRoutes.CreateProjectFromUrlRoute)
     createProjectFromUrl: RouteHandler<typeof ProjectRoutes.CreateProjectFromUrlRoute> = async (c) => {
-        const { projectName, url } = c.req.valid("json");
+        const { projectName, url, maxPages } = c.req.valid("json");
         try {
-            const newProject = await this.projectService.createProjectFromUrl(projectName, url);
+            const newProject = await this.projectService.createProjectFromUrl(projectName, url, maxPages);
             return c.json(newProject, 201);
         } catch (error) {
             const err = error as { message?: string };
