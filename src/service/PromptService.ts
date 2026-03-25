@@ -156,7 +156,7 @@ ${JSON.stringify(jsonStructureExample, null, 2)}
             );
 
             const response = await this.openai.chat.completions.create({
-                model: "gpt-4o-mini",
+                model: "gpt-5-mini",
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userPrompt },
@@ -182,7 +182,7 @@ ${JSON.stringify(jsonStructureExample, null, 2)}
         this.logger.log(`Starting Agentic RAG for goal: "${userGoal}"`);
 
         // 1. Initial search to populate starting context
-        const initialSearchResults = await this.performRAGSearch(vectorCollectionName, userGoal, 5);
+        const initialSearchResults = await this.performRAGSearch(vectorCollectionName, userGoal, 25);
         const initialDocsContent = initialSearchResults
             .map((res, i) =>
                 `--- DOCUMENT ${i + 1} (Score: ${res.score}) ---\n${
@@ -191,47 +191,25 @@ ${JSON.stringify(jsonStructureExample, null, 2)}
             )
             .join("\n");
 
-        const systemPrompt = `
+        const researchSystemPrompt = `
 ### ROLE
-You are a Senior Software Engineer specializing in creating high-quality, executable code examples.
+You are an AI Research Agent building context for coding examples. 
 
 ### TASK
-Create 3-5 high-quality, executable example programs based on the provided documentation and the user's goal.
-Each program MUST be a standalone JavaScript file that follows the execution contract.
-
-### EXECUTION CONTRACT (CRITICAL)
-1. **Universal JavaScript:** Your code must be compatible with **BOTH Node.js and Browser** environments.
-2. **Context ('ctx'):** - State passed between steps. 
-3. **Return Signature:** Return an object: \`{ result: <api_response>, ctx: <updated_context> }\`.
-4. **Structure:** Export a default async function that accepts \`ctx\`.
-
-\`\`\`javascript
-export default async (ctx) => {
-    // ... logic ...
-    return { result: response, ctx };
-}
-\`\`\`
+Your goal is to prepare for writing high-quality executable code examples by gathering ALL necessary function documentation using the 'search_knowledge_base' tool.
+You are given a user goal and an initial context. 
 
 ### TOOLS
-You have access to 'search_knowledge_base' tool. 
-CRITICAL: You are given a small set of initial search results. If they are insufficient or you need more details about other APIs, functions, or patterns, you MUST use this tool to search the vector database.
+You have access to the 'search_knowledge_base' tool.
+CRITICAL MANDATORY RULE: FOR EVERY function, API, or pattern you plan to use, you MUST find a fragment of documentation related to it if it's not already in the initial context. Do not hallucinate or guess any function usage or signatures whatsoever. Keep calling the tool until you are fully confident you have the exact documentation for EVERY function you will use.
 
-### OUTPUT FORMAT
-You MUST respond with a valid JSON object.
-Structure:
-{
-    "examples": [
-        {
-            "title": "Example Title",
-            "explanation": "What this example does",
-            "fullProgram": "The complete JS code starting with exports/imports"
-        }
-    ],
-    "finalMarkdownSummary": "Overall summary of all examples in Markdown"
-}
+### OUTPUT INSTRUCTIONS
+You are in the Research Phase. Analyze the goal, plan what functions you need, and search for their documentation. 
+You can use the 'search_knowledge_base' tool as many times as you need in this phase.
+Once you have retrieved ALL necessary documentation and are completely ready to write the code examples, you MUST reply with exactly this text: "READY_FOR_GENERATION". DO NOT output any code or JSON yet!
 `;
 
-        const userPrompt = `
+        const researchUserPrompt = `
 ### INITIAL CONTEXT (TOP RELEVANT FRAGMENTS)
 ${initialDocsContent}
 
@@ -239,14 +217,15 @@ ${initialDocsContent}
 ${userGoal}
 
 ### INSTRUCTIONS
-1. Analyze the initial context. 
-2. Use the 'search_knowledge_base' tool if you need more information from the documentation to fulfill the goal.
-3. Generate the JSON response with executable programs.
+1. Analyze the initial context and the user goal.
+2. Plan what libraries and functions you need.
+3. Use the 'search_knowledge_base' tool to find documentation for EVERYTHING you need. Do not hesitate to use it multiple times.
+4. When you have everything, reply with "READY_FOR_GENERATION".
 `;
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
+            { role: "system", content: researchSystemPrompt },
+            { role: "user", content: researchUserPrompt },
         ];
 
         const tools: OpenAI.Chat.ChatCompletionTool[] = [
@@ -269,16 +248,16 @@ ${userGoal}
         ];
 
         let iterations = 0;
-        const maxIterations = 5;
+        const maxIterations = 8;
+        let isReady = false;
 
-        while (iterations < maxIterations) {
-            this.logger.log(`Agentic RAG Iteration ${iterations + 1}...`);
+        while (iterations < maxIterations && !isReady) {
+            this.logger.log(`Agentic RAG Research Iteration ${iterations + 1}...`);
             const response = await this.openai.chat.completions.create({
-                model: "gpt-4o",
+                model: "gpt-5-mini",
                 messages,
                 tools,
                 tool_choice: "auto",
-                response_format: { type: "json_object" },
             });
 
             const message = response.choices[0].message;
@@ -291,7 +270,7 @@ ${userGoal}
                         const searchResults = await this.performRAGSearch(
                             vectorCollectionName,
                             args.query,
-                            args.limit,
+                            25,
                         );
                         messages.push({
                             role: "tool",
@@ -300,13 +279,59 @@ ${userGoal}
                         });
                     }
                 }
-                iterations++;
-            } else {
-                return JSON.parse(message.content || "{}") as CodeGenerationResponse;
+            } else if (message.content?.includes("READY_FOR_GENERATION")) {
+                isReady = true;
             }
+            iterations++;
         }
 
-        throw new Error("Maximum iterations reached without a final JSON response.");
+        // PHASE 2: GENERATION
+        this.logger.log(`Agentic RAG Generation Phase...`);
+        const generationPrompt = `
+### ROLE
+You are a Senior Software Engineer specializing in creating high-quality, executable code examples.
+
+### TASK
+Now that you have gathered all necessary information in this thread, create 3-5 high-quality, executable example programs based on the previous context and the user's goal.
+Each program MUST be a standalone JavaScript file that follows the execution contract.
+
+### EXECUTION CONTRACT (CRITICAL)
+1. **Universal JavaScript:** Your code must be compatible with **BOTH Node.js and Browser** environments.
+2. **Context ('ctx'):** - State passed between steps. 
+3. **Return Signature:** Return an object: \`{ result: <api_response>, ctx: <updated_context> }\`.
+4. **Structure:** Export a default async function that accepts \`ctx\`.
+
+\`\`\`javascript
+export default async (ctx) => {
+    // ... logic ...
+    return { result: response, ctx };
+}
+\`\`\`
+
+### OUTPUT FORMAT
+You MUST respond with a valid JSON object.
+Structure:
+{
+    "examples": [
+        {
+            "title": "Example Title",
+            "explanation": "What this example does",
+            "fullProgram": "The complete JS code starting with exports/imports"
+        }
+    ],
+    "finalMarkdownSummary": "Overall summary of all examples in Markdown"
+}
+`;
+        messages.push({ role: "system", content: generationPrompt });
+
+        const genResponse = await this.openai.chat.completions.create({
+            model: "gpt-5-mini",
+            messages,
+            response_format: { type: "json_object" },
+        });
+
+        const jsonString = genResponse.choices[0].message?.content || "{}";
+        return JSON.parse(jsonString) as CodeGenerationResponse;
     }
 
     private async performRAGSearch(
@@ -315,6 +340,7 @@ ${userGoal}
         limit: number = 5,
     ): Promise<types.vector.SearchResult<types.file.FileShard>[]> {
         try {
+            this.logger.log(query)
             const collection = await this.vectorCollectionFactory.createCollection<
                 types.file.FileShard
             >(

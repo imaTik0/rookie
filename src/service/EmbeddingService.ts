@@ -1,34 +1,27 @@
-import { FeatureExtractionPipeline, pipeline } from "@xenova/transformers";
+import OpenAI from "@openai/openai";
 import { ConfigService } from "./ConfigService.ts";
-import { IOCManualRegistration } from "../ioc/decorator.ts";
 import * as types from "../types/index.ts";
 
-@IOCManualRegistration
 export class EmbeddingService {
-    private static instance: EmbeddingService | null = null;
-    private pipe: FeatureExtractionPipeline;
+    private modelName: string;
+    private dimensions: number;
 
-    private constructor(pipe: FeatureExtractionPipeline) {
-        this.pipe = pipe;
-    }
-
-    static async init(configService: ConfigService): Promise<EmbeddingService> {
-        if (!this.instance) {
-            const modelName = configService.values.embeddings.embeddingModel;
-            const extractor = await pipeline("feature-extraction", modelName);
-            this.instance = new EmbeddingService(
-                extractor as FeatureExtractionPipeline,
-            );
-        }
-        return this.instance;
+    constructor(
+        private openai: OpenAI,
+        private configService: ConfigService
+    ) {
+        // Hard-set to a model accommodating 8192 context window. Config model will be ignored.
+        this.modelName = "text-embedding-3-small";
+        this.dimensions = configService.values.embeddings.vectorSize || 384;
     }
 
     async embed(text: string): Promise<types.vector.DenseVector[]> {
-        const result = await this.pipe(text, {
-            pooling: "mean",
-            normalize: true,
+        const response = await this.openai.embeddings.create({
+            model: this.modelName,
+            input: text,
+            dimensions: this.dimensions,
         });
-        return result.tolist();
+        return response.data.map((d: any) => d.embedding);
     }
 
     sparseEmbed(text: string): types.vector.SparseVector {

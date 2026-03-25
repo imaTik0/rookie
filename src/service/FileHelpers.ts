@@ -28,7 +28,7 @@ export class FileHelpers {
 
     public chunkDbFile(
         dbFile: db.File,
-        options: ChunkingOptions = { chunkSize: 1000, chunkOverlap: 200 },
+        options: ChunkingOptions = { chunkSize: 7500, chunkOverlap: 1000 },
     ): types.file.FileShard[] {
         if (!this._isChunkable(dbFile.mimetype)) {
             throw new Error(
@@ -44,7 +44,7 @@ export class FileHelpers {
 
     public async chunkFileFromPath(
         filePath: string,
-        options: ChunkingOptions = { chunkSize: 1000, chunkOverlap: 200 },
+        options: ChunkingOptions = { chunkSize: 7500, chunkOverlap: 1000 },
     ): Promise<types.file.FileShard[]> {
         let content = await Deno.readTextFile(filePath);
         content = striptags(content);

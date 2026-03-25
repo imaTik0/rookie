@@ -43,10 +43,6 @@ export class Container extends IOC {
                 );
             },
         );
-        this.registerValue(
-            "embeddingService",
-            await EmbeddingService.init(this.getConfig()),
-        );
         this.registerValue("container", this);
     }
 
