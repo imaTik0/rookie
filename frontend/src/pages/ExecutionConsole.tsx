@@ -88,11 +88,11 @@ export default function ExecutionConsole() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0f1c] relative">
-      <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between z-10 shrink-0">
+    <div className="flex flex-col h-full bg-white relative">
+      <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between z-10 shrink-0">
         <div className="flex items-center gap-4">
-          <Terminal className="text-blue-500" />
-          <h2 className="text-xl font-bold text-white tracking-widest uppercase text-sm">Execution Stream</h2>
+          <Terminal className="text-orange-500" />
+          <h2 className="text-xl font-bold text-gray-900 tracking-widest uppercase text-sm">Execution Stream</h2>
         </div>
         <div className="flex items-center gap-3">
           <input 
@@ -100,29 +100,29 @@ export default function ExecutionConsole() {
             value={suiteId}
             onChange={e => setSuiteId(e.target.value)}
             placeholder="TestSuite ID"
-            className="bg-slate-900 border border-slate-700 text-sm px-3 py-1.5 rounded-lg w-64 text-white focus:outline-none"
+            className="bg-white border border-gray-300 text-sm px-3 py-1.5 rounded-lg w-64 text-gray-900 focus:outline-none"
             disabled={isRunning}
           />
           <button 
             onClick={handleExecute}
             disabled={isRunning || !suiteId}
-            className="flex items-center gap-2 px-4 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg transition-colors text-sm font-medium"
+            className="flex items-center gap-2 px-4 py-1.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-lg transition-colors text-sm font-medium"
           >
             <Play size={14} /> {isRunning ? 'Streaming...' : 'Run Diagnostics'}
           </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden relative bg-[#0b0f19]">
+      <div className="flex-1 overflow-hidden relative bg-gray-50">
         <div className="absolute top-4 right-4 z-10">
-          <button onClick={handleCopyLogs} className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-md border border-slate-700 shadow-md">
+          <button onClick={handleCopyLogs} className="p-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-md border border-gray-300 shadow-md">
             <Copy size={16} />
           </button>
         </div>
         
         <div className="h-full overflow-y-auto p-6 font-mono text-[13px] leading-relaxed">
           {logs.length === 0 && (
-            <div className="h-full flex items-center justify-center text-slate-600 opacity-50 flex-col gap-4">
+            <div className="h-full flex items-center justify-center text-gray-400 opacity-50 flex-col gap-4">
               <Terminal size={48} />
               <p>Standby... waiting for RAG invocation.</p>
             </div>
@@ -131,9 +131,9 @@ export default function ExecutionConsole() {
           {logs.map((log, i) => (
             <div key={i} className="mb-1 flex">
               {log.type === 'log' && (
-                <span className="text-blue-500 mr-3 select-none flex-shrink-0">➜</span>
+                <span className="text-orange-500 mr-3 select-none flex-shrink-0">➜</span>
               )}
-              <span className={`break-all whitespace-pre-wrap ${log.type === 'token' ? 'text-purple-400' : 'text-slate-300'}`}>
+              <span className={`break-all whitespace-pre-wrap ${log.type === 'token' ? 'text-orange-600' : 'text-gray-700'}`}>
                 {log.content}
               </span>
             </div>

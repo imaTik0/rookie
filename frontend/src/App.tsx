@@ -1,6 +1,6 @@
 import React from 'react';
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, PlusCircle, Activity, Play } from 'lucide-react';
+import { LayoutDashboard, PlusCircle, Play } from 'lucide-react';
 import Dashboard from './pages/Dashboard';
 import ProjectCreator from './pages/ProjectCreator';
 import TestSuiteCreator from './pages/TestSuiteCreator';
@@ -14,10 +14,10 @@ export default function App() {
     return (
       <Link
         to={path}
-        className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all ${
+        className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors ${
           isActive
-            ? 'bg-blue-600 text-white font-medium shadow-md shadow-blue-500/20'
-            : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
+            ? 'bg-orange-500 text-white font-medium'
+            : 'text-gray-600 hover:text-orange-600 hover:bg-orange-50'
         }`}
       >
         {icon} {label}
@@ -26,12 +26,12 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-50 font-sans">
-      <aside className="w-64 border-r border-slate-800/60 bg-slate-950 flex flex-col z-10 shadow-xl shadow-black/50">
-        <div className="p-6 border-b border-slate-800/60">
-          <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent flex items-center gap-2">
-            <Activity className="text-blue-400" />
-            Rookie RAG
+    <div className="flex h-screen bg-white text-gray-900 font-sans">
+      <aside className="w-64 border-r border-gray-200 bg-gray-50 flex flex-col z-10">
+        <div className="p-6 border-b border-gray-200">
+          <h1 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+            <img src="/rookielogo.png" alt="Rookie Logo" className="w-8 h-8 object-contain" />
+            Rookie
           </h1>
         </div>
         <nav className="flex-1 p-4 space-y-1.5">
@@ -41,7 +41,7 @@ export default function App() {
           {navItem('/execute', <Play size={18} />, 'Execute Tests')}
         </nav>
       </aside>
-      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-[#0a0f1a] relative">
+      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-white relative">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/project/new" element={<ProjectCreator />} />

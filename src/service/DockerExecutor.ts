@@ -23,7 +23,7 @@ export interface LanguageDefinition {
 
 export const LANGUAGES: Record<string, LanguageDefinition> = {
     python: { image: "python:3.10-alpine", command: ["python"] },
-    node: { image: "node:20-alpine", command: ["node"] },
+    node: { image: "node:20-alpine", command: ["sh"] },
     cpp: {
         image: "gcc:12",
         command: ["sh", "-c", "cat > main.cpp && g++ main.cpp -o main && ./main"],
@@ -36,9 +36,9 @@ export const LANGUAGES: Record<string, LanguageDefinition> = {
         image: "rust:1.70-alpine",
         command: ["sh", "-c", "cat > main.rs && rustc main.rs && ./main"],
     },
-    puppeteer: {
-        image: "ghcr.io/puppeteer/puppeteer:latest",
-        command: ["node", "-"],
+    browser: {
+        image: "mcr.microsoft.com/playwright:v1.49.1-focal",
+        command: ["sh"],
     },
 };
 
@@ -58,6 +58,7 @@ export class DockerExecutor {
     public async execute(
         lang: keyof typeof LANGUAGES | LanguageDefinition,
         code: string,
+        dependencies: string[] = []
     ): Promise<ExecutionResult> {
         const langDef = typeof lang === "string" ? LANGUAGES[lang] : lang;
         if (!langDef) throw new Error(`Language '${lang}' not supported.`);
@@ -67,8 +68,8 @@ export class DockerExecutor {
             ? `--network=${this.config.networkName}`
             : (this.config.networkAccess ? "" : "--network=none");
 
-        // Chrome typically requires SYS_ADMIN capability to run in Docker
-        const capAddArg = lang === "puppeteer" ? "--cap-add=SYS_ADMIN" : "";
+        // Playwright typically requires higher memory IPC limits
+        const capAddArg = lang === "browser" ? "--ipc=host" : "";
 
         const args = [
             "run",
@@ -91,11 +92,29 @@ export class DockerExecutor {
 
         const process = command.spawn();
         let isTimeout = false;
-        let timeoutId: number | undefined;
+        let timeoutId: any;
+
+        let finalStdinContent = code;
+        if (lang === "node" || lang === "browser") {
+            const depsInstall = dependencies.length > 0
+                ? `npm install ${dependencies.join(" ")} > /dev/null 2>&1`
+                : "";
+                
+            finalStdinContent = `
+mkdir -p /eval && cd /eval
+npm init -y > /dev/null 2>&1
+npm pkg set type="module"
+${depsInstall}
+cat << 'ENDEVALCODE' > run.js
+${code}
+ENDEVALCODE
+node run.js
+`;
+        }
 
         try {
             const writer = process.stdin.getWriter();
-            await writer.write(new TextEncoder().encode(code));
+            await writer.write(new TextEncoder().encode(finalStdinContent));
             await writer.close();
 
             timeoutId = setTimeout(() => {

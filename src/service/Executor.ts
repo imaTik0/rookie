@@ -63,7 +63,21 @@ export class Executor {
         const codeGenResponse = await this.promptService.promptForCodeGenerationWithAgenticRAG(
             testSuite.projectId,
             testSuite.userGoal || "No goal specified",
-            onProgress
+            onProgress,
+            async (code, env, deps) => {
+                const execResult = await this.runStepInDocker(
+                    code,
+                    JSON.parse(testSuite.initialContext),
+                    env,
+                    deps,
+                );
+                
+                if (execResult.success) {
+                    return `SUCCESS.\nOutput: ${JSON.stringify(execResult.result)}`;
+                } else {
+                    return `FAILED.\nError: ${execResult.error}\nLogs: ${execResult.logs}`;
+                }
+            }
         );
         onProgress?.(JSON.stringify({ type: "log", content: "Code Generation completed. Executing in Docker environment..." }));
 
@@ -78,6 +92,8 @@ export class Executor {
             const execResult = await this.runStepInDocker(
                 example.fullProgram,
                 JSON.parse(testSuite.initialContext),
+                example.environment || "node",
+                example.dependencies || [],
             );
 
             const stepReport: types.report.StepResult = {
@@ -226,6 +242,8 @@ export class Executor {
     private async runStepInDocker(
         userCode: string,
         currentCtx: unknown,
+        environment: "node" | "browser" = "node",
+        dependencies: string[] = [],
     ): Promise<{
         success: boolean;
         result?: { ctx: unknown; result: unknown };
@@ -236,7 +254,6 @@ export class Executor {
 
         const script = `
             const ctx = ${JSON.stringify(currentCtx)};
-            const { inspect } = require('util');
 
             ${cleanedUserCode}
 
@@ -269,7 +286,7 @@ export class Executor {
         `;
 
         try {
-            const execResult = await this.dockerExecutor.execute("node", script);
+            const execResult = await this.dockerExecutor.execute(environment, script, dependencies);
             const fullLogs = `STDOUT:\n${execResult.stdout}\n\nSTDERR:\n${execResult.stderr}`;
 
             if (execResult.exitCode !== 0) {

@@ -13,7 +13,7 @@ const MarkdownRenderer = ({ content }: { content: string }) => {
 
   return (
     <div 
-      className="prose prose-sm max-w-full text-slate-300 prose-headings:text-white prose-a:text-blue-400 prose-code:text-purple-400 prose-code:bg-slate-800 prose-pre:bg-slate-950 prose-pre:border prose-pre:border-slate-800" 
+      className="prose prose-sm max-w-full text-gray-700 prose-headings:text-gray-900 prose-a:text-orange-500 prose-code:text-orange-600 prose-code:bg-gray-100 prose-pre:bg-gray-50 prose-pre:border prose-pre:border-gray-200" 
       dangerouslySetInnerHTML={{ __html: html as string }} 
     />
   );
@@ -24,7 +24,7 @@ const StatusBadge = ({ status }: { status: string }) => {
     SUCCESS: { bg: "bg-emerald-500/20", border: "border-emerald-500/30", text: "text-emerald-400", icon: <CheckCircle size={14} className="mr-1.5" /> },
     FAILED: { bg: "bg-rose-500/20", border: "border-rose-500/30", text: "text-rose-400", icon: <XCircle size={14} className="mr-1.5" /> },
     PARTIAL_FAILURE: { bg: "bg-amber-500/20", border: "border-amber-500/30", text: "text-amber-400", icon: <AlertTriangle size={14} className="mr-1.5" /> },
-    RUNNING: { bg: "bg-blue-500/20", border: "border-blue-500/30", text: "text-blue-400", icon: <Loader size={14} className="mr-1.5 animate-spin" /> }
+    RUNNING: { bg: "bg-blue-500/20", border: "border-blue-500/30", text: "text-orange-500", icon: <Loader size={14} className="mr-1.5 animate-spin" /> }
   };
   const current = config[status] || config.RUNNING;
 
@@ -37,12 +37,12 @@ const StatusBadge = ({ status }: { status: string }) => {
 };
 
 const CodeBlock = ({ code, language = "javascript" }: { code: string, language?: string }) => (
-  <div className="bg-[#0d1117] rounded-xl overflow-hidden border border-slate-800 shadow-inner">
-    <div className="bg-slate-900/80 px-4 py-2.5 flex items-center justify-between border-b border-slate-800">
-      <span className="text-xs text-slate-400 font-medium uppercase tracking-wider">{language}</span>
+  <div className="bg-gray-50 rounded-xl overflow-hidden border border-gray-200 shadow-inner">
+    <div className="bg-white px-4 py-2.5 flex items-center justify-between border-b border-gray-200">
+      <span className="text-xs text-gray-600 font-medium uppercase tracking-wider">{language}</span>
       <button 
         onClick={() => navigator.clipboard.writeText(code)}
-        className="text-slate-500 hover:text-white transition-colors"
+        className="text-gray-500 hover:text-orange-500 transition-colors"
         title="Copy"
       >
         <Copy size={14} />
@@ -62,8 +62,8 @@ const RelatedKnowledgeItem = ({ item }: { item: any }) => {
 
   if (!content) {
     return (
-      <div className="bg-amber-950/30 border border-amber-900/50 rounded-xl p-4">
-        <pre className="text-xs text-amber-500/80 whitespace-pre-wrap font-mono overflow-x-auto">
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+        <pre className="text-xs text-amber-600 whitespace-pre-wrap font-mono overflow-x-auto">
           {JSON.stringify(item, null, 2)}
         </pre>
       </div>
@@ -71,19 +71,19 @@ const RelatedKnowledgeItem = ({ item }: { item: any }) => {
   }
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-md mb-4">
-      <div className="bg-slate-800/50 px-4 py-3 border-b border-slate-800 flex justify-between items-center">
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-md mb-4">
+      <div className="bg-gray-100/50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
         <div className="flex items-center gap-2">
-          <FileText size={16} className="text-blue-400" />
-          <span className="text-sm font-semibold text-slate-200">
+          <FileText size={16} className="text-orange-500" />
+          <span className="text-sm font-semibold text-gray-800">
             {metadata.fileName || "Knowledge Base Match"}
           </span>
         </div>
-        <span className="text-xs text-slate-500 font-mono bg-slate-950 px-2 py-1 rounded">
+        <span className="text-xs text-gray-500 font-mono bg-gray-50 px-2 py-1 rounded">
           Score: {typeof score === "number" ? score.toFixed(4) : "N/A"}
         </span>
       </div>
-      <div className="p-5 bg-slate-900/50">
+      <div className="p-5 bg-gray-50">
         <MarkdownRenderer content={content} />
       </div>
     </div>
@@ -107,9 +107,9 @@ const StepDetail = ({ step }: { step: any }) => {
   const isFailed = step.status === "FAILED";
 
   return (
-    <div className={`rounded-xl mb-4 bg-slate-900 shadow-lg overflow-hidden border ${isFailed ? "border-rose-500/30 shadow-rose-900/10" : "border-slate-800"}`}>
+    <div className={`rounded-xl mb-4 bg-white shadow-lg overflow-hidden border ${isFailed ? "border-rose-500/30 shadow-rose-900/10" : "border-gray-200"}`}>
       <div 
-        className="p-5 flex items-center justify-between cursor-pointer hover:bg-slate-800/50 transition-colors"
+        className="p-5 flex items-center justify-between cursor-pointer hover:bg-gray-100/50 transition-colors"
         onClick={() => setIsOpen(!isOpen)}
       >
         <div className="flex items-center gap-4">
@@ -117,16 +117,16 @@ const StepDetail = ({ step }: { step: any }) => {
             {isFailed ? <X size={20} className="stroke-[3px]" /> : <Check size={20} className="stroke-[3px]" />}
           </div>
           <div>
-            <h3 className="font-bold text-white text-base">Step {step.stepIndex}</h3>
-            <p className="text-sm text-slate-400 mt-0.5">{step.stepDescription}</p>
+            <h3 className="font-bold text-gray-900 text-base">Step {step.stepIndex}</h3>
+            <p className="text-sm text-gray-600 mt-0.5">{step.stepDescription}</p>
           </div>
         </div>
-        {isOpen ? <ChevronUp className="text-slate-500" /> : <ChevronDown className="text-slate-500" />}
+        {isOpen ? <ChevronUp className="text-gray-500" /> : <ChevronDown className="text-gray-500" />}
       </div>
 
       {isOpen && (
-        <div className="border-t border-slate-800 bg-slate-950">
-          <div className="flex border-b border-slate-800 px-2 pt-2">
+        <div className="border-t border-gray-200 bg-gray-50">
+          <div className="flex border-b border-gray-200 px-2 pt-2">
             {["logs", "script", "context", "related"].map(tab => {
               if (tab === "related" && !hasRelated) return null;
               return (
@@ -135,8 +135,8 @@ const StepDetail = ({ step }: { step: any }) => {
                   onClick={() => setActiveTab(tab)}
                   className={`px-5 py-2.5 text-sm font-medium transition-all rounded-t-lg mx-1 ${
                     activeTab === tab 
-                      ? "bg-slate-800 text-white shadow-sm" 
-                      : "text-slate-500 hover:text-slate-300 hover:bg-slate-900"
+                      ? "bg-gray-100 text-gray-900 shadow-sm" 
+                      : "text-gray-500 hover:text-gray-700 hover:bg-white"
                   }`}
                 >
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -149,7 +149,7 @@ const StepDetail = ({ step }: { step: any }) => {
             {activeTab === "logs" && (
               <div className="space-y-4">
                 {step.error && (
-                  <div className="bg-rose-950/20 border border-rose-900/50 rounded-xl p-4 shadow-inner">
+                  <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 shadow-inner">
                     <pre className="text-rose-400/90 text-xs font-mono whitespace-pre-wrap">{step.error}</pre>
                   </div>
                 )}
@@ -158,8 +158,8 @@ const StepDetail = ({ step }: { step: any }) => {
             )}
             {activeTab === "script" && <CodeBlock code={step.scriptContent} />}
             {activeTab === "context" && (
-              <div className="bg-[#0d1117] rounded-xl border border-slate-800 p-4 shadow-inner">
-                <pre className="text-xs text-blue-300 font-mono overflow-auto max-h-96">
+              <div className="bg-gray-50 rounded-xl border border-gray-200 p-4 shadow-inner">
+                <pre className="text-xs text-orange-600 font-mono overflow-auto max-h-96">
                   {JSON.stringify(step.contextAfter, null, 2)}
                 </pre>
               </div>
@@ -181,24 +181,24 @@ export default function ReportViewer({ report, onBack }: { report: any, onBack: 
   const isCodeGeneration = report.type === "CODE_GENERATION";
   
   return (
-    <div className="flex flex-col h-full bg-[#0a0f1c] overflow-y-auto">
-      <div className="bg-slate-900 border-b border-slate-800 sticky top-0 z-20 shadow-md">
+    <div className="flex flex-col h-full bg-gray-50 overflow-y-auto">
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-md">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-5">
             <button 
               onClick={onBack} 
-              className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-full transition-colors text-slate-300"
+              className="p-2.5 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors text-gray-700"
               title="Back to Stream"
             >
               <ArrowLeft size={18} />
             </button>
             <div>
-              <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                <Activity className="text-blue-500" size={20} />
+              <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <Activity className="text-orange-500" size={20} />
                 {isCodeGeneration ? "Code Generation Report" : "Test Execution Report"}
               </h1>
-              <p className="text-xs text-slate-400 mt-1 font-mono">
-                Suite: <span className="text-slate-300">{report.testSuiteId}</span> • {new Date(report.createdAt).toLocaleString()}
+              <p className="text-xs text-gray-600 mt-1 font-mono">
+                Suite: <span className="text-gray-700">{report.testSuiteId}</span> • {new Date(report.createdAt).toLocaleString()}
               </p>
             </div>
           </div>
@@ -208,20 +208,20 @@ export default function ReportViewer({ report, onBack }: { report: any, onBack: 
 
       <div className="max-w-6xl mx-auto w-full px-6 py-10 space-y-10">
         {isCodeGeneration && report.detailedResults?.finalOutput && (
-          <div className="bg-slate-900 p-8 rounded-2xl shadow-xl border border-slate-800">
-            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-3 border-b border-slate-800 pb-4">
-              <FileCode className="text-purple-400" /> Generated Deliverables
+          <div className="bg-white p-8 rounded-2xl shadow-xl border border-gray-200">
+            <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3 border-b border-gray-200 pb-4">
+              <FileCode className="text-orange-600" /> Generated Deliverables
             </h2>
             <MarkdownRenderer content={report.detailedResults.finalOutput} />
           </div>
         )}
 
         <div>
-          <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-3 border-b border-slate-800 pb-4">
-            <Activity className="text-blue-400" /> Execution Diagnostics & Validation
+          <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3 border-b border-gray-200 pb-4">
+            <Activity className="text-orange-500" /> Execution Diagnostics & Validation
           </h2>
           <div className="space-y-4">
-            {steps.length === 0 && <p className="text-slate-500 italic">No execution steps found in this report.</p>}
+            {steps.length === 0 && <p className="text-gray-500 italic">No execution steps found in this report.</p>}
             {steps.map((step: any) => <StepDetail key={step.stepIndex} step={step} />)}
           </div>
         </div>
