@@ -23,7 +23,7 @@ export interface LanguageDefinition {
 
 export const LANGUAGES: Record<string, LanguageDefinition> = {
     python: { image: "python:3.10-alpine", command: ["python"] },
-    node: { image: "node:20-alpine", command: ["sh"] },
+    node: { image: "node:20-slim", command: ["bash"] },
     cpp: {
         image: "gcc:12",
         command: ["sh", "-c", "cat > main.cpp && g++ main.cpp -o main && ./main"],
@@ -37,8 +37,8 @@ export const LANGUAGES: Record<string, LanguageDefinition> = {
         command: ["sh", "-c", "cat > main.rs && rustc main.rs && ./main"],
     },
     browser: {
-        image: "mcr.microsoft.com/playwright:v1.49.1-focal",
-        command: ["sh"],
+        image: "mcr.microsoft.com/playwright:v1.49.1-jammy",
+        command: ["bash"],
     },
 };
 
@@ -59,6 +59,7 @@ export class DockerExecutor {
         lang: keyof typeof LANGUAGES | LanguageDefinition,
         code: string,
         dependencies: string[] = [],
+        setup?: string,
     ): Promise<ExecutionResult> {
         const langDef = typeof lang === "string" ? LANGUAGES[lang] : lang;
         if (!langDef) throw new Error(`Language '${lang}' not supported.`);
@@ -105,6 +106,7 @@ mkdir -p /eval && cd /eval
 npm init -y > /dev/null 2>&1
 npm pkg set type="module"
 ${depsInstall}
+${setup || ""}
 cat << 'ENDEVALCODE' > run.js
 ${code}
 ENDEVALCODE

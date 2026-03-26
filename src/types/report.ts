@@ -24,6 +24,7 @@ export interface StepResult {
     error?: string;
     relatedKnowledge?: unknown[];
     failureAnalysis?: FailureAnalysis;
+    bashSetup?: string;
 }
 
 export interface Report {

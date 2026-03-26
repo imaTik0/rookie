@@ -224,7 +224,7 @@ export class PromptService {
                         onProgress,
                         `Running Smoke Test... Env: ${args.environment}, Deps: [${
                             args.dependencies.join(", ")
-                        }]`,
+                        }]${args.bash_setup ? `, Setup: ${args.bash_setup.substring(0, 50)}...` : ""}`,
                     );
 
                     let testResult = "Tool not available locally.";
@@ -234,6 +234,7 @@ export class PromptService {
                                 args.code,
                                 args.environment,
                                 args.dependencies,
+                                args.bash_setup,
                             );
                         } catch (e) {
                             testResult = `FATAL RUNTIME ERROR: ${

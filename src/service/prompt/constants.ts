@@ -55,6 +55,11 @@ export const SMOKE_TEST_TOOL: OpenAI.Chat.ChatCompletionTool = {
                     description:
                         "Array of exactly named NPM packages required (e.g. ['axios', 'zod']). Do not include built-in modules.",
                 },
+                bash_setup: {
+                    type: "string",
+                    description:
+                        "Optional bash script to run before the JS code (e.g. for creating, moving or copying files).",
+                },
             },
             required: ["code", "environment", "dependencies"],
         },

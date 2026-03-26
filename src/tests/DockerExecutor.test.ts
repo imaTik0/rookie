@@ -130,6 +130,35 @@ Deno.test("DockerExecutor - Node.js (Interpreted)", async (t) => {
         assertEquals(result.exitCode, 0);
         assertStringIncludes(result.stdout, "Async Hello");
     });
+
+    await t.step("should execute bash setup before Node.js code", async () => {
+        const setup = `echo "Setup string" > setup.txt`;
+        const code = `
+            import fs from 'fs';
+            const content = fs.readFileSync('setup.txt', 'utf8');
+            console.log("From file:", content.trim());
+        `;
+        const result = await executor.execute("node", code, [], setup);
+
+        assertEquals(result.exitCode, 0);
+        assertStringIncludes(result.stdout, "From file: Setup string");
+    });
+
+    await t.step("should handle complex bash setup with folders", async () => {
+        const setup = `
+            mkdir -p test_dir
+            echo "Nested file" > test_dir/nested.txt
+        `;
+        const code = `
+            import fs from 'fs';
+            const content = fs.readFileSync('test_dir/nested.txt', 'utf8');
+            console.log("Nested:", content.trim());
+        `;
+        const result = await executor.execute("node", code, [], setup);
+
+        assertEquals(result.exitCode, 0);
+        assertStringIncludes(result.stdout, "Nested: Nested file");
+    });
 });
 
 Deno.test("DockerExecutor - Puppeteer (Browser)", async (t) => {

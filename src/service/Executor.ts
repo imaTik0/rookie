@@ -86,6 +86,7 @@ export class Executor {
                     JSON.parse(testSuite.initialContext),
                     env,
                     deps,
+                    undefined, // bash_setup not used in initial RAG prompt yet
                 );
 
                 if (execResult.success) {
@@ -120,6 +121,7 @@ export class Executor {
                 JSON.parse(testSuite.initialContext),
                 example.environment || "node",
                 example.dependencies || [],
+                example.bash_setup,
             );
 
             const stepReport: types.report.StepResult = {
@@ -129,6 +131,7 @@ export class Executor {
                 status: execResult.success ? "SUCCESS" : "FAILED",
                 logs: execResult.logs,
                 contextAfter: execResult.result?.ctx || null,
+                bashSetup: example.bash_setup,
             };
 
             if (!execResult.success) {
@@ -326,6 +329,7 @@ export class Executor {
         currentCtx: unknown,
         environment: "node" | "browser" = "node",
         dependencies: string[] = [],
+        bashSetup?: string,
     ): Promise<{
         success: boolean;
         result?: { ctx: unknown; result: unknown };
@@ -368,7 +372,7 @@ export class Executor {
         `;
 
         try {
-            const execResult = await this.dockerExecutor.execute(environment, script, dependencies);
+            const execResult = await this.dockerExecutor.execute(environment, script, dependencies, bashSetup);
             const fullLogs = `STDOUT:\n${execResult.stdout}\n\nSTDERR:\n${execResult.stderr}`;
 
             if (execResult.exitCode !== 0) {

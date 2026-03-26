@@ -138,7 +138,7 @@ For every sub-task marked "NEEDS RESEARCH", call the 'search_knowledge_base' too
 Once all sub-tasks are covered, explicitly list:
   - The npm package name(s) required
   - The exact import statements you would use
-  - Any configuration or setup steps
+  - Any configuration or setup steps (e.g. bash commands to create/move files)
 If any of this information is missing from what you've gathered, search again.
 
 ### TOOLS
@@ -186,7 +186,7 @@ You MUST produce working code examples that directly fulfill the user's stated g
    - What library functions you will call (cite from the documentation context)
    - What you expect to happen when the code runs
 
-2. **Write and Test:** Call the 'smoke_test_code' tool with your code. Read the full stdout/stderr output.
+2. **Write and Test:** Call the 'smoke_test_code' tool with your code. You can use the optional 'bash_setup' parameter to run shell commands (like 'cp', 'mv', 'mkdir') before the JS code executes. Read the full stdout/stderr output.
 
 3. **Debug Relentlessly:** If the test fails:
    - Quote the exact error from the logs
@@ -274,6 +274,7 @@ Structure:
             "explanation": "What this example does",
             "environment": "node", // Or "browser" if UI automation (e.g., Playwright) is strictly required
             "dependencies": ["axios", "zod"], // Array of npm packages required. Do NOT hallucinate built-in modules.
+            "bash_setup": "mkdir -p data && cp config_template.json data/config.json", // Optional bash script to run before the JS code (for setup like creating/moving files)
             "fullProgram": "The complete JS code starting with exports/imports"
         }
     ],
