@@ -31,8 +31,16 @@ export class Executor {
         });
     }
 
-    async executeTestSuite(testSuiteId: types.test.TestSuiteId, onProgress?: (msg: string) => void) {
-        onProgress?.(JSON.stringify({ type: "log", content: "Starting execution of Test Suite: " + testSuiteId }));
+    async executeTestSuite(
+        testSuiteId: types.test.TestSuiteId,
+        onProgress?: (msg: string) => void,
+    ) {
+        onProgress?.(
+            JSON.stringify({
+                type: "log",
+                content: "Starting execution of Test Suite: " + testSuiteId,
+            }),
+        );
         const startTime = Date.now();
         const testSuite = await this.testSuiteRepository.get(testSuiteId);
         if (!testSuite) return null;
@@ -44,8 +52,13 @@ export class Executor {
             project.files.map((file) => this.fileService.downloadFile(file)),
         );
         const validFiles = files.filter((file): file is NonNullable<typeof file> => !!file);
-        
-        onProgress?.(JSON.stringify({ type: "log", content: `Downloaded ${validFiles.length} project context files.` }));
+
+        onProgress?.(
+            JSON.stringify({
+                type: "log",
+                content: `Downloaded ${validFiles.length} project context files.`,
+            }),
+        );
 
         if (testSuite.mode === "CODE_GENERATION") {
             return await this.executeCodeGeneration(testSuite, validFiles, startTime, onProgress);
@@ -60,7 +73,9 @@ export class Executor {
         startTime: number,
         onProgress?: (msg: string) => void,
     ) {
-        onProgress?.(JSON.stringify({ type: "log", content: "Starting Agentic RAG for CODE_GENERATION..." }));
+        onProgress?.(
+            JSON.stringify({ type: "log", content: "Starting Agentic RAG for CODE_GENERATION..." }),
+        );
         const codeGenResponse = await this.promptService.promptForCodeGenerationWithAgenticRAG(
             testSuite.projectId,
             testSuite.userGoal || "No goal specified",
@@ -72,15 +87,20 @@ export class Executor {
                     env,
                     deps,
                 );
-                
+
                 if (execResult.success) {
                     return `SUCCESS.\nOutput: ${JSON.stringify(execResult.result)}`;
                 } else {
                     return `FAILED.\nError: ${execResult.error}\nLogs: ${execResult.logs}`;
                 }
-            }
+            },
         );
-        onProgress?.(JSON.stringify({ type: "log", content: "Code Generation completed. Executing in Docker environment..." }));
+        onProgress?.(
+            JSON.stringify({
+                type: "log",
+                content: "Code Generation completed. Executing in Docker environment...",
+            }),
+        );
 
         const stepsResults: types.report.StepResult[] = [];
         let hasFailures = false;
@@ -89,7 +109,12 @@ export class Executor {
         for (const example of codeGenResponse.examples) {
             i++;
             this.logger.log(`Executing generated example ${i}: ${example.title}`);
-            onProgress?.(JSON.stringify({ type: "log", content: `Running Docker container for Example ${i}: ${example.title}...` }));
+            onProgress?.(
+                JSON.stringify({
+                    type: "log",
+                    content: `Running Docker container for Example ${i}: ${example.title}...`,
+                }),
+            );
             const execResult = await this.runStepInDocker(
                 example.fullProgram,
                 JSON.parse(testSuite.initialContext),
@@ -131,7 +156,13 @@ export class Executor {
                     relatedDocsText,
                     `${example.title}: ${example.explanation}`,
                 );
-                onProgress?.(JSON.stringify({ type: "log", content: `Failure classified as: ${stepReport.failureAnalysis.documentationGap} - ${stepReport.failureAnalysis.reasoning}` }));
+                onProgress?.(
+                    JSON.stringify({
+                        type: "log",
+                        content:
+                            `Failure classified as: ${stepReport.failureAnalysis.documentationGap} - ${stepReport.failureAnalysis.reasoning}`,
+                    }),
+                );
             }
             stepsResults.push(stepReport);
         }
@@ -164,7 +195,9 @@ export class Executor {
         onProgress?: (msg: string) => void,
     ) {
         const docs = files.map((f) => new TextDecoder().decode(f.buffer)).join("\n");
-        onProgress?.(JSON.stringify({ type: "log", content: "Generating Test Scenario execution plan..." }));
+        onProgress?.(
+            JSON.stringify({ type: "log", content: "Generating Test Scenario execution plan..." }),
+        );
         const plan = await this.promptService.promptForApiUsageScenario(
             docs,
             testSuite.initialContext,
@@ -172,9 +205,14 @@ export class Executor {
                 minimalLength: testSuite.minimalStoryLength,
                 maximalLength: testSuite.maximalStoryLength,
             },
-            onProgress
+            onProgress,
         );
-        onProgress?.(JSON.stringify({ type: "log", content: `Generated test plan with ${plan.calls.length} steps. Executing...` }));
+        onProgress?.(
+            JSON.stringify({
+                type: "log",
+                content: `Generated test plan with ${plan.calls.length} steps. Executing...`,
+            }),
+        );
 
         let context = JSON.parse(testSuite.initialContext);
         const stepsResults: types.report.StepResult[] = [];
@@ -184,7 +222,12 @@ export class Executor {
         for (const call of plan.calls) {
             i++;
             this.logger.log(`Executing step ${i}: ${call.stepExplanation}`);
-            onProgress?.(JSON.stringify({ type: "log", content: `Running Docker container for Step ${i}: ${call.stepExplanation}...` }));
+            onProgress?.(
+                JSON.stringify({
+                    type: "log",
+                    content: `Running Docker container for Step ${i}: ${call.stepExplanation}...`,
+                }),
+            );
             const execResult = await this.runStepInDocker(call.fetch, context);
 
             const stepReport: types.report.StepResult = {
@@ -223,7 +266,13 @@ export class Executor {
                     relatedDocsText,
                     call.stepExplanation,
                 );
-                onProgress?.(JSON.stringify({ type: "log", content: `Failure classified as: ${stepReport.failureAnalysis.documentationGap} - ${stepReport.failureAnalysis.reasoning}` }));
+                onProgress?.(
+                    JSON.stringify({
+                        type: "log",
+                        content:
+                            `Failure classified as: ${stepReport.failureAnalysis.documentationGap} - ${stepReport.failureAnalysis.reasoning}`,
+                    }),
+                );
             }
             stepsResults.push(stepReport);
         }

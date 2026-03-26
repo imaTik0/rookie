@@ -5,7 +5,7 @@
 import OpenAI from "@openai/openai";
 import { Logger } from "../../Logger.ts";
 import { MODEL_NAME } from "./constants.ts";
-import { ProgressCallback, emitLog } from "./helpers.ts";
+import { emitLog, ProgressCallback } from "./helpers.ts";
 import { AgenticLoopConfig } from "./types.ts";
 
 export async function runAgenticLoop(
@@ -30,8 +30,13 @@ export async function runAgenticLoop(
             return sum + content.length + toolCalls.length;
         }, 0);
         const estimatedTokens = Math.ceil(estimatedChars / 4);
-        logger.log(`${phaseLabel} estimated context: ~${estimatedTokens} tokens (${estimatedChars} chars, ${messages.length} messages)`);
-        emitLog(onProgress, `Context size: ~${estimatedTokens} tokens (${messages.length} messages)`);
+        logger.log(
+            `${phaseLabel} estimated context: ~${estimatedTokens} tokens (${estimatedChars} chars, ${messages.length} messages)`,
+        );
+        emitLog(
+            onProgress,
+            `Context size: ~${estimatedTokens} tokens (${messages.length} messages)`,
+        );
 
         const response = await openai.chat.completions.create({
             model: MODEL_NAME,

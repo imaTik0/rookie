@@ -5,32 +5,28 @@ import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.
 import * as types from "../types/index.ts";
 
 import {
-    MODEL_NAME,
     DEFAULT_SEARCH_LIMIT,
-    MAX_RESEARCH_ITERATIONS,
-    MAX_VERIFICATION_ITERATIONS,
-    MAX_RESULT_CHARS,
     MAX_CONTEXT_CHARS,
+    MAX_RESEARCH_ITERATIONS,
+    MAX_RESULT_CHARS,
+    MAX_VERIFICATION_ITERATIONS,
+    MODEL_NAME,
     SEARCH_TOOL,
     SMOKE_TEST_TOOL,
 } from "./prompt/constants.ts";
+import { emitLog, emitToken, ProgressCallback } from "./prompt/helpers.ts";
 import {
-    ProgressCallback,
-    emitLog,
-    emitToken,
-} from "./prompt/helpers.ts";
-import {
-    StructuredResponse,
     CodeGenerationResponse,
     PromptOptions,
-    SmokeTestCallback,
     SearchToolArgs,
+    SmokeTestCallback,
     SmokeTestToolArgs,
+    StructuredResponse,
 } from "./prompt/types.ts";
 import * as templates from "./prompt/templates.ts";
 import { runAgenticLoop } from "./prompt/agenticLoop.ts";
 
-export type { StructuredResponse, CodeGenerationResponse, PromptOptions } from "./prompt/types.ts";
+export type { CodeGenerationResponse, PromptOptions, StructuredResponse } from "./prompt/types.ts";
 
 export class PromptService {
     constructor(
@@ -38,7 +34,7 @@ export class PromptService {
         private logger: Logger,
         private embeddingService: EmbeddingService,
         private vectorCollectionFactory: VectorCollectionFactory,
-    ) { }
+    ) {}
 
     public async promptForApiUsageScenario(
         docs: string,
@@ -120,7 +116,10 @@ export class PromptService {
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
             { role: "system", content: templates.RESEARCH_SYSTEM_PROMPT },
-            { role: "user", content: templates.createResearchUserPrompt(initialDocsContent, userGoal) },
+            {
+                role: "user",
+                content: templates.createResearchUserPrompt(initialDocsContent, userGoal),
+            },
         ];
 
         const finalMessages = await runAgenticLoop(this.openai, this.logger, onProgress, {
@@ -135,12 +134,14 @@ export class PromptService {
                         args.query,
                         DEFAULT_SEARCH_LIMIT,
                     );
-                    const truncated = results.map(r => ({
+                    const truncated = results.map((r) => ({
                         ...r,
-                        payload: r.payload ? {
-                            ...r.payload,
-                            content: (r.payload.content || "").substring(0, MAX_RESULT_CHARS),
-                        } : r.payload,
+                        payload: r.payload
+                            ? {
+                                ...r.payload,
+                                content: (r.payload.content || "").substring(0, MAX_RESULT_CHARS),
+                            }
+                            : r.payload,
                     }));
                     return JSON.stringify(truncated);
                 },
@@ -151,16 +152,19 @@ export class PromptService {
         });
 
         const agentSynthesis = finalMessages
-            .filter(m => m.role === "assistant" && typeof m.content === "string" && m.content)
-            .map(m => m.content as string)
+            .filter((m) => m.role === "assistant" && typeof m.content === "string" && m.content)
+            .map((m) => m.content as string)
             .join("\n\n");
 
         const toolResults = finalMessages
-            .filter(m => m.role === "tool")
-            .map(m => typeof m.content === "string" ? m.content : "")
+            .filter((m) => m.role === "tool")
+            .map((m) => typeof m.content === "string" ? m.content : "")
             .join("\n\n");
 
-        const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(0, MAX_CONTEXT_CHARS);
+        const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(
+            0,
+            MAX_CONTEXT_CHARS,
+        );
 
         return { initialDocsContent, contextFound };
     }
@@ -178,7 +182,14 @@ export class PromptService {
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
             { role: "system", content: templates.VERIFICATION_SYSTEM_PROMPT },
-            { role: "user", content: templates.createVerificationUserPrompt(initialDocsContent, contextFound, userGoal) },
+            {
+                role: "user",
+                content: templates.createVerificationUserPrompt(
+                    initialDocsContent,
+                    contextFound,
+                    userGoal,
+                ),
+            },
         ];
 
         return runAgenticLoop(this.openai, this.logger, onProgress, {
@@ -187,31 +198,47 @@ export class PromptService {
             toolHandlers: {
                 search_knowledge_base: async (_id, rawArgs) => {
                     const args = rawArgs as SearchToolArgs;
-                    emitLog(onProgress, `Agent RAG searching knowledge base (Verification phase) for: "${args.query}"`);
+                    emitLog(
+                        onProgress,
+                        `Agent RAG searching knowledge base (Verification phase) for: "${args.query}"`,
+                    );
                     const results = await this.performRAGSearch(
                         vectorCollectionName,
                         args.query,
                         DEFAULT_SEARCH_LIMIT,
                     );
-                    const truncated = results.map(r => ({
+                    const truncated = results.map((r) => ({
                         ...r,
-                        payload: r.payload ? {
-                            ...r.payload,
-                            content: (r.payload.content || "").substring(0, MAX_RESULT_CHARS),
-                        } : r.payload,
+                        payload: r.payload
+                            ? {
+                                ...r.payload,
+                                content: (r.payload.content || "").substring(0, MAX_RESULT_CHARS),
+                            }
+                            : r.payload,
                     }));
                     return JSON.stringify(truncated);
                 },
                 smoke_test_code: async (_id, rawArgs) => {
                     const args = rawArgs as SmokeTestToolArgs;
-                    emitLog(onProgress, `Running Smoke Test... Env: ${args.environment}, Deps: [${args.dependencies.join(", ")}]`);
+                    emitLog(
+                        onProgress,
+                        `Running Smoke Test... Env: ${args.environment}, Deps: [${
+                            args.dependencies.join(", ")
+                        }]`,
+                    );
 
                     let testResult = "Tool not available locally.";
                     if (smokeTestCallback) {
                         try {
-                            testResult = await smokeTestCallback(args.code, args.environment, args.dependencies);
+                            testResult = await smokeTestCallback(
+                                args.code,
+                                args.environment,
+                                args.dependencies,
+                            );
                         } catch (e) {
-                            testResult = `FATAL RUNTIME ERROR: ${e instanceof Error ? e.message : String(e)}`;
+                            testResult = `FATAL RUNTIME ERROR: ${
+                                e instanceof Error ? e.message : String(e)
+                            }`;
                         }
                     }
 
@@ -232,22 +259,39 @@ export class PromptService {
         onProgress: ProgressCallback,
     ): Promise<CodeGenerationResponse> {
         this.logger.log(`Agentic RAG Generation Phase...`);
-        emitLog(onProgress, `Agentic RAG Finalizing Phase... Formatting verified code into final response.`);
+        emitLog(
+            onProgress,
+            `Agentic RAG Finalizing Phase... Formatting verified code into final response.`,
+        );
 
         const relevantMessages = verificationMessages.filter((m, i, arr) => {
             if (m.role === "system" || (m.role === "user" && i <= 1)) return true;
-            if (m.role === "tool" && typeof m.content === "string" && m.content.startsWith("SUCCESS")) return true;
+            if (
+                m.role === "tool" && typeof m.content === "string" &&
+                m.content.startsWith("SUCCESS")
+            ) return true;
             if (m.role === "assistant" && i + 1 < arr.length) {
                 for (let j = i + 1; j < Math.min(i + 5, arr.length); j++) {
-                    if (arr[j].role === "tool" && typeof arr[j].content === "string" && (arr[j].content as string).startsWith("SUCCESS")) return true;
+                    if (
+                        arr[j].role === "tool" && typeof arr[j].content === "string" &&
+                        (arr[j].content as string).startsWith("SUCCESS")
+                    ) return true;
                 }
             }
-            if (m.role === "assistant" && typeof m.content === "string" && m.content.includes("VERIFICATION_COMPLETE")) return true;
+            if (
+                m.role === "assistant" && typeof m.content === "string" &&
+                m.content.includes("VERIFICATION_COMPLETE")
+            ) return true;
             return false;
         });
 
         const testedHistory = relevantMessages
-            .map(m => `ROLE: ${m.role}\n${m.content || ((m as any).tool_calls ? JSON.stringify((m as any).tool_calls) : '')}`)
+            .map((m) =>
+                `ROLE: ${m.role}\n${
+                    m.content ||
+                    ((m as any).tool_calls ? JSON.stringify((m as any).tool_calls) : "")
+                }`
+            )
             .join("\n\n---\n");
 
         const genResponse = await this.openai.chat.completions.create({
@@ -256,7 +300,8 @@ export class PromptService {
                 { role: "system", content: templates.GENERATION_SYSTEM_PROMPT },
                 {
                     role: "user",
-                    content: `### TESTED EXAMPLES HISTORY:\n${testedHistory}\n\n### TASK\nExtract the working examples from the history above and format them precisely into the requested JSON structure.`,
+                    content:
+                        `### TESTED EXAMPLES HISTORY:\n${testedHistory}\n\n### TASK\nExtract the working examples from the history above and format them precisely into the requested JSON structure.`,
                 },
             ],
             response_format: { type: "json_object" },
@@ -280,7 +325,9 @@ export class PromptService {
     ): string {
         return results
             .map((res, i) =>
-                `--- DOCUMENT ${i + 1} (Score: ${res.score}) ---\n${(res.payload?.content || "No content").substring(0, MAX_RESULT_CHARS)}\n`
+                `--- DOCUMENT ${i + 1} (Score: ${res.score}) ---\n${
+                    (res.payload?.content || "No content").substring(0, MAX_RESULT_CHARS)
+                }\n`
             )
             .join("\n");
     }
@@ -308,7 +355,9 @@ export class PromptService {
             const err = error as types.vector.QdrantError;
             const errorData = err?.data?.status?.error || err?.message || String(error);
             this.logger.error(
-                `RAG search failed for collection "${collectionName}": ${JSON.stringify(errorData).substring(0, 300)}`,
+                `RAG search failed for collection "${collectionName}": ${
+                    JSON.stringify(errorData).substring(0, 300)
+                }`,
             );
             return [];
         }
@@ -318,7 +367,8 @@ export class PromptService {
         error: string,
         context: string,
     ): Promise<string> {
-        const prompt = `You are a Search Specialist. Given a technical error and the context of what the code was trying to do, generate a single, highly effective search query to find relevant documentation in a knowledge base.
+        const prompt =
+            `You are a Search Specialist. Given a technical error and the context of what the code was trying to do, generate a single, highly effective search query to find relevant documentation in a knowledge base.
 
 Focus on:
 - Core library names
@@ -339,7 +389,8 @@ Generate ONLY the search query string, no explanation.`;
                 messages: [{ role: "user", content: prompt }],
             });
 
-            return response.choices[0]?.message?.content?.trim() || `${error} ${context}`.substring(0, 500);
+            return response.choices[0]?.message?.content?.trim() ||
+                `${error} ${context}`.substring(0, 500);
         } catch (err) {
             this.logger.error(err, "Failed to refine search query");
             return `${error} ${context}`.substring(0, 500);
@@ -352,7 +403,8 @@ Generate ONLY the search query string, no explanation.`;
         relatedDocs: string,
         stepDescription: string,
     ): Promise<types.report.FailureAnalysis> {
-        const prompt = `You are a Documentation Quality Analyst. A code example that was written based on library documentation has CRASHED. Your job is to classify WHY it failed by comparing the error to the documentation.
+        const prompt =
+            `You are a Documentation Quality Analyst. A code example that was written based on library documentation has CRASHED. Your job is to classify WHY it failed by comparing the error to the documentation.
 
 ### THE ERROR
 ${errorMessage}

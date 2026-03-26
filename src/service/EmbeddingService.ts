@@ -8,7 +8,7 @@ export class EmbeddingService {
 
     constructor(
         private openai: OpenAI,
-        private configService: ConfigService
+        private configService: ConfigService,
     ) {
         // Hard-set to a model accommodating 8192 context window. Config model will be ignored.
         this.modelName = "text-embedding-3-small";

@@ -58,7 +58,7 @@ export class DockerExecutor {
     public async execute(
         lang: keyof typeof LANGUAGES | LanguageDefinition,
         code: string,
-        dependencies: string[] = []
+        dependencies: string[] = [],
     ): Promise<ExecutionResult> {
         const langDef = typeof lang === "string" ? LANGUAGES[lang] : lang;
         if (!langDef) throw new Error(`Language '${lang}' not supported.`);
@@ -99,7 +99,7 @@ export class DockerExecutor {
             const depsInstall = dependencies.length > 0
                 ? `npm install ${dependencies.join(" ")} > /dev/null 2>&1`
                 : "";
-                
+
             finalStdinContent = `
 mkdir -p /eval && cd /eval
 npm init -y > /dev/null 2>&1

@@ -43,9 +43,14 @@ export const UpdateProjectSchema = CreateProjectSchema.partial().openapi(
 
 export const CreateProjectFromUrlSchema = z
     .object({
-        projectName: z.string().min(3, "Name must be at least 3 characters").openapi({ example: "Docs Project" }),
+        projectName: z.string().min(3, "Name must be at least 3 characters").openapi({
+            example: "Docs Project",
+        }),
         url: z.string().url().openapi({ example: "https://docs.example.com" }),
-        maxPages: z.number().int().min(1).max(200).optional().default(50).openapi({ example: 50, description: "Maximum number of pages to crawl" }),
+        maxPages: z.number().int().min(1).max(200).optional().default(50).openapi({
+            example: 50,
+            description: "Maximum number of pages to crawl",
+        }),
     })
     .openapi("CreateProjectFromUrl");
 

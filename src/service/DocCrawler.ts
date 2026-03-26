@@ -48,10 +48,16 @@ export class DocCrawler {
         onProgress?.(`Starting crawl from: ${startUrl} (max: ${opts.maxPages} pages)`);
 
         while (queue.length > 0 && results.length < opts.maxPages) {
-            const batchSize = Math.min(opts.concurrency, opts.maxPages - results.length, queue.length);
+            const batchSize = Math.min(
+                opts.concurrency,
+                opts.maxPages - results.length,
+                queue.length,
+            );
             const batch = queue.splice(0, batchSize);
 
-            this.logger.log(`Crawl batch: ${batch.length} URLs, ${queue.length} remaining, ${results.length} done`);
+            this.logger.log(
+                `Crawl batch: ${batch.length} URLs, ${queue.length} remaining, ${results.length} done`,
+            );
 
             const fetchPromises = batch.map(async (url) => {
                 if (visited.has(url)) return null;
@@ -61,7 +67,9 @@ export class DocCrawler {
                     const page = await this.fetchPage(url, startOrigin, startPathPrefix, opts);
                     if (!page) return null;
 
-                    this.logger.log(`Crawled: ${url} (${page.markdown.length} chars, ${page.links.length} links)`);
+                    this.logger.log(
+                        `Crawled: ${url} (${page.markdown.length} chars, ${page.links.length} links)`,
+                    );
                     onProgress?.(`Crawled (${results.length + 1}/${opts.maxPages}): ${url}`);
 
                     for (const link of page.links) {
@@ -129,14 +137,22 @@ export class DocCrawler {
             if (!html || html.length < 100) return null;
 
             // Extract links from raw HTML before stripping
-            const links = this.extractLinksFromHtml(html, url, originFilter, pathPrefix, opts.sameDomainOnly);
+            const links = this.extractLinksFromHtml(
+                html,
+                url,
+                originFilter,
+                pathPrefix,
+                opts.sameDomainOnly,
+            );
 
             // Extract title
             const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
             const title = titleMatch ? titleMatch[1].trim() : this.urlToSlug(url);
 
             // Strip HTML to clean text, keeping some structure
-            const bodyMatch = html.match(/<(?:main|article|body)[^>]*>([\s\S]*?)<\/(?:main|article|body)>/i);
+            const bodyMatch = html.match(
+                /<(?:main|article|body)[^>]*>([\s\S]*?)<\/(?:main|article|body)>/i,
+            );
             const contentHtml = bodyMatch ? bodyMatch[1] : html;
 
             // Remove script, style tags entirely
@@ -145,8 +161,12 @@ export class DocCrawler {
                 .replace(/<style[\s\S]*?<\/style>/gi, "");
 
             // If we found a specific content tag (main/article), we are more aggressive with layout
-            if (bodyMatch && (bodyMatch[0].toLowerCase().startsWith("<main") || bodyMatch[0].toLowerCase().startsWith("<article"))) {
-                 cleaned = cleaned
+            if (
+                bodyMatch &&
+                (bodyMatch[0].toLowerCase().startsWith("<main") ||
+                    bodyMatch[0].toLowerCase().startsWith("<article"))
+            ) {
+                cleaned = cleaned
                     .replace(/<nav[\s\S]*?<\/nav>/gi, "")
                     .replace(/<footer[\s\S]*?<\/footer>/gi, "")
                     .replace(/<header[\s\S]*?<\/header>/gi, "");
@@ -207,8 +227,13 @@ export class DocCrawler {
         while ((match = linkRegex.exec(html)) !== null) {
             let href = match[1];
 
-            if (href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("javascript:") || href.startsWith("data:")) continue;
-            if (/\.(png|jpg|jpeg|gif|svg|ico|webp|mp4|pdf|zip|tar|gz|css|js)$/i.test(href)) continue;
+            if (
+                href.startsWith("#") || href.startsWith("mailto:") ||
+                href.startsWith("javascript:") || href.startsWith("data:")
+            ) continue;
+            if (/\.(png|jpg|jpeg|gif|svg|ico|webp|mp4|pdf|zip|tar|gz|css|js)$/i.test(href)) {
+                continue;
+            }
 
             try {
                 const resolved = new URL(href, currentUrl);
@@ -276,7 +301,6 @@ export class DocCrawler {
     }
 
     private delay(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 }
-

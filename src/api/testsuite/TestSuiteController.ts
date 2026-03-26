@@ -82,30 +82,34 @@ export class TestSuiteController {
 
     @Get(TestSuiteRoutes.StreamExecuteTestSuiteRoute)
     // @ts-expect-error - SSE Response Type mismatch
-    streamExecuteTestSuite: RouteHandler<typeof TestSuiteRoutes.StreamExecuteTestSuiteRoute> = async (c) => {
-        const { testSuiteId } = c.req.valid("param");
+    streamExecuteTestSuite: RouteHandler<typeof TestSuiteRoutes.StreamExecuteTestSuiteRoute> =
+        async (c) => {
+            const { testSuiteId } = c.req.valid("param");
 
-        return streamSSE(c, async (stream) => {
-            const onProgress = async (message: string) => {
-                await stream.writeSSE({ data: message });
-            };
+            return streamSSE(c, async (stream) => {
+                const onProgress = async (message: string) => {
+                    await stream.writeSSE({ data: message });
+                };
 
-            try {
-                const executionResult = await this.executor.executeTestSuite(
-                    testSuiteId as types.test.TestSuiteId,
-                    onProgress,
-                );
+                try {
+                    const executionResult = await this.executor.executeTestSuite(
+                        testSuiteId as types.test.TestSuiteId,
+                        onProgress,
+                    );
 
-                if (!executionResult) {
-                    await stream.writeSSE({ event: "error", data: "TestSuite or Project not found" });
-                } else {
-                    const apiReport = this.reportService.mapReportToApi(executionResult);
-                    await stream.writeSSE({ event: "done", data: JSON.stringify(apiReport) });
+                    if (!executionResult) {
+                        await stream.writeSSE({
+                            event: "error",
+                            data: "TestSuite or Project not found",
+                        });
+                    } else {
+                        const apiReport = this.reportService.mapReportToApi(executionResult);
+                        await stream.writeSSE({ event: "done", data: JSON.stringify(apiReport) });
+                    }
+                } catch (error) {
+                    const err = error as Error;
+                    await stream.writeSSE({ event: "error", data: err.message || "Unknown error" });
                 }
-            } catch (error) {
-                const err = error as Error;
-                await stream.writeSSE({ event: "error", data: err.message || "Unknown error" });
-            }
-        });
-    };
+            });
+        };
 }

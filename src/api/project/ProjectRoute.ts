@@ -1,7 +1,7 @@
 import { createRoute } from "@hono/zod-openapi";
 import {
-    CreateProjectSchema,
     CreateProjectFromUrlSchema,
+    CreateProjectSchema,
     DeleteProjectResponseSchema,
     PaginatedProjectsResponseSchema,
     ParamsSchema,
