@@ -8,6 +8,7 @@ import { PromptService } from "./PromptService.ts";
 import { TestSuiteRepository } from "./TestSuiteRepository.ts";
 import { DockerExecutor } from "./DockerExecutor.ts";
 import { ReportRepository } from "./ReportRepository.ts";
+import { RELATED_DOCS_LIMIT } from "./prompt/constants.ts";
 
 export class Executor {
     private dockerExecutor: DockerExecutor;
@@ -111,11 +112,13 @@ export class Executor {
                     ? JSON.stringify(execResult.error)
                     : String(execResult.error);
 
-                // Search using the actual error, not just the description
-                const errorQuery = `${stepReport.error} ${example.explanation}`.substring(0, 500);
+                const refinedQuery = await this.promptService.refineSearchQuery(
+                    stepReport.error || "Unknown error",
+                    example.explanation || example.title,
+                );
                 stepReport.relatedKnowledge = await this.findRelatedKnowledge(
                     testSuite.projectId,
-                    errorQuery,
+                    refinedQuery,
                 );
 
                 // LLM failure classification
@@ -201,11 +204,13 @@ export class Executor {
                     ? JSON.stringify(execResult.error)
                     : String(execResult.error);
 
-                // Search using the actual error, not just the description
-                const errorQuery = `${stepReport.error} ${call.stepExplanation}`.substring(0, 500);
+                const refinedQuery = await this.promptService.refineSearchQuery(
+                    stepReport.error || "Unknown error",
+                    call.stepExplanation,
+                );
                 stepReport.relatedKnowledge = await this.findRelatedKnowledge(
                     testSuite.projectId,
-                    errorQuery,
+                    refinedQuery,
                 );
 
                 // LLM failure classification
@@ -250,7 +255,7 @@ export class Executor {
                 this.embeddingService.embed(query),
                 this.embeddingService.sparseEmbed(query),
             ]);
-            return await vCollection.searchHybrid(dense[0], sparse, 3);
+            return await vCollection.searchHybrid(dense[0], sparse, RELATED_DOCS_LIMIT);
         } catch (err) {
             this.logger.error(err, "Failed to perform hybrid search for related knowledge");
             return [];

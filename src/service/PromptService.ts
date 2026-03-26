@@ -95,6 +95,7 @@ export class PromptService {
         );
 
         const verificationMessages = await this.runVerificationPhase(
+            vectorCollectionName,
             initialDocsContent,
             contextFound,
             userGoal,
@@ -165,6 +166,7 @@ export class PromptService {
     }
 
     private async runVerificationPhase(
+        vectorCollectionName: string,
         initialDocsContent: string,
         contextFound: string,
         userGoal: string,
@@ -181,8 +183,25 @@ export class PromptService {
 
         return runAgenticLoop(this.openai, this.logger, onProgress, {
             messages,
-            tools: [SMOKE_TEST_TOOL],
+            tools: [SMOKE_TEST_TOOL, SEARCH_TOOL],
             toolHandlers: {
+                search_knowledge_base: async (_id, rawArgs) => {
+                    const args = rawArgs as SearchToolArgs;
+                    emitLog(onProgress, `Agent RAG searching knowledge base (Verification phase) for: "${args.query}"`);
+                    const results = await this.performRAGSearch(
+                        vectorCollectionName,
+                        args.query,
+                        DEFAULT_SEARCH_LIMIT,
+                    );
+                    const truncated = results.map(r => ({
+                        ...r,
+                        payload: r.payload ? {
+                            ...r.payload,
+                            content: (r.payload.content || "").substring(0, MAX_RESULT_CHARS),
+                        } : r.payload,
+                    }));
+                    return JSON.stringify(truncated);
+                },
                 smoke_test_code: async (_id, rawArgs) => {
                     const args = rawArgs as SmokeTestToolArgs;
                     emitLog(onProgress, `Running Smoke Test... Env: ${args.environment}, Deps: [${args.dependencies.join(", ")}]`);
@@ -292,6 +311,38 @@ export class PromptService {
                 `RAG search failed for collection "${collectionName}": ${JSON.stringify(errorData).substring(0, 300)}`,
             );
             return [];
+        }
+    }
+
+    public async refineSearchQuery(
+        error: string,
+        context: string,
+    ): Promise<string> {
+        const prompt = `You are a Search Specialist. Given a technical error and the context of what the code was trying to do, generate a single, highly effective search query to find relevant documentation in a knowledge base.
+
+Focus on:
+- Core library names
+- Specific method or tool names (e.g. npm, playwright, hono)
+- The technical root cause
+
+### ERROR:
+${error}
+
+### CONTEXT:
+${context}
+
+Generate ONLY the search query string, no explanation.`;
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: MODEL_NAME,
+                messages: [{ role: "user", content: prompt }],
+            });
+
+            return response.choices[0]?.message?.content?.trim() || `${error} ${context}`.substring(0, 500);
+        } catch (err) {
+            this.logger.error(err, "Failed to refine search query");
+            return `${error} ${context}`.substring(0, 500);
         }
     }
 
