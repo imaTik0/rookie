@@ -23,6 +23,16 @@ export async function runAgenticLoop(
         logger.log(`${phaseLabel} Iteration ${iterations + 1}...`);
         emitLog(onProgress, `${phaseLabel} Iteration ${iterations + 1}...`);
 
+        // Estimate tokens before sending to catch context bloat early
+        const estimatedChars = messages.reduce((sum, m) => {
+            const content = typeof m.content === "string" ? m.content : "";
+            const toolCalls = (m as any).tool_calls ? JSON.stringify((m as any).tool_calls) : "";
+            return sum + content.length + toolCalls.length;
+        }, 0);
+        const estimatedTokens = Math.ceil(estimatedChars / 4);
+        logger.log(`${phaseLabel} estimated context: ~${estimatedTokens} tokens (${estimatedChars} chars, ${messages.length} messages)`);
+        emitLog(onProgress, `Context size: ~${estimatedTokens} tokens (${messages.length} messages)`);
+
         const response = await openai.chat.completions.create({
             model: MODEL_NAME,
             messages,

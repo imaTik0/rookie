@@ -211,14 +211,17 @@ export function createVerificationUserPrompt(
     contextFound: string,
     userGoal: string,
 ): string {
+    // Cap combined docs to prevent token overflow in verification phase
+    const MAX_DOCS_CHARS = 50_000;
+    let combinedDocs = `#### Initial Documentation:\n${initialDocsContent}\n\n#### Researched Documentation:\n${contextFound}`;
+    if (combinedDocs.length > MAX_DOCS_CHARS) {
+        combinedDocs = combinedDocs.substring(0, MAX_DOCS_CHARS) + "\n\n[... documentation truncated to fit token budget ...]";
+    }
+
     return `### DOCUMENTATION CONTEXT (Source of Truth)
 Use ONLY the information below to write your code. Do not guess or hallucinate function signatures.
 
-#### Initial Documentation:
-${initialDocsContent}
-
-#### Researched Documentation:
-${contextFound}
+${combinedDocs}
 
 ### USER GOAL (Your code MUST achieve this)
 ${userGoal}

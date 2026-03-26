@@ -3,9 +3,11 @@ import OpenAI from "@openai/openai";
 // ─── Model & Limits ─────────────────────────────────────────────────────────
 
 export const MODEL_NAME = "gpt-5-mini";
-export const MAX_RESEARCH_ITERATIONS = 8;
-export const MAX_VERIFICATION_ITERATIONS = 8;
-export const DEFAULT_SEARCH_LIMIT = 25;
+export const MAX_RESEARCH_ITERATIONS = 5;
+export const MAX_VERIFICATION_ITERATIONS = 5;
+export const DEFAULT_SEARCH_LIMIT = 10;
+export const MAX_RESULT_CHARS = 3000;
+export const MAX_CONTEXT_CHARS = 50_000;
 
 // ─── Tool Definitions ────────────────────────────────────────────────────────
 

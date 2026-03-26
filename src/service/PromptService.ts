@@ -9,6 +9,8 @@ import {
     DEFAULT_SEARCH_LIMIT,
     MAX_RESEARCH_ITERATIONS,
     MAX_VERIFICATION_ITERATIONS,
+    MAX_RESULT_CHARS,
+    MAX_CONTEXT_CHARS,
     SEARCH_TOOL,
     SMOKE_TEST_TOOL,
 } from "./prompt/constants.ts";
@@ -28,7 +30,6 @@ import {
 import * as templates from "./prompt/templates.ts";
 import { runAgenticLoop } from "./prompt/agenticLoop.ts";
 
-// Re-export public types so existing consumers don't break
 export type { StructuredResponse, CodeGenerationResponse, PromptOptions } from "./prompt/types.ts";
 
 export class PromptService {
@@ -38,8 +39,6 @@ export class PromptService {
         private embeddingService: EmbeddingService,
         private vectorCollectionFactory: VectorCollectionFactory,
     ) { }
-
-    // ─── Public: Legacy Test Scenario Generation ─────────────────────────────
 
     public async promptForApiUsageScenario(
         docs: string,
@@ -80,8 +79,6 @@ export class PromptService {
         }
     }
 
-    // ─── Public: Agentic RAG Pipeline (3 Phases) ────────────────────────────
-
     public async promptForCodeGenerationWithAgenticRAG(
         vectorCollectionName: string,
         userGoal: string,
@@ -91,14 +88,12 @@ export class PromptService {
         this.logger.log(`Starting Agentic RAG for goal: "${userGoal}"`);
         emitLog(onProgress, `Starting Agentic RAG for goal: "${userGoal}"`);
 
-        // Phase 1: Research
         const { initialDocsContent, contextFound } = await this.runResearchPhase(
             vectorCollectionName,
             userGoal,
             onProgress,
         );
 
-        // Phase 2: Verification
         const verificationMessages = await this.runVerificationPhase(
             initialDocsContent,
             contextFound,
@@ -107,11 +102,8 @@ export class PromptService {
             smokeTestCallback,
         );
 
-        // Phase 3: Generation
         return this.runGenerationPhase(verificationMessages, onProgress);
     }
-
-    // ─── Phase 1: Research ──────────────────────────────────────────────────
 
     private async runResearchPhase(
         vectorCollectionName: string,
@@ -142,7 +134,14 @@ export class PromptService {
                         args.query,
                         DEFAULT_SEARCH_LIMIT,
                     );
-                    return JSON.stringify(results);
+                    const truncated = results.map(r => ({
+                        ...r,
+                        payload: r.payload ? {
+                            ...r.payload,
+                            content: (r.payload.content || "").substring(0, MAX_RESULT_CHARS),
+                        } : r.payload,
+                    }));
+                    return JSON.stringify(truncated);
                 },
             },
             readySignal: "READY_FOR_GENERATION",
@@ -150,15 +149,20 @@ export class PromptService {
             phaseLabel: "Agentic RAG Research",
         });
 
-        const contextFound = finalMessages
-            .filter(m => m.role === "tool")
-            .map(m => m.content)
+        const agentSynthesis = finalMessages
+            .filter(m => m.role === "assistant" && typeof m.content === "string" && m.content)
+            .map(m => m.content as string)
             .join("\n\n");
+
+        const toolResults = finalMessages
+            .filter(m => m.role === "tool")
+            .map(m => typeof m.content === "string" ? m.content : "")
+            .join("\n\n");
+
+        const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(0, MAX_CONTEXT_CHARS);
 
         return { initialDocsContent, contextFound };
     }
-
-    // ─── Phase 2: Verification ──────────────────────────────────────────────
 
     private async runVerificationPhase(
         initialDocsContent: string,
@@ -204,8 +208,6 @@ export class PromptService {
         });
     }
 
-    // ─── Phase 3: Generation ────────────────────────────────────────────────
-
     private async runGenerationPhase(
         verificationMessages: OpenAI.Chat.ChatCompletionMessageParam[],
         onProgress: ProgressCallback,
@@ -213,7 +215,19 @@ export class PromptService {
         this.logger.log(`Agentic RAG Generation Phase...`);
         emitLog(onProgress, `Agentic RAG Finalizing Phase... Formatting verified code into final response.`);
 
-        const testedHistory = verificationMessages
+        const relevantMessages = verificationMessages.filter((m, i, arr) => {
+            if (m.role === "system" || (m.role === "user" && i <= 1)) return true;
+            if (m.role === "tool" && typeof m.content === "string" && m.content.startsWith("SUCCESS")) return true;
+            if (m.role === "assistant" && i + 1 < arr.length) {
+                for (let j = i + 1; j < Math.min(i + 5, arr.length); j++) {
+                    if (arr[j].role === "tool" && typeof arr[j].content === "string" && (arr[j].content as string).startsWith("SUCCESS")) return true;
+                }
+            }
+            if (m.role === "assistant" && typeof m.content === "string" && m.content.includes("VERIFICATION_COMPLETE")) return true;
+            return false;
+        });
+
+        const testedHistory = relevantMessages
             .map(m => `ROLE: ${m.role}\n${m.content || ((m as any).tool_calls ? JSON.stringify((m as any).tool_calls) : '')}`)
             .join("\n\n---\n");
 
@@ -242,14 +256,12 @@ export class PromptService {
         return JSON.parse(jsonString) as CodeGenerationResponse;
     }
 
-    // ─── Helpers ─────────────────────────────────────────────────────────────
-
     private formatSearchResults(
         results: types.vector.SearchResult<types.file.FileShard>[],
     ): string {
         return results
             .map((res, i) =>
-                `--- DOCUMENT ${i + 1} (Score: ${res.score}) ---\n${res.payload?.content || "No content"}\n`
+                `--- DOCUMENT ${i + 1} (Score: ${res.score}) ---\n${(res.payload?.content || "No content").substring(0, MAX_RESULT_CHARS)}\n`
             )
             .join("\n");
     }
@@ -282,8 +294,6 @@ export class PromptService {
             return [];
         }
     }
-
-    // ─── Failure Classification ──────────────────────────────────────────────
 
     public async classifyFailure(
         errorMessage: string,

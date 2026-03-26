@@ -139,13 +139,18 @@ export class DocCrawler {
             const bodyMatch = html.match(/<(?:main|article|body)[^>]*>([\s\S]*?)<\/(?:main|article|body)>/i);
             const contentHtml = bodyMatch ? bodyMatch[1] : html;
 
-            // Remove script, style, nav, footer, header tags entirely
-            const cleaned = contentHtml
+            // Remove script, style tags entirely
+            let cleaned = contentHtml
                 .replace(/<script[\s\S]*?<\/script>/gi, "")
-                .replace(/<style[\s\S]*?<\/style>/gi, "")
-                .replace(/<nav[\s\S]*?<\/nav>/gi, "")
-                .replace(/<footer[\s\S]*?<\/footer>/gi, "")
-                .replace(/<header[\s\S]*?<\/header>/gi, "");
+                .replace(/<style[\s\S]*?<\/style>/gi, "");
+
+            // If we found a specific content tag (main/article), we are more aggressive with layout
+            if (bodyMatch && (bodyMatch[0].toLowerCase().startsWith("<main") || bodyMatch[0].toLowerCase().startsWith("<article"))) {
+                 cleaned = cleaned
+                    .replace(/<nav[\s\S]*?<\/nav>/gi, "")
+                    .replace(/<footer[\s\S]*?<\/footer>/gi, "")
+                    .replace(/<header[\s\S]*?<\/header>/gi, "");
+            }
 
             // Convert headings to markdown-like format before stripping
             let text = cleaned
@@ -236,8 +241,14 @@ export class DocCrawler {
     private getPathPrefix(url: string): string {
         const parsed = new URL(url);
         const segments = parsed.pathname.split("/").filter(Boolean);
-        if (segments.length > 0) {
-            return "/" + segments[0];
+
+        // Only enforce a prefix if the URL ends with a slash or has multiple segments.
+        // This suggests the user intended to crawl a specific subdirectory.
+        if (url.endsWith("/") || segments.length > 1) {
+            // If it's something like /docs/getting-started, we take /docs
+            if (segments.length > 0) {
+                return "/" + segments[0];
+            }
         }
         return "";
     }
