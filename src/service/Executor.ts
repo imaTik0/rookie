@@ -24,8 +24,8 @@ export class Executor {
         private reportRepository: ReportRepository,
     ) {
         this.dockerExecutor = new DockerExecutor({
-            timeoutMs: 10000,
-            memoryLimit: "256m",
+            timeoutMs: 60000,
+            memoryLimit: "2048m",
             networkAccess: true,
             networkName: "rookie-network",
         });
@@ -61,9 +61,9 @@ export class Executor {
         );
 
         if (testSuite.mode === "CODE_GENERATION") {
-            return await this.executeCodeGeneration(testSuite, validFiles, startTime, onProgress);
+            return await this.executeCodeGeneration(testSuite as unknown as types.test.TestSuite, validFiles, startTime, onProgress);
         } else {
-            return await this.executeTestScenario(testSuite, validFiles, startTime, onProgress);
+            return await this.executeTestScenario(testSuite as unknown as types.test.TestSuite, validFiles, startTime, onProgress);
         }
     }
 
@@ -76,17 +76,18 @@ export class Executor {
         onProgress?.(
             JSON.stringify({ type: "log", content: "Starting Agentic RAG for CODE_GENERATION..." }),
         );
-        const codeGenResponse = await this.promptService.promptForCodeGenerationWithAgenticRAG(
+        const { response: codeGenResponse, history: conversationHistory } = await this.promptService.promptForCodeGenerationWithAgenticRAG(
             testSuite.projectId,
             testSuite.userGoal || "No goal specified",
             onProgress,
-            async (code, env, deps) => {
+            async (code, env, deps, bash_setup, command) => {
                 const execResult = await this.runStepInDocker(
                     code,
                     JSON.parse(testSuite.initialContext),
                     env,
                     deps,
-                    undefined, // bash_setup not used in initial RAG prompt yet
+                    bash_setup,
+                    command,
                 );
 
                 if (execResult.success) {
@@ -132,6 +133,9 @@ export class Executor {
                 logs: execResult.logs,
                 contextAfter: execResult.result?.ctx || null,
                 bashSetup: example.bash_setup,
+                environment: example.environment || "node",
+                dependencies: example.dependencies || [],
+                command: example.command || "node run.js",
             };
 
             if (!execResult.success) {
@@ -151,8 +155,13 @@ export class Executor {
 
                 // LLM failure classification
                 const relatedDocsText = (stepReport.relatedKnowledge || [])
-                    .map((k: any) => k.payload?.content || JSON.stringify(k))
-                    .join("\n---\n");
+                    .map((k: any) => {
+                        const payload = k.payload || {};
+                        const fileName = payload.metadata?.fileName || "unknown_file";
+                        const line = payload.metadata?.lineNumber ? ` [Line: ${payload.metadata.lineNumber}]` : "";
+                        return `--- DOCUMENT: ${fileName}${line} ---\n${payload.content || JSON.stringify(k)}`;
+                    })
+                    .join("\n\n");
                 stepReport.failureAnalysis = await this.promptService.classifyFailure(
                     stepReport.error,
                     example.fullProgram,
@@ -178,11 +187,13 @@ export class Executor {
             initialContext: testSuite.initialContext,
             executionPlan: codeGenResponse,
             steps: stepsResults,
+            conversationHistory: conversationHistory,
             durationMs: Date.now() - startTime,
             detailedResults: {
                 executionPlan: codeGenResponse,
                 initialContext: testSuite.initialContext,
                 steps: stepsResults,
+                conversationHistory: conversationHistory,
                 durationMs: Date.now() - startTime,
                 finalOutput: codeGenResponse.finalMarkdownSummary,
             },
@@ -240,6 +251,8 @@ export class Executor {
                 status: execResult.success ? "SUCCESS" : "FAILED",
                 logs: execResult.logs,
                 contextAfter: execResult.result?.ctx || null,
+                environment: "node",
+                command: "node run.js",
             };
 
             if (execResult.success && execResult.result) {
@@ -261,8 +274,13 @@ export class Executor {
 
                 // LLM failure classification
                 const relatedDocsText = (stepReport.relatedKnowledge || [])
-                    .map((k: any) => k.payload?.content || JSON.stringify(k))
-                    .join("\n---\n");
+                    .map((k: any) => {
+                        const payload = k.payload || {};
+                        const fileName = payload.metadata?.fileName || "unknown_file";
+                        const line = payload.metadata?.lineNumber ? ` [Line: ${payload.metadata.lineNumber}]` : "";
+                        return `--- DOCUMENT: ${fileName}${line} ---\n${payload.content || JSON.stringify(k)}`;
+                    })
+                    .join("\n\n");
                 stepReport.failureAnalysis = await this.promptService.classifyFailure(
                     stepReport.error,
                     call.fetch,
@@ -330,6 +348,7 @@ export class Executor {
         environment: "node" | "browser" = "node",
         dependencies: string[] = [],
         bashSetup?: string,
+        commandOverride?: string,
     ): Promise<{
         success: boolean;
         result?: { ctx: unknown; result: unknown };
@@ -372,7 +391,15 @@ export class Executor {
         `;
 
         try {
-            const execResult = await this.dockerExecutor.execute(environment, script, dependencies, bashSetup);
+            const timeoutMs = environment === "browser" ? 180000 : 60000;
+            const execResult = await this.dockerExecutor.execute(
+                environment,
+                script,
+                dependencies,
+                bashSetup,
+                commandOverride,
+                timeoutMs,
+            );
             const fullLogs = `STDOUT:\n${execResult.stdout}\n\nSTDERR:\n${execResult.stderr}`;
 
             if (execResult.exitCode !== 0) {

@@ -134,12 +134,12 @@ For EACH sub-task above, check the initial context:
 **STEP 3 - TARGETED RESEARCH:**
 For every sub-task marked "NEEDS RESEARCH", call the 'search_knowledge_base' tool with a precise, targeted query. Read the results. If the results don't contain the specific function signatures, parameters, or usage patterns you need, search AGAIN with a different query. Do not stop until every sub-task is "COVERED".
 
-**STEP 4 - DEPENDENCY DISCOVERY:**
+**STEP 4 - DEPENDENCY & PACKAGE VERIFICATION:**
 Once all sub-tasks are covered, explicitly list:
-  - The npm package name(s) required
-  - The exact import statements you would use
-  - Any configuration or setup steps (e.g. bash commands to create/move files)
-If any of this information is missing from what you've gathered, search again.
+  - The exact npm package name(s) required. If a package seems to be missing from the registry or you are unsure of the naming (e.g. @company/lib), SEARCH for the specific package name in the docs.
+  - The exact import statements.
+  - Any configuration or setup steps.
+If you find that a required library is NOT available or documented, flag this as a critical gap.
 
 ### TOOLS
 You have access to the 'search_knowledge_base' tool.
@@ -186,21 +186,27 @@ You MUST produce working code examples that directly fulfill the user's stated g
    - What library functions you will call (cite from the documentation context)
    - What you expect to happen when the code runs
 
-2. **Write and Test:** Call the 'smoke_test_code' tool with your code. You can use the optional 'bash_setup' parameter to run shell commands (like 'cp', 'mv', 'mkdir') before the JS code executes. Read the full stdout/stderr output.
+2. **Prepare Environment:** If the library requires specific files, configuration, or frontend setup, use the 'bash_setup' parameter to run shell commands (like 'mkdir', 'cp', 'npm install' for extra tools). 
 
-3. **Debug Relentlessly:** If the test fails:
-   - Quote the exact error from the logs
-   - Explain what went wrong
-   - Fix the code and re-test
+3. **Choose Environment Wisely:**
+   - Use 'node' for pure logic/API tests (faster).
+   - Use 'browser' ONLY for Playwright UI automation. Note: Browser environment has 2GB RAM allocated.
+
+4. **Write and Test:** Call the 'smoke_test_code' tool. You can use 'command' (e.g. 'npx playwright test') if you need to run something other than 'node run.js'.
+
+5. **Debug Relentlessly:** If the test fails:
+   - Quote the exact error from the logs.
+   - **DOCUMENTATION GAP ANALYSIS:** Identify which specific part of the documentation is missing, ambiguous, or incorrect to solve this error. State it clearly: "MISSING DOCS: [feature name]" or "INCORRECT SIGNATURE: [method name]".
+   - Explain what went wrong.
+   - Fix the code and re-test.
    - Do NOT give up. Iterate until it works or you've exhausted all approaches from the documentation.
-
-4. **Cover the Goal Fully:** Write 3-5 examples that together demonstrate the user's goal comprehensively. Each example should test a different aspect or use case.
 
 ### RULES
 - You MUST NOT mock or simulate the library. Use real imports and real calls.
 - You MUST use ES module syntax (import/export). The environment has "type": "module" set.
 - Every example must be a standalone program that can run independently.
-- **CRITICAL: NO TRY/CATCH.** Your programs MUST be happy paths. Do NOT wrap code in try/catch blocks. Do NOT catch or suppress errors. If the library does not behave as documented, the program MUST crash with an unhandled error. The crash IS the signal that the documentation is ambiguous or lacking. A swallowed error is a hidden bug in the docs.
+- **CRITICAL: NO HALLUCINATIONS.** Do not invent functions. If documentation is missing something, search for it or let it fail.
+- **CRITICAL: NO TRY/CATCH.** Your programs MUST be happy paths. Do NOT wrap code in try/catch blocks. The crash IS the signal that something is wrong.
 
 ### COMPLETION
 Once you have 3-5 working, tested examples that collectively achieve the user's full goal, reply with EXACTLY: "VERIFICATION_COMPLETE"
@@ -272,9 +278,10 @@ Structure:
         {
             "title": "Example Title",
             "explanation": "What this example does",
-            "environment": "node", // Or "browser" if UI automation (e.g., Playwright) is strictly required
-            "dependencies": ["axios", "zod"], // Array of npm packages required. Do NOT hallucinate built-in modules.
-            "bash_setup": "mkdir -p data && cp config_template.json data/config.json", // Optional bash script to run before the JS code (for setup like creating/moving files)
+            "environment": "node", // Or "browser" if Playwright UI automation is required
+            "dependencies": ["zod"], // Array of npm packages required.
+            "bash_setup": "mkdir -p data && cp config_template.json data/config.json", // Optional bash script to run before the JS code
+            "command": "node run.js", // Optional custom command (e.g. 'npx playwright test')
             "fullProgram": "The complete JS code starting with exports/imports"
         }
     ],

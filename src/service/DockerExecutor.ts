@@ -60,7 +60,10 @@ export class DockerExecutor {
         code: string,
         dependencies: string[] = [],
         setup?: string,
+        commandOverride?: string,
+        timeoutOverride?: number,
     ): Promise<ExecutionResult> {
+        const timeoutMs = timeoutOverride || this.config.timeoutMs;
         const langDef = typeof lang === "string" ? LANGUAGES[lang] : lang;
         if (!langDef) throw new Error(`Language '${lang}' not supported.`);
 
@@ -69,15 +72,17 @@ export class DockerExecutor {
             ? `--network=${this.config.networkName}`
             : (this.config.networkAccess ? "" : "--network=none");
 
-        // Playwright typically requires higher memory IPC limits
+        // Increase resources for browser-based testing
+        const memoryArg = lang === "browser" ? "--memory=2g" : `--memory=${this.config.memoryLimit}`;
+        const cpuArg = lang === "browser" ? "--cpus=1.0" : `--cpus=${this.config.cpuLimit}`;
         const capAddArg = lang === "browser" ? "--ipc=host" : "";
 
         const args = [
             "run",
             "-i",
             "--rm",
-            `--memory=${this.config.memoryLimit}`,
-            `--cpus=${this.config.cpuLimit}`,
+            memoryArg,
+            cpuArg,
             networkArg,
             capAddArg,
             langDef.image,
@@ -98,19 +103,25 @@ export class DockerExecutor {
         let finalStdinContent = code;
         if (lang === "node" || lang === "browser") {
             const depsInstall = dependencies.length > 0
-                ? `npm install ${dependencies.join(" ")} > /dev/null 2>&1`
+                ? `npm install ${dependencies.join(" ")}`
+                : "";
+
+            const executionCommand = commandOverride || "node run.js";
+            const codeBlock = code.trim()
+                ? `cat << 'ENDEVALCODE' > run.js
+${code}
+ENDEVALCODE`
                 : "";
 
             finalStdinContent = `
+set -e
 mkdir -p /eval && cd /eval
 npm init -y > /dev/null 2>&1
 npm pkg set type="module"
 ${depsInstall}
 ${setup || ""}
-cat << 'ENDEVALCODE' > run.js
-${code}
-ENDEVALCODE
-node run.js
+${codeBlock}
+${executionCommand}
 `;
         }
 

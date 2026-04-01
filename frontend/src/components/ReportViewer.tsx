@@ -93,6 +93,7 @@ const CodeBlock = ({ code, language = "javascript" }: { code: string; language?:
 );
 
 const RelatedKnowledgeItem = ({ item }: { item: any }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
     const payload = item.payload || item;
     const content = payload.content;
     const metadata = payload.metadata || {};
@@ -109,21 +110,34 @@ const RelatedKnowledgeItem = ({ item }: { item: any }) => {
     }
 
     return (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-md mb-4">
-            <div className="bg-gray-100/50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                    <FileText size={16} className="text-orange-500" />
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm mb-4 transition-all">
+            <div
+                className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center cursor-pointer hover:bg-gray-100 transition-colors"
+                onClick={() => setIsExpanded(!isExpanded)}
+            >
+                <div className="flex items-center gap-3">
+                    <FileText size={16} className={`${isExpanded ? "text-orange-500" : "text-gray-400"}`} />
                     <span className="text-sm font-semibold text-gray-800">
                         {metadata.fileName || "Knowledge Base Match"}
                     </span>
+                    {metadata.lineNumber && (
+                        <span className="text-[10px] text-gray-400 font-mono">
+                            Line: {metadata.lineNumber}
+                        </span>
+                    )}
                 </div>
-                <span className="text-xs text-gray-500 font-mono bg-gray-50 px-2 py-1 rounded">
-                    Score: {typeof score === "number" ? score.toFixed(4) : "N/A"}
-                </span>
+                <div className="flex items-center gap-4">
+                    <span className="text-[10px] text-gray-400 font-mono bg-white px-2 py-0.5 rounded border border-gray-200">
+                        Score: {typeof score === "number" ? score.toFixed(4) : "N/A"}
+                    </span>
+                    {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                </div>
             </div>
-            <div className="p-5 bg-gray-50">
-                <MarkdownRenderer content={content} />
-            </div>
+            {isExpanded && (
+                <div className="p-5 bg-white border-t border-gray-100 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <MarkdownRenderer content={content} />
+                </div>
+            )}
         </div>
     );
 };
@@ -256,17 +270,45 @@ const StepDetail = ({ step }: { step: any }) => {
                                         {step.failureAnalysis.reasoning}
                                     </p>
                                 </div>
+                                {step.failureAnalysis.pinpointedFragment && (
+                                    <div className="bg-rose-50 border border-rose-200 rounded-xl p-4">
+                                        <p className="text-xs text-rose-600 uppercase tracking-wider mb-2 font-bold">
+                                            Pinpointed Documentation Fragment (Problematic)
+                                        </p>
+                                        <div className="bg-white border border-rose-100 rounded-lg p-3 shadow-inner">
+                                            <pre className="text-xs text-gray-700 font-mono whitespace-pre-wrap italic">
+                                                "{step.failureAnalysis.pinpointedFragment}"
+                                            </pre>
+                                        </div>
+                                    </div>
+                                )}
                                 <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
                                     <p className="text-xs text-orange-600 uppercase tracking-wider mb-2">
                                         Suggested Documentation Fix
                                     </p>
-                                    <p className="text-sm text-gray-800 leading-relaxed">
+                                    <p className="text-sm text-gray-800 leading-relaxed mb-4">
                                         {step.failureAnalysis.suggestedDocsFix}
                                     </p>
+                                    {step.failureAnalysis.proposedFragment && (
+                                        <div className="mt-4">
+                                            <p className="text-[10px] text-orange-500 uppercase tracking-widest mb-2 font-bold">
+                                                Proposed Documentation Update
+                                            </p>
+                                            <div className="bg-white border border-orange-100 rounded-lg overflow-hidden shadow-sm">
+                                                <div className="bg-emerald-50 px-3 py-1.5 border-b border-emerald-100 flex items-center gap-2">
+                                                    <CheckCircle size={12} className="text-emerald-500" />
+                                                    <span className="text-[10px] text-emerald-600 font-bold uppercase">Corrected version</span>
+                                                </div>
+                                                <div className="p-3">
+                                                    <MarkdownRenderer content={step.failureAnalysis.proposedFragment} />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
                                     <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">
-                                        Error Message
+                                        Full Error Message
                                     </p>
                                     <pre className="text-xs text-rose-600 font-mono whitespace-pre-wrap">{step.failureAnalysis.errorMessage}</pre>
                                 </div>

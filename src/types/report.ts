@@ -12,6 +12,8 @@ export interface FailureAnalysis {
     documentationGap: DocumentationGap;
     reasoning: string;
     suggestedDocsFix: string;
+    pinpointedFragment?: string;
+    proposedFragment?: string;
 }
 
 export interface StepResult {
@@ -25,6 +27,9 @@ export interface StepResult {
     relatedKnowledge?: unknown[];
     failureAnalysis?: FailureAnalysis;
     bashSetup?: string;
+    environment?: string;
+    dependencies?: string[];
+    command?: string;
 }
 
 export interface Report {
@@ -35,6 +40,7 @@ export interface Report {
     initialContext: string;
     executionPlan: unknown;
     steps: StepResult[];
+    conversationHistory?: any[];
     createdAt: Date;
     durationMs?: number;
 }

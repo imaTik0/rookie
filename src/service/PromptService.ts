@@ -9,6 +9,7 @@ import {
     MAX_CONTEXT_CHARS,
     MAX_RESEARCH_ITERATIONS,
     MAX_RESULT_CHARS,
+    MAX_SCENARIO_DOCS_CHARS,
     MAX_VERIFICATION_ITERATIONS,
     MODEL_NAME,
     SEARCH_TOOL,
@@ -42,10 +43,15 @@ export class PromptService {
         options: PromptOptions = {},
         onProgress?: ProgressCallback,
     ): Promise<StructuredResponse> {
+        const query = `${options.userPreferences || ""} ${startingContext}`.substring(0, 2000);
+        
+        const smartDocs = await this.rankAndFilterDocs(docs, query, MAX_SCENARIO_DOCS_CHARS);
+        const smartCtx = await this.rankAndFilterDocs(startingContext, query, MAX_CONTEXT_CHARS);
+
         const systemPrompt = templates.createSystemPrompt(options.mandatoryImports);
         const userPrompt = templates.createUserPrompt(
-            docs,
-            startingContext,
+            smartDocs,
+            smartCtx,
             options.minimalLength || 10,
             options.maximalLength || 20,
             options.userPreferences,
@@ -80,11 +86,11 @@ export class PromptService {
         userGoal: string,
         onProgress?: ProgressCallback,
         smokeTestCallback?: SmokeTestCallback,
-    ): Promise<CodeGenerationResponse> {
+    ): Promise<{ response: CodeGenerationResponse; history: any[] }> {
         this.logger.log(`Starting Agentic RAG for goal: "${userGoal}"`);
         emitLog(onProgress, `Starting Agentic RAG for goal: "${userGoal}"`);
 
-        const { initialDocsContent, contextFound } = await this.runResearchPhase(
+        const { initialDocsContent, contextFound, messages: researchMessages } = await this.runResearchPhase(
             vectorCollectionName,
             userGoal,
             onProgress,
@@ -99,14 +105,46 @@ export class PromptService {
             smokeTestCallback,
         );
 
-        return this.runGenerationPhase(verificationMessages, onProgress);
+        const response = await this.runGenerationPhase(verificationMessages, onProgress);
+        const fullHistory = [...researchMessages, ...verificationMessages];
+
+        return {
+            response,
+            history: this.cleanHistoryForReport(fullHistory),
+        };
+    }
+
+    private cleanHistoryForReport(messages: OpenAI.Chat.ChatCompletionMessageParam[]): any[] {
+        return messages.map((m) => {
+            const cleanMessage = { ...m };
+            if (cleanMessage.role === "assistant" && typeof cleanMessage.content === "string") {
+                // Remove code blocks from assistant content to save space, as they are parsed separately
+                cleanMessage.content = cleanMessage.content.replace(/```[\s\S]*?```/g, "[Generated Code Block]");
+            }
+            if ((cleanMessage as any).tool_calls) {
+                // Also clean tool calls if they contain large code strings
+                (cleanMessage as any).tool_calls = (cleanMessage as any).tool_calls.map((tc: any) => {
+                    if (tc.function?.name === "smoke_test_code" && tc.function?.arguments) {
+                        try {
+                            const args = JSON.parse(tc.function.arguments);
+                            if (args.code) args.code = "[Code Snippet Truncated]";
+                            return { ...tc, function: { ...tc.function, arguments: JSON.stringify(args) } };
+                        } catch {
+                            return tc;
+                        }
+                    }
+                    return tc;
+                });
+            }
+            return cleanMessage;
+        });
     }
 
     private async runResearchPhase(
         vectorCollectionName: string,
         userGoal: string,
         onProgress: ProgressCallback,
-    ): Promise<{ initialDocsContent: string; contextFound: string }> {
+    ): Promise<{ initialDocsContent: string; contextFound: string; messages: OpenAI.Chat.ChatCompletionMessageParam[] }> {
         const initialSearchResults = await this.performRAGSearch(
             vectorCollectionName,
             userGoal,
@@ -166,7 +204,7 @@ export class PromptService {
             MAX_CONTEXT_CHARS,
         );
 
-        return { initialDocsContent, contextFound };
+        return { initialDocsContent, contextFound, messages: finalMessages };
     }
 
     private async runVerificationPhase(
@@ -177,6 +215,13 @@ export class PromptService {
         onProgress: ProgressCallback,
         smokeTestCallback?: SmokeTestCallback,
     ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
+        // Smartly prune documentation before verification to stay within token budget
+        const query = userGoal.substring(0, 2000);
+        const MAX_DOCS_CHARS = 50_000;
+        
+        const combinedRaw = `#### Initial Documentation:\n${initialDocsContent}\n\n#### Researched Documentation:\n${contextFound}`;
+        const smartDocs = await this.rankAndFilterDocs(combinedRaw, query, MAX_DOCS_CHARS);
+
         this.logger.log(`Agentic RAG Verification Phase (Smoke Testing)...`);
         emitLog(onProgress, `Agentic RAG Verification Phase... Smoke testing examples in Docker.`);
 
@@ -185,8 +230,8 @@ export class PromptService {
             {
                 role: "user",
                 content: templates.createVerificationUserPrompt(
-                    initialDocsContent,
-                    contextFound,
+                    "", // Doc fragments now in contextFound string passed as smartDocs
+                    smartDocs,
                     userGoal,
                 ),
             },
@@ -235,6 +280,7 @@ export class PromptService {
                                 args.environment,
                                 args.dependencies,
                                 args.bash_setup,
+                                args.command,
                             );
                         } catch (e) {
                             testResult = `FATAL RUNTIME ERROR: ${
@@ -265,24 +311,25 @@ export class PromptService {
             `Agentic RAG Finalizing Phase... Formatting verified code into final response.`,
         );
 
+        // Preserve a larger window of context to avoid hallucinations
+        const verificationCompleteIdx = verificationMessages.findLastIndex(m => 
+            typeof m.content === "string" && m.content.includes("VERIFICATION_COMPLETE")
+        );
+        
+        const lastFewMessagesStart = Math.max(0, verificationCompleteIdx - 10);
+        
         const relevantMessages = verificationMessages.filter((m, i, arr) => {
             if (m.role === "system" || (m.role === "user" && i <= 1)) return true;
+            
+            // Keep the last 10 messages of the verification phase for context
+            if (i >= lastFewMessagesStart) return true;
+
+            // Also keep any successful tool results leading up to it
             if (
                 m.role === "tool" && typeof m.content === "string" &&
                 m.content.startsWith("SUCCESS")
             ) return true;
-            if (m.role === "assistant" && i + 1 < arr.length) {
-                for (let j = i + 1; j < Math.min(i + 5, arr.length); j++) {
-                    if (
-                        arr[j].role === "tool" && typeof arr[j].content === "string" &&
-                        (arr[j].content as string).startsWith("SUCCESS")
-                    ) return true;
-                }
-            }
-            if (
-                m.role === "assistant" && typeof m.content === "string" &&
-                m.content.includes("VERIFICATION_COMPLETE")
-            ) return true;
+            
             return false;
         });
 
@@ -420,11 +467,13 @@ ${relatedDocs || "No related documentation was found."}
 ${stepDescription}
 
 ### YOUR TASK
-Analyze the error and the documentation. Determine:
+Determine:
 1. Which function/method call caused the crash
 2. Whether the documentation is MISSING (no docs exist for this function), AMBIGUOUS (docs exist but are unclear/confusing), INCORRECT (docs say one thing but the library does another), CONFIG (library needs undocumented configuration/setup), or UNKNOWN (cannot determine)
 3. Your reasoning
 4. A concrete suggestion for how the documentation should be fixed
+5. **PINPOINTED FRAGMENT**: Quote the EXACT fragment from the provided documentation that is wrong or missing information. **CRITICAL**: Include the filename at the beginning of the fragment (e.g., "[api.md]: the problematic line...").
+6. **PROPOSED FRAGMENT**: Provide a corrected or improved version of that documentation fragment.
 
 Respond with a JSON object:
 {
@@ -432,7 +481,9 @@ Respond with a JSON object:
     "failedFunction": "the function/method that crashed",
     "documentationGap": "MISSING" | "AMBIGUOUS" | "INCORRECT" | "CONFIG" | "UNKNOWN",
     "reasoning": "why you classified it this way",
-    "suggestedDocsFix": "concrete suggestion for documentation improvement"
+    "suggestedDocsFix": "concrete suggestion for documentation improvement",
+    "pinpointedFragment": "exact quote from the docs",
+    "proposedFragment": "how the documentation should look like"
 }`;
 
         try {
@@ -456,5 +507,71 @@ Respond with a JSON object:
                 suggestedDocsFix: "Manual review required",
             };
         }
+    }
+
+    private async rankAndFilterDocs(
+        content: string,
+        query: string,
+        maxChars: number,
+    ): Promise<string> {
+        if (content.length <= maxChars) return content;
+
+        // Split by document markers or double newlines
+        const chunks = content.split(/--- DOCUMENT \d+ ---/).filter((c) => c.trim().length > 0);
+        if (chunks.length <= 1) {
+            // If no markers, fallback to double newlines
+            const fallbackChunks = content.split("\n\n").filter((c) => c.trim().length > 0);
+            if (fallbackChunks.length > 1) return this.rankAndFilterDocsByChunks(fallbackChunks, query, maxChars);
+            return content.substring(0, maxChars);
+        }
+
+        return this.rankAndFilterDocsByChunks(chunks, query, maxChars);
+    }
+
+    private async rankAndFilterDocsByChunks(
+        chunks: string[],
+        query: string,
+        maxChars: number,
+    ): Promise<string> {
+        try {
+            const queryVector = (await this.embeddingService.embed(query))[0];
+            const chunkVectors = await Promise.all(
+                chunks.map(async (c) => ({
+                    content: c,
+                    vector: (await this.embeddingService.embed(c.substring(0, 3000)))[0],
+                })),
+            );
+
+            const scoredChunks = chunkVectors.map((cv) => ({
+                content: cv.content,
+                score: this.cosineSimilarity(queryVector, cv.vector as number[]),
+            }));
+
+            scoredChunks.sort((a, b) => b.score - a.score);
+
+            let result = "";
+            for (const sc of scoredChunks) {
+                if ((result.length + sc.content.length) > maxChars) continue;
+                result += (result ? "\n\n" : "") + sc.content;
+            }
+
+            return result || chunks[0].substring(0, maxChars);
+        } catch (error) {
+            this.logger.error(error, "Error in smart truncation");
+            return chunks.join("\n\n").substring(0, maxChars);
+        }
+    }
+
+    private cosineSimilarity(vecA: number[], vecB: number[]): number {
+        let dotProduct = 0;
+        let normA = 0;
+        let normB = 0;
+        for (let i = 0; i < vecA.length; i++) {
+            dotProduct += vecA[i] * vecB[i];
+            normA += vecA[i] * vecA[i];
+            normB += vecB[i] * vecB[i];
+        }
+        if (normA === 0 || normB === 0) return 0;
+        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 }
