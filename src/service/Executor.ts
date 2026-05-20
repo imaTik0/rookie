@@ -80,14 +80,10 @@ export class Executor {
             testSuite.projectId,
             testSuite.userGoal || "No goal specified",
             onProgress,
-            async (code, env, deps, bash_setup, command) => {
+            async (code) => {
                 const execResult = await this.runStepInDocker(
                     code,
-                    JSON.parse(testSuite.initialContext),
-                    env,
-                    deps,
-                    bash_setup,
-                    command,
+                    JSON.parse(testSuite.initialContext)
                 );
 
                 if (execResult.success) {
@@ -119,10 +115,7 @@ export class Executor {
             );
             const execResult = await this.runStepInDocker(
                 example.fullProgram,
-                JSON.parse(testSuite.initialContext),
-                example.environment || "node",
-                example.dependencies || [],
-                example.bash_setup,
+                JSON.parse(testSuite.initialContext)
             );
 
             const stepReport: types.report.StepResult = {
@@ -132,10 +125,6 @@ export class Executor {
                 status: execResult.success ? "SUCCESS" : "FAILED",
                 logs: execResult.logs,
                 contextAfter: execResult.result?.ctx || null,
-                bashSetup: example.bash_setup,
-                environment: example.environment || "node",
-                dependencies: example.dependencies || [],
-                command: example.command || "node run.js",
             };
 
             if (!execResult.success) {
@@ -251,8 +240,6 @@ export class Executor {
                 status: execResult.success ? "SUCCESS" : "FAILED",
                 logs: execResult.logs,
                 contextAfter: execResult.result?.ctx || null,
-                environment: "node",
-                command: "node run.js",
             };
 
             if (execResult.success && execResult.result) {
@@ -345,10 +332,6 @@ export class Executor {
     private async runStepInDocker(
         userCode: string,
         currentCtx: unknown,
-        environment: "node" | "browser" = "node",
-        dependencies: string[] = [],
-        bashSetup?: string,
-        commandOverride?: string,
     ): Promise<{
         success: boolean;
         result?: { ctx: unknown; result: unknown };
@@ -356,49 +339,44 @@ export class Executor {
         logs: string;
     }> {
         const cleanedUserCode = userCode.replace("export default", "const runStep =");
-
         const script = `
-            const ctx = ${JSON.stringify(currentCtx)};
+                const ctx = ${JSON.stringify(currentCtx)};
 
-            ${cleanedUserCode}
+                ${cleanedUserCode}
 
-            (async () => {
-                try {
-                    const runFunc = typeof runStep === 'function' ? runStep : (ctx) => { /* no-op if no default export */ };
-                    const output = await runFunc(ctx);
-                    console.log("___RESULT_START___");
-                    console.log(JSON.stringify(output || { result: null, ctx }));
-                    console.log("___RESULT_END___");
-                } catch (e) {
-                    let serializableError = {};
-                    if (e instanceof Error) {
-                        serializableError = {
-                            message: e.message,
-                            name: e.name,
-                            stack: e.stack,
-                            cause: e.cause
-                        };
-                        Object.assign(serializableError, e);
-                    } else if (typeof e === 'object' && e !== null) {
-                        serializableError = e;
-                    } else {
-                        serializableError = { message: String(e) };
+                ; (async () => {
+                    try {
+                        const runFunc = typeof runStep === 'function' ? runStep : (ctx) => { /* no-op if no default export */ };
+                        const output = await runFunc(ctx);
+                        console.log("___RESULT_START___");
+                        console.log(JSON.stringify(output || { result: null, ctx }));
+                        console.log("___RESULT_END___");
+                    } catch (e) {
+                        let serializableError = {};
+                        if (e instanceof Error) {
+                            serializableError = {
+                                message: e.message,
+                                name: e.name,
+                                stack: e.stack,
+                                cause: e.cause
+                            };
+                            Object.assign(serializableError, e);
+                        } else if (typeof e === 'object' && e !== null) {
+                            serializableError = e;
+                        } else {
+                            serializableError = { message: String(e) };
+                        }
+                        console.error(JSON.stringify(serializableError));
+                        process.exit(1);
                     }
-                    console.error(JSON.stringify(serializableError));
-                    process.exit(1);
-                }
-            })();
-        `;
+                })();
+            `;
 
         try {
-            const timeoutMs = environment === "browser" ? 180000 : 60000;
             const execResult = await this.dockerExecutor.execute(
-                environment,
+                "node",
                 script,
-                dependencies,
-                bashSetup,
-                commandOverride,
-                timeoutMs,
+                60000,
             );
             const fullLogs = `STDOUT:\n${execResult.stdout}\n\nSTDERR:\n${execResult.stderr}`;
 

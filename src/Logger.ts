@@ -24,21 +24,21 @@ export class Logger {
 
     log(...args: LoggerParams) {
         const trimmed = this.trimArgs(args);
-        this.logger.info(trimmed[0], ...trimmed.slice(1));
+        (this.logger.info as any)(...trimmed);
     }
 
     warn(...args: LoggerParams) {
         const trimmed = this.trimArgs(args);
-        this.logger.warn(trimmed[0], ...trimmed.slice(1));
+        (this.logger.warn as any)(...trimmed);
     }
 
     error(...args: LoggerParams) {
         const trimmed = this.trimArgs(args);
-        this.logger.error(trimmed[0], ...trimmed.slice(1));
+        (this.logger.error as any)(...trimmed);
     }
 
     debug(...args: LoggerParams) {
         const trimmed = this.trimArgs(args);
-        this.logger.debug(trimmed[0], ...trimmed.slice(1));
+        (this.logger.debug as any)(...trimmed);
     }
 }

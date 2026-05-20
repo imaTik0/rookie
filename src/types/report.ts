@@ -2,7 +2,7 @@ import * as types from "./index.ts";
 
 export type ReportId = string & { __reportId: never };
 export type ReportStatus = "SUCCESS" | "FAILED";
-export type DetailedResults = unknown;
+export type DetailedResults = { finalOutput?: string; [key: string]: any };
 
 export type DocumentationGap = "MISSING" | "AMBIGUOUS" | "INCORRECT" | "CONFIG" | "UNKNOWN";
 
@@ -37,9 +37,11 @@ export interface Report {
     testSuiteId: types.test.TestSuiteId;
     projectId: types.project.ProjectId;
     status: ReportStatus;
+    type: "CODE_GENERATION" | "TEST_SCENARIO";
     initialContext: string;
     executionPlan: unknown;
     steps: StepResult[];
+    detailedResults?: DetailedResults;
     conversationHistory?: any[];
     createdAt: Date;
     durationMs?: number;

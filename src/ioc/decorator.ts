@@ -4,5 +4,5 @@ export function IOCManualRegistration(constructor: Function) {
 }
 
 export function isManualRegistrationSet(constructor: Function) {
-    return !constructor.prototype.manualRegistration;
+    return !constructor.prototype?.manualRegistration;
 }

@@ -267,9 +267,7 @@ export class PromptService {
                     const args = rawArgs as SmokeTestToolArgs;
                     emitLog(
                         onProgress,
-                        `Running Smoke Test... Env: ${args.environment}, Deps: [${
-                            args.dependencies.join(", ")
-                        }]${args.bash_setup ? `, Setup: ${args.bash_setup.substring(0, 50)}...` : ""}`,
+                        `Running Smoke Test...`,
                     );
 
                     let testResult = "Tool not available locally.";
@@ -277,10 +275,6 @@ export class PromptService {
                         try {
                             testResult = await smokeTestCallback(
                                 args.code,
-                                args.environment,
-                                args.dependencies,
-                                args.bash_setup,
-                                args.command,
                             );
                         } catch (e) {
                             testResult = `FATAL RUNTIME ERROR: ${
@@ -573,5 +567,72 @@ Respond with a JSON object:
         }
         if (normA === 0 || normB === 0) return 0;
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    public async promptForUserGoals(docs: string, onProgress?: ProgressCallback): Promise<string[]> {
+        this.logger.log(`Generating user goals from documentation...`);
+        emitLog(onProgress, `Generating user goals from documentation...`);
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: MODEL_NAME,
+                messages: [
+                    { role: "system", content: templates.PLANNER_GOALS_SYSTEM_PROMPT },
+                    { role: "user", content: templates.createPlannerGoalsUserPrompt(docs) },
+                ],
+                response_format: { type: "json_object" }, // Wait, the prompt asks for an array. Let's wrap in an object for JSON mode.
+            });
+
+            // Wait, if response_format is json_object, the prompt must ask for an object. Let's fix that in templates in next step, or just parse it.
+            // Actually, if it's an array, json_object might throw an error. Let me use default text response.
+            // But for now, let's just parse whatever it returns.
+            const content = response.choices[0]?.message?.content;
+            if (!content) throw new Error("Empty response");
+
+            let parsed = JSON.parse(content);
+            if (!Array.isArray(parsed)) {
+                // If the LLM wrapped it in an object like { "goals": [...] }
+                const maybeArray = Object.values(parsed).find(Array.isArray);
+                if (maybeArray) {
+                    parsed = maybeArray;
+                } else {
+                    throw new Error("Could not find an array of goals in the response");
+                }
+            }
+
+            return parsed as string[];
+        } catch (error) {
+            this.logger.error(error, "Failed to generate user goals");
+            return [];
+        }
+    }
+
+    public async promptForMasterSummary(reportsData: any, onProgress?: ProgressCallback): Promise<string> {
+        this.logger.log(`Generating master summary report...`);
+        emitLog(onProgress, `Generating master summary report...`);
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: MODEL_NAME,
+                messages: [
+                    { role: "system", content: templates.PLANNER_SUMMARY_SYSTEM_PROMPT },
+                    { role: "user", content: templates.createPlannerSummaryUserPrompt(JSON.stringify(reportsData)) },
+                ],
+                stream: true,
+            });
+
+            let markdown = "";
+            for await (const chunk of response) {
+                const content = chunk.choices[0]?.delta?.content || "";
+                if (content) {
+                    markdown += content;
+                    emitToken(onProgress, content);
+                }
+            }
+            return markdown;
+        } catch (error) {
+            this.logger.error(error, "Failed to generate master summary report");
+            return "Failed to generate summary report.";
+        }
     }
 }

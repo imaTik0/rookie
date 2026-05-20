@@ -17,10 +17,6 @@ export interface CodeGenerationResponse {
         title: string;
         explanation: string;
         fullProgram: string;
-        environment: "node" | "browser";
-        dependencies: string[];
-        bash_setup?: string;
-        command?: string;
     }[];
     finalMarkdownSummary: string;
 }
@@ -41,20 +37,12 @@ export interface SearchToolArgs {
 
 export interface SmokeTestToolArgs {
     code: string;
-    environment: "node" | "browser";
-    dependencies: string[];
-    bash_setup?: string;
-    command?: string;
 }
 
 // ─── SmokeTest Callback ─────────────────────────────────────────────────────
 
 export type SmokeTestCallback = (
     code: string,
-    env: "node" | "browser",
-    deps: string[],
-    bash_setup?: string,
-    command?: string,
 ) => Promise<string>;
 
 // ─── Agentic Loop Types ─────────────────────────────────────────────────────

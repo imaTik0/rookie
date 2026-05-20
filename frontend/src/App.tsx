@@ -6,6 +6,8 @@ import ProjectCreator from "./pages/ProjectCreator";
 import TestSuiteCreator from "./pages/TestSuiteCreator";
 import ExecutionConsole from "./pages/ExecutionConsole";
 import Reports from "./pages/Reports";
+import MasterPlanner from "./pages/MasterPlanner";
+import { BrainCircuit } from "lucide-react";
 
 export default function App() {
     const location = useLocation();
@@ -43,6 +45,7 @@ export default function App() {
                     {navItem("/", <LayoutDashboard size={18} />, "Dashboard")}
                     {navItem("/project/new", <PlusCircle size={18} />, "New Project")}
                     {navItem("/testsuite/new", <PlusCircle size={18} />, "New Test Suite")}
+                    {navItem("/planner", <BrainCircuit size={18} />, "Master Planner")}
                     {navItem("/execute", <Play size={18} />, "Execute Tests")}
                     {navItem("/reports", <FileText size={18} />, "Reports")}
                 </nav>
@@ -52,6 +55,7 @@ export default function App() {
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/project/new" element={<ProjectCreator />} />
                     <Route path="/testsuite/new" element={<TestSuiteCreator />} />
+                    <Route path="/planner" element={<MasterPlanner />} />
                     <Route path="/execute" element={<ExecutionConsole />} />
                     <Route path="/execute/:id" element={<ExecutionConsole />} />
                     <Route path="/reports" element={<Reports />} />

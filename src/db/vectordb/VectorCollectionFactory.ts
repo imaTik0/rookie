@@ -11,7 +11,7 @@ export class VectorCollectionFactory {
         private configService: ConfigService,
     ) {}
 
-    async createCollection<T = FileShard>(
+    async createCollection<T extends Record<string, unknown> = FileShard>(
         name: string,
         vectorSize?: number,
     ): Promise<VectorCollection<T>> {
@@ -19,7 +19,7 @@ export class VectorCollectionFactory {
             name,
             vectorSize || this.configService.values.embeddings.vectorSize,
         );
-        return new VectorCollection(this.vectorConnection, name);
+        return new VectorCollection<T>(this.vectorConnection, name);
     }
 
     private async ensureCollectionExists(name: string, vectorSize: number) {

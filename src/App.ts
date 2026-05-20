@@ -8,6 +8,7 @@ import { Container } from "./Container.ts";
 import { FileController } from "./api/file/FileController.ts";
 import { ReportController } from "./api/report/ReportController.ts";
 import { TestSuiteController } from "./api/testsuite/TestSuiteController.ts";
+import { PlannerController } from "./api/planner/PlannerController.ts";
 import { logger } from "hono/logger";
 import { cors } from "hono/cors";
 
@@ -43,6 +44,11 @@ export class App {
         registerController(
             this.honoServer,
             this.container.resolve<TestSuiteController>("testSuiteController"),
+            this.logger,
+        );
+        registerController(
+            this.honoServer,
+            this.container.resolve<PlannerController>("plannerController"),
             this.logger,
         );
         this.honoServer.doc("/docs", {

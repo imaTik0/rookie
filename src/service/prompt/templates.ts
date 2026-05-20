@@ -134,12 +134,11 @@ For EACH sub-task above, check the initial context:
 **STEP 3 - TARGETED RESEARCH:**
 For every sub-task marked "NEEDS RESEARCH", call the 'search_knowledge_base' tool with a precise, targeted query. Read the results. If the results don't contain the specific function signatures, parameters, or usage patterns you need, search AGAIN with a different query. Do not stop until every sub-task is "COVERED".
 
-**STEP 4 - DEPENDENCY & PACKAGE VERIFICATION:**
+**STEP 4 - IMPORT VERIFICATION:**
 Once all sub-tasks are covered, explicitly list:
-  - The exact npm package name(s) required. If a package seems to be missing from the registry or you are unsure of the naming (e.g. @company/lib), SEARCH for the specific package name in the docs.
-  - The exact import statements.
-  - Any configuration or setup steps.
-If you find that a required library is NOT available or documented, flag this as a critical gap.
+  - The exact import statements required.
+  - Any necessary setup or initialization from the library.
+If you find that a required library or feature is NOT documented, flag this as a critical gap.
 
 ### TOOLS
 You have access to the 'search_knowledge_base' tool.
@@ -165,7 +164,7 @@ ${userGoal}
 1. Decompose the goal into concrete sub-tasks (Step 1).
 2. Perform a gap analysis against the initial context (Step 2).
 3. Research every gap using 'search_knowledge_base' (Step 3).
-4. Verify you have full dependency and import information (Step 4).
+4. Verify you have full import information (Step 4).
 5. When fully ready, reply with "READY_FOR_GENERATION".
 
 Be thorough. Every missing piece of documentation will cause the generated code to fail.
@@ -186,13 +185,10 @@ You MUST produce working code examples that directly fulfill the user's stated g
    - What library functions you will call (cite from the documentation context)
    - What you expect to happen when the code runs
 
-2. **Prepare Environment:** If the library requires specific files, configuration, or frontend setup, use the 'bash_setup' parameter to run shell commands (like 'mkdir', 'cp', 'npm install' for extra tools). 
+2. **Choose Environment:**
+   - The code will be executed in a Node.js container with all necessary system utilities.
 
-3. **Choose Environment Wisely:**
-   - Use 'node' for pure logic/API tests (faster).
-   - Use 'browser' ONLY for Playwright UI automation. Note: Browser environment has 2GB RAM allocated.
-
-4. **Write and Test:** Call the 'smoke_test_code' tool. You can use 'command' (e.g. 'npx playwright test') if you need to run something other than 'node run.js'.
+3. **Write and Test:** Call the 'smoke_test_code' tool to verify your logic.
 
 5. **Debug Relentlessly:** If the test fails:
    - Quote the exact error from the logs.
@@ -249,7 +245,7 @@ Now that you have gathered all necessary information in this thread, create 3-5 
 Each program MUST be a standalone JavaScript file that follows the execution contract.
 
 ### EXECUTION CONTRACT (CRITICAL)
-1. **Universal JavaScript:** Your code must be compatible with **BOTH Node.js and Browser** environments.
+1. **Universal Code:** Your code must be written for the Node.js environment.
 2. **NO MOCKING ALLOWED:** 
    - DO NOT use mock endpoints, fake APIs, or simulated behavior. 
    - You MUST import REAL external libraries via \\require('...')\\ or ES imports.
@@ -278,13 +274,61 @@ Structure:
         {
             "title": "Example Title",
             "explanation": "What this example does",
-            "environment": "node", // Or "browser" if Playwright UI automation is required
-            "dependencies": ["zod"], // Array of npm packages required.
-            "bash_setup": "mkdir -p data && cp config_template.json data/config.json", // Optional bash script to run before the JS code
-            "command": "node run.js", // Optional custom command (e.g. 'npx playwright test')
             "fullProgram": "The complete JS code starting with exports/imports"
         }
     ],
     "finalMarkdownSummary": "Overall summary of all examples in Markdown"
 }
 `;
+
+// ─── Master Planner Prompts ──────────────────────────────────────────────────
+
+export const PLANNER_GOALS_SYSTEM_PROMPT = `
+### ROLE
+You are a Principal Architect. Your goal is to analyze the complete technical documentation of a project and propose a set of "user goals" - concrete, varied use cases or problems that can be solved using this specific library or API.
+
+### TASK
+Read the provided documentation and generate 10 to 15 distinct, practical scenarios. Each scenario should represent a real-world task a developer might want to accomplish using the documented tools. Do not invent features that aren't mentioned in the documentation.
+
+### OUTPUT FORMAT
+You MUST respond with a valid JSON object containing a "goals" array, where each string is a user goal. Example:
+{
+  "goals": [
+    "Create a new user account and authenticate via OAuth",
+    "Query the database for active users and export results to CSV",
+    "Set up a WebSocket connection and handle incoming chat messages"
+  ]
+}
+`;
+
+export function createPlannerGoalsUserPrompt(docs: string): string {
+    return `
+### DOCUMENTATION
+${docs}
+
+Generate 10 to 15 user goals based on the documentation above. Return ONLY a JSON object with a "goals" array.
+`;
+}
+
+export const PLANNER_SUMMARY_SYSTEM_PROMPT = `
+### ROLE
+You are a Lead QA Engineer. You have just run a comprehensive suite of test scenarios (user goals) against a project's documentation.
+
+### TASK
+Analyze the provided JSON containing the execution reports for all the tested user goals. Some might have succeeded, some might have failed.
+Write a comprehensive final summary report in Markdown.
+The report should include:
+1. An executive summary of the overall documentation quality and API usability.
+2. A list of successfully executed goals.
+3. A detailed breakdown of any failures, including the specific errors and the identified documentation gaps.
+4. Recommendations for improving the documentation or API.
+`;
+
+export function createPlannerSummaryUserPrompt(reportsData: string): string {
+    return `
+### EXECUTION REPORTS
+${reportsData}
+
+Write the final summary report in Markdown based on the reports above.
+`;
+}

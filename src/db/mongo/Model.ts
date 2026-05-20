@@ -32,7 +32,7 @@ export interface ReportModel {
     testSuiteId: types.test.TestSuiteId;
     projectId: types.project.ProjectId;
     status: types.report.ReportStatus;
-    type: types.report.ReportType;
+    type: "CODE_GENERATION" | "TEST_SCENARIO";
     initialContext: string;
     executionPlan: unknown; // The raw JSON plan or code from LLM
     steps: types.report.StepResult[];
@@ -48,8 +48,17 @@ export interface TestSuite {
     functionTemplate?: string;
     minimalStoryLength: number;
     maximalStoryLength: number;
-    mode: types.test.TestSuiteMode;
+    mode: "CODE_GENERATION" | "TEST_SCENARIO";
     userGoal?: string;
     createdAt: Date;
     updatedAt: Date;
+}
+
+export interface MasterPlanReport {
+    _id: types.planner.MasterPlanId;
+    projectId: types.project.ProjectId;
+    goals: string[];
+    reports: types.report.ReportId[];
+    finalSummary: string;
+    createdAt: Date;
 }

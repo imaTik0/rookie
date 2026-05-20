@@ -36,10 +36,6 @@ export const LANGUAGES: Record<string, LanguageDefinition> = {
         image: "rust:1.70-alpine",
         command: ["sh", "-c", "cat > main.rs && rustc main.rs && ./main"],
     },
-    browser: {
-        image: "mcr.microsoft.com/playwright:v1.49.1-jammy",
-        command: ["bash"],
-    },
 };
 
 export class DockerExecutor {
@@ -58,9 +54,6 @@ export class DockerExecutor {
     public async execute(
         lang: keyof typeof LANGUAGES | LanguageDefinition,
         code: string,
-        dependencies: string[] = [],
-        setup?: string,
-        commandOverride?: string,
         timeoutOverride?: number,
     ): Promise<ExecutionResult> {
         const timeoutMs = timeoutOverride || this.config.timeoutMs;
@@ -72,10 +65,9 @@ export class DockerExecutor {
             ? `--network=${this.config.networkName}`
             : (this.config.networkAccess ? "" : "--network=none");
 
-        // Increase resources for browser-based testing
-        const memoryArg = lang === "browser" ? "--memory=2g" : `--memory=${this.config.memoryLimit}`;
-        const cpuArg = lang === "browser" ? "--cpus=1.0" : `--cpus=${this.config.cpuLimit}`;
-        const capAddArg = lang === "browser" ? "--ipc=host" : "";
+        const memoryArg = `--memory=${this.config.memoryLimit}`;
+        const cpuArg = `--cpus=${this.config.cpuLimit}`;
+        const capAddArg = "";
 
         const args = [
             "run",
@@ -101,12 +93,8 @@ export class DockerExecutor {
         let timeoutId: any;
 
         let finalStdinContent = code;
-        if (lang === "node" || lang === "browser") {
-            const depsInstall = dependencies.length > 0
-                ? `npm install ${dependencies.join(" ")}`
-                : "";
-
-            const executionCommand = commandOverride || "node run.js";
+        if (lang === "node") {
+            const executionCommand = "node run.js";
             const codeBlock = code.trim()
                 ? `cat << 'ENDEVALCODE' > run.js
 ${code}
@@ -118,8 +106,6 @@ set -e
 mkdir -p /eval && cd /eval
 npm init -y > /dev/null 2>&1
 npm pkg set type="module"
-${depsInstall}
-${setup || ""}
 ${codeBlock}
 ${executionCommand}
 `;

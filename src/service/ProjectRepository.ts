@@ -50,10 +50,11 @@ export class ProjectRepository extends BaseRepository<types.project.ProjectId, d
             },
             { $addFields: { files: "$populatedFiles" } },
             { $project: { populatedFiles: 0 } },
+            { $sort: { "files.createdAt": 1 } },
         ];
 
         const result = await this.getCollection().aggregate(pipeline).toArray();
-        return result.length > 0 ? result[0] : null;
+        return result.length > 0 ? (result[0] as unknown as db.PopulatedProject) : null;
     }
 
     async listPopulated(
