@@ -41,12 +41,7 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
 
     async listSlim(
         pagination: { page: number; limit: number },
-    ): Promise<
-        {
-            reports: Pick<db.ReportModel, "_id" | "status" | "createdAt" | "testSuiteId">[];
-            total: number;
-        }
-    > {
+    ): Promise<{ reports: Partial<db.ReportModel>[]; total: number }> {
         const { page, limit } = pagination;
         const skip = (page - 1) * limit;
         const collection = this.getCollection();
@@ -64,12 +59,19 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
         ]);
 
         return {
-            reports: reports as unknown as Pick<
-                db.ReportModel,
-                "_id" | "status" | "createdAt" | "testSuiteId"
-            >[],
+            reports: reports as unknown as Partial<db.ReportModel>[],
             total,
         };
+    }
+
+    async setMasterPlanId(
+        reportId: types.report.ReportId,
+        masterPlanId: types.planner.MasterPlanId,
+    ): Promise<void> {
+        await this.getCollection().updateOne(
+            { _id: reportId },
+            { $set: { masterPlanId } },
+        );
     }
 
     async delete(reportId: types.report.ReportId): Promise<boolean> {

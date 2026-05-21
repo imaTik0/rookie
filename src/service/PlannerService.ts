@@ -4,6 +4,7 @@ import { PromptService } from "./PromptService.ts";
 import { Executor } from "./Executor.ts";
 import { MasterPlanRepository } from "./MasterPlanRepository.ts";
 import { TestSuiteRepository } from "./TestSuiteRepository.ts";
+import { ReportRepository } from "./ReportRepository.ts";
 import * as types from "../types/index.ts";
 
 export class PlannerService {
@@ -14,10 +15,11 @@ export class PlannerService {
         private executor: Executor,
         private testSuiteRepository: TestSuiteRepository,
         private masterPlanRepository: MasterPlanRepository,
+        private reportRepository: ReportRepository,
     ) {}
 
-    public async runMasterPlan(projectId: types.project.ProjectId, onProgress?: (msg: string) => void) {
-        onProgress?.(JSON.stringify({ type: "log", content: `Starting Master Plan for project: ${projectId}` }));
+    public async runMasterPlan(projectId: types.project.ProjectId, maxGoals: number = 5, onProgress?: (msg: string) => void) {
+        onProgress?.(JSON.stringify({ type: "INIT", projectId }));
         
         // 1. Fetch project files
         const project = await this.projectRepository.get(projectId);
@@ -35,19 +37,20 @@ export class PlannerService {
 
         // 2. Generate user goals
         onProgress?.(JSON.stringify({ type: "log", content: "Analyzing documentation and generating user goals..." }));
-        const goals = await this.promptService.promptForUserGoals(docsContent, (msg) => {
+        const goals = await this.promptService.promptForUserGoals(docsContent, maxGoals, (msg) => {
             onProgress?.(JSON.stringify({ type: "log", content: msg }));
         });
 
-        onProgress?.(JSON.stringify({ type: "log", content: `Generated ${goals.length} user goals.` }));
+        onProgress?.(JSON.stringify({ type: "GOALS_GENERATED", goals }));
 
         const reportIds: types.report.ReportId[] = [];
+        // Full execution data — all step details including failureAnalysis for rich summary
         const executionReports: any[] = [];
 
         // 3. Execute a TestSuite for each goal
         for (let i = 0; i < goals.length; i++) {
             const goal = goals[i];
-            onProgress?.(JSON.stringify({ type: "log", content: `Executing Goal ${i + 1}/${goals.length}: ${goal}` }));
+            onProgress?.(JSON.stringify({ type: "GOAL_START", goal, index: i, total: goals.length }));
             
             // Create a temporary TestSuite
             const testSuite = await this.testSuiteRepository.create({
@@ -61,41 +64,55 @@ export class PlannerService {
 
             // Execute it using Executor
             const report = await this.executor.executeTestSuite(testSuite._id as types.test.TestSuiteId, (msg) => {
-                // Pass through progress but prefix it with goal info
-                onProgress?.(msg);
+                onProgress?.(JSON.stringify({ type: "GOAL_PROGRESS", goal, log: msg }));
             });
 
             if (report) {
                 reportIds.push(report._id as types.report.ReportId);
+                // Pass FULL step data (including all failureAnalysis fields) to the summary LLM
                 executionReports.push({
                     goal,
                     status: report.status,
+                    reportId: report._id,
                     steps: report.steps.map(s => ({
+                        stepIndex: s.stepIndex,
                         description: s.stepDescription,
                         status: s.status,
                         error: s.error,
                         failureAnalysis: s.failureAnalysis,
                     })),
                 });
+                onProgress?.(JSON.stringify({ type: "GOAL_COMPLETE", goal, status: report.status, reportId: report._id }));
+            } else {
+                executionReports.push({ goal, status: "FAILED", reportId: null, steps: [] });
+                onProgress?.(JSON.stringify({ type: "GOAL_COMPLETE", goal, status: "FAILED", reportId: null }));
             }
             
             // Clean up temporary test suite
             await this.testSuiteRepository.delete(testSuite._id as types.test.TestSuiteId);
         }
 
-        // 4. Generate final summary
+        // 4. Generate structured summary from full report data
         onProgress?.(JSON.stringify({ type: "log", content: "Generating final master summary..." }));
-        const finalSummary = await this.promptService.promptForMasterSummary(executionReports, (msg) => {
-             // Only log string progress if needed or handle it
-        });
+        const { structured, markdown } = await this.promptService.promptForMasterSummary(executionReports);
+        
+        onProgress?.(JSON.stringify({ type: "SUMMARY_GENERATED", summary: markdown, structured }));
 
-        // 5. Store MasterPlanReport
+        // 5. Store MasterPlanReport with structured summary
         const masterPlan = await this.masterPlanRepository.create({
             projectId,
             goals,
             reports: reportIds,
-            finalSummary,
+            finalSummary: markdown,
+            structuredSummary: structured,
         });
+
+        // 6. Back-link each partial report to this master plan
+        await Promise.all(
+            reportIds.map(rid =>
+                this.reportRepository.setMasterPlanId(rid, masterPlan._id as types.planner.MasterPlanId)
+            )
+        );
 
         onProgress?.(JSON.stringify({ type: "log", content: "Master Plan execution completed." }));
         return masterPlan;

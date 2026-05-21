@@ -2,7 +2,7 @@ import OpenAI from "@openai/openai";
 
 // ─── Model & Limits ─────────────────────────────────────────────────────────
 
-export const MODEL_NAME = "gpt-5.4-nano";
+export const MODEL_NAME = "gpt-5.4";
 export const MAX_RESEARCH_ITERATIONS = 5;
 export const MAX_VERIFICATION_ITERATIONS = 5;
 export const DEFAULT_SEARCH_LIMIT = 10;

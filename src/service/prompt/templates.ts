@@ -288,7 +288,7 @@ export const PLANNER_GOALS_SYSTEM_PROMPT = `
 You are a Principal Architect. Your goal is to analyze the complete technical documentation of a project and propose a set of "user goals" - concrete, varied use cases or problems that can be solved using this specific library or API.
 
 ### TASK
-Read the provided documentation and generate 10 to 15 distinct, practical scenarios. Each scenario should represent a real-world task a developer might want to accomplish using the documented tools. Do not invent features that aren't mentioned in the documentation.
+Read the provided documentation and generate practical scenarios. Each scenario should represent a real-world task a developer might want to accomplish using the documented tools. Do not invent features that aren't mentioned in the documentation.
 
 ### OUTPUT FORMAT
 You MUST respond with a valid JSON object containing a "goals" array, where each string is a user goal. Example:
@@ -301,34 +301,78 @@ You MUST respond with a valid JSON object containing a "goals" array, where each
 }
 `;
 
-export function createPlannerGoalsUserPrompt(docs: string): string {
+export function createPlannerGoalsUserPrompt(docs: string, maxGoals: number): string {
     return `
 ### DOCUMENTATION
 ${docs}
 
-Generate 10 to 15 user goals based on the documentation above. Return ONLY a JSON object with a "goals" array.
+Generate up to ${maxGoals} distinct user goals based on the documentation above. Return ONLY a JSON object with a "goals" array.
 `;
 }
 
 export const PLANNER_SUMMARY_SYSTEM_PROMPT = `
 ### ROLE
-You are a Lead QA Engineer. You have just run a comprehensive suite of test scenarios (user goals) against a project's documentation.
+You are a Lead Documentation Quality Analyst. You have just executed a battery of real-world developer scenarios against a project's documentation to find gaps, bugs, and ambiguities.
 
 ### TASK
-Analyze the provided JSON containing the execution reports for all the tested user goals. Some might have succeeded, some might have failed.
-Write a comprehensive final summary report in Markdown.
-The report should include:
-1. An executive summary of the overall documentation quality and API usability.
-2. A list of successfully executed goals.
-3. A detailed breakdown of any failures, including the specific errors and the identified documentation gaps.
-4. Recommendations for improving the documentation or API.
+Analyze the execution reports for all tested user goals and produce a **comprehensive, structured quality report**.
+
+### OUTPUT FORMAT
+Respond with a SINGLE valid JSON object — no markdown, no prose outside the JSON.
+
+Structure:
+{
+  "executiveSummary": "3-5 sentence markdown summary of overall documentation quality, key findings, and top recommendations",
+  "overallPassRate": 0.75,
+  "failureTaxonomy": {
+    "MISSING": 3,
+    "AMBIGUOUS": 2,
+    "INCORRECT": 1,
+    "CONFIG": 0,
+    "UNKNOWN": 1
+  },
+  "topFailingFunctions": [
+    { "functionName": "client.connect()", "count": 3, "goals": ["goal title 1", "goal title 2"] }
+  ],
+  "goalsBreakdown": [
+    {
+      "goal": "the exact goal string",
+      "status": "SUCCESS",
+      "reportId": "report-id-string or null",
+      "keyFindings": "1-2 sentence summary of what worked or what failed and why"
+    }
+  ],
+  "documentationGapDetails": [
+    {
+      "fragment": "exact quote from the problematic doc fragment",
+      "file": "filename if known, else null",
+      "proposedFix": "concrete improved version of this documentation",
+      "affectedGoals": ["goal title that hit this gap"]
+    }
+  ],
+  "recommendations": [
+    "Concrete, actionable recommendation sentence"
+  ]
+}
+
+### RULES
+- Every goal MUST appear in goalsBreakdown
+- Only include documentationGapDetails for ACTUAL failures where a pinpointedFragment was captured
+- topFailingFunctions should be sorted by count descending, max 10 entries
+- recommendations should be specific to the documentation, not generic advice
+- overallPassRate = (number of SUCCESS goals) / (total goals), as a float 0-1
 `;
 
 export function createPlannerSummaryUserPrompt(reportsData: string): string {
-    return `
-### EXECUTION REPORTS
+    return `### EXECUTION REPORTS
+The following JSON contains detailed reports for all user goals that were executed. Each report includes:
+- goal: the user goal string
+- status: SUCCESS or FAILED
+- reportId: the ID of the partial report
+- steps: each step with stepDescription, status, error, failureAnalysis (which contains documentationGap, failedFunction, reasoning, pinpointedFragment, proposedFragment, suggestedDocsFix)
+
 ${reportsData}
 
-Write the final summary report in Markdown based on the reports above.
+Analyze the reports above and produce the comprehensive structured JSON quality report. Be specific — quote actual function names and documentation fragments from the data.
 `;
 }

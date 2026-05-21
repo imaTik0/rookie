@@ -31,6 +31,11 @@ export class MasterPlanRepository extends BaseRepository<types.planner.MasterPla
         });
     }
 
+    async delete(id: types.planner.MasterPlanId): Promise<boolean> {
+        const result = await this.getCollection().deleteOne({ _id: id });
+        return result.deletedCount === 1;
+    }
+
     async list(
         pagination: { page: number; limit: number },
     ): Promise<{ reports: db.MasterPlanReport[]; total: number }> {

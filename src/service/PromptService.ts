@@ -569,7 +569,7 @@ Respond with a JSON object:
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    public async promptForUserGoals(docs: string, onProgress?: ProgressCallback): Promise<string[]> {
+    public async promptForUserGoals(docs: string, maxGoals: number = 5, onProgress?: ProgressCallback): Promise<string[]> {
         this.logger.log(`Generating user goals from documentation...`);
         emitLog(onProgress, `Generating user goals from documentation...`);
 
@@ -578,7 +578,7 @@ Respond with a JSON object:
                 model: MODEL_NAME,
                 messages: [
                     { role: "system", content: templates.PLANNER_GOALS_SYSTEM_PROMPT },
-                    { role: "user", content: templates.createPlannerGoalsUserPrompt(docs) },
+                    { role: "user", content: templates.createPlannerGoalsUserPrompt(docs, maxGoals) },
                 ],
                 response_format: { type: "json_object" }, // Wait, the prompt asks for an array. Let's wrap in an object for JSON mode.
             });
@@ -607,32 +607,42 @@ Respond with a JSON object:
         }
     }
 
-    public async promptForMasterSummary(reportsData: any, onProgress?: ProgressCallback): Promise<string> {
+    public async promptForMasterSummary(reportsData: any, _onProgress?: ProgressCallback): Promise<{ structured: types.planner.StructuredMasterSummary; markdown: string }> {
         this.logger.log(`Generating master summary report...`);
-        emitLog(onProgress, `Generating master summary report...`);
 
         try {
             const response = await this.openai.chat.completions.create({
                 model: MODEL_NAME,
                 messages: [
                     { role: "system", content: templates.PLANNER_SUMMARY_SYSTEM_PROMPT },
-                    { role: "user", content: templates.createPlannerSummaryUserPrompt(JSON.stringify(reportsData)) },
+                    { role: "user", content: templates.createPlannerSummaryUserPrompt(JSON.stringify(reportsData, null, 2)) },
                 ],
-                stream: true,
+                response_format: { type: "json_object" },
             });
 
-            let markdown = "";
-            for await (const chunk of response) {
-                const content = chunk.choices[0]?.delta?.content || "";
-                if (content) {
-                    markdown += content;
-                    emitToken(onProgress, content);
-                }
-            }
-            return markdown;
+            const content = response.choices[0]?.message?.content;
+            if (!content) throw new Error("Empty response from summary LLM");
+
+            const structured = JSON.parse(content) as types.planner.StructuredMasterSummary;
+
+            // Build a fallback markdown from the structured data
+            const markdown = structured.executiveSummary || "See structured summary for details.";
+
+            return { structured, markdown };
         } catch (error) {
             this.logger.error(error, "Failed to generate master summary report");
-            return "Failed to generate summary report.";
+            return {
+                structured: {
+                    executiveSummary: "Failed to generate summary.",
+                    overallPassRate: 0,
+                    failureTaxonomy: {},
+                    topFailingFunctions: [],
+                    goalsBreakdown: [],
+                    documentationGapDetails: [],
+                    recommendations: [],
+                },
+                markdown: "Failed to generate summary report.",
+            };
         }
     }
 }

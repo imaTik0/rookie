@@ -22,7 +22,8 @@ export class ReportService {
             initialContext: model.initialContext,
             steps: model.steps,
             durationMs: model.durationMs,
-            createdAt: model.createdAt.toISOString(),
+            masterPlanId: model.masterPlanId,
+            createdAt: model.createdAt.toISOString() as unknown as Date,
             detailedResults: {
                 executionPlan: model.executionPlan,
                 initialContext: model.initialContext,
@@ -39,6 +40,7 @@ export class ReportService {
             testSuiteId: model.testSuiteId,
             status: model.status,
             type: model.type,
+            masterPlanId: model.masterPlanId,
             createdAt: model.createdAt.toISOString(),
         };
     }

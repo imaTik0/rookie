@@ -34,11 +34,12 @@ export interface ReportModel {
     status: types.report.ReportStatus;
     type: "CODE_GENERATION" | "TEST_SCENARIO";
     initialContext: string;
-    executionPlan: unknown; // The raw JSON plan or code from LLM
+    executionPlan: unknown;
     steps: types.report.StepResult[];
     finalOutput?: string;
     createdAt: Date;
     durationMs?: number;
+    masterPlanId?: types.planner.MasterPlanId;
 }
 
 export interface TestSuite {
@@ -60,5 +61,6 @@ export interface MasterPlanReport {
     goals: string[];
     reports: types.report.ReportId[];
     finalSummary: string;
+    structuredSummary?: types.planner.StructuredMasterSummary;
     createdAt: Date;
 }

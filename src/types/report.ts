@@ -45,13 +45,16 @@ export interface Report {
     conversationHistory?: any[];
     createdAt: Date;
     durationMs?: number;
+    masterPlanId?: string;
 }
 
 export interface ListReport {
     id: ReportId;
     testSuiteId: types.test.TestSuiteId;
     status: ReportStatus;
+    type?: string;
     createdAt: string;
+    masterPlanId?: string;
 }
 
 export interface ReportIdParam {

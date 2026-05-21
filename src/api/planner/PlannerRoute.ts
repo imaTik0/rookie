@@ -12,26 +12,20 @@ export const PlannerRoutes = {
                     "application/json": {
                         schema: z.object({
                             projectId: z.string().describe("ID of the project to analyze"),
+                            maxGoals: z.number().int().min(1).max(15).optional().default(5).describe("Maximum number of goals to generate"),
                         }),
                     },
                 },
             },
         },
         responses: {
-            201: {
+            200: {
                 content: {
-                    "application/json": {
-                        schema: z.object({
-                            _id: z.string(),
-                            projectId: z.string(),
-                            goals: z.array(z.string()),
-                            reports: z.array(z.string()),
-                            finalSummary: z.string(),
-                            createdAt: z.string(),
-                        }),
+                    "application/x-ndjson": {
+                        schema: z.string(),
                     },
                 },
-                description: "Master Plan report created",
+                description: "Master Plan NDJSON stream",
             },
             400: {
                 description: "Bad Request",
