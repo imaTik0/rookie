@@ -13,13 +13,14 @@ export class PlannerController {
 
     @Post(PlannerRoutes.RunMasterPlanRoute)
     runMasterPlan: RouteHandler<typeof PlannerRoutes.RunMasterPlanRoute> = async (c) => {
-        const { projectId, maxGoals } = c.req.valid("json");
+        const { projectId, maxGoals, initialContext } = c.req.valid("json");
         
         return streamText(c, async (stream) => {
             try {
                 const result = await this.plannerService.runMasterPlan(
                     projectId as types.project.ProjectId,
                     maxGoals,
+                    initialContext,
                     async (msg) => {
                         await stream.writeln(msg);
                     }

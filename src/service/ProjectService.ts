@@ -40,7 +40,8 @@ export class ProjectService {
         if (fileIds) {
             this.addFilesToProjectNoCheck(newProject._id, fileIds);
         }
-        return this.projectRepository.getPopulated(newProject._id);
+        const populated = await this.projectRepository.getPopulated(newProject._id);
+        return populated ? this.mapDbToApi(populated) : null;
     }
 
     async createProjectFromUrl(
@@ -86,7 +87,8 @@ export class ProjectService {
     }
 
     async getProjectById(projectId: types.project.ProjectId) {
-        return await this.projectRepository.getPopulated(projectId);
+        const project = await this.projectRepository.getPopulated(projectId);
+        return project ? this.mapDbToApi(project) : null;
     }
 
     async listProjects(
@@ -113,7 +115,8 @@ export class ProjectService {
             await this.validateFileIds(updateDto.fileIds as types.file.FileId[]);
         }
         await this.projectRepository.update(projectId, updateDto);
-        return this.projectRepository.getPopulated(projectId);
+        const populated = await this.projectRepository.getPopulated(projectId);
+        return populated ? this.mapDbToApi(populated) : null;
     }
 
     async deleteProject(projectId: types.project.ProjectId): Promise<boolean> {
@@ -141,7 +144,8 @@ export class ProjectService {
             }
         }
 
-        return this.projectRepository.getPopulated(projectId);
+        const populated = await this.projectRepository.getPopulated(projectId);
+        return populated ? this.mapDbToApi(populated) : null;
     }
 
     async removeFilesFromProject(projectId: types.project.ProjectId, fileIds: types.file.FileId[]) {
@@ -150,7 +154,8 @@ export class ProjectService {
             return null;
         }
         await this.projectRepository.removeFiles(projectId, fileIds);
-        return this.projectRepository.getPopulated(projectId);
+        const populated = await this.projectRepository.getPopulated(projectId);
+        return populated ? this.mapDbToApi(populated) : null;
     }
 
     private async addFilesToProjectNoCheck(
@@ -170,7 +175,8 @@ export class ProjectService {
             await this.fileProcessorService.processAndStore(allChunks, projectId);
         }
 
-        return this.projectRepository.getPopulated(projectId);
+        const populated = await this.projectRepository.getPopulated(projectId);
+        return populated ? this.mapDbToApi(populated) : null;
     }
 
     private mapDbToApi(model: db.PopulatedProject): ProjectSchema {

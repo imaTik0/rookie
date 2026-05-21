@@ -25,6 +25,9 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
             executionPlan: data.executionPlan,
             steps: data.steps,
             finalOutput: data.detailedResults?.finalOutput,
+            masterPlanGoals: data.masterPlanGoals,
+            masterPlanReports: data.masterPlanReports,
+            structuredSummary: data.structuredSummary,
             createdAt: new Date(),
             durationMs: data.durationMs || 0,
         };
@@ -50,6 +53,7 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
             steps: 0,
             executionPlan: 0,
             initialContext: 0,
+            masterPlanReports: 0,
         };
 
         const [reports, total] = await Promise.all([
@@ -66,7 +70,7 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
 
     async setMasterPlanId(
         reportId: types.report.ReportId,
-        masterPlanId: types.planner.MasterPlanId,
+        masterPlanId: string,
     ): Promise<void> {
         await this.getCollection().updateOne(
             { _id: reportId },

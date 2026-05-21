@@ -23,6 +23,9 @@ export class ReportService {
             steps: model.steps,
             durationMs: model.durationMs,
             masterPlanId: model.masterPlanId,
+            masterPlanGoals: model.masterPlanGoals,
+            masterPlanReports: model.masterPlanReports,
+            structuredSummary: model.structuredSummary,
             createdAt: model.createdAt.toISOString() as unknown as Date,
             detailedResults: {
                 executionPlan: model.executionPlan,
@@ -41,6 +44,8 @@ export class ReportService {
             status: model.status,
             type: model.type,
             masterPlanId: model.masterPlanId,
+            masterPlanGoals: model.masterPlanGoals,
+            structuredSummary: model.structuredSummary,
             createdAt: model.createdAt.toISOString(),
         };
     }

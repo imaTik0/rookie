@@ -81,7 +81,6 @@ export class TestSuiteController {
     };
 
     @Get(TestSuiteRoutes.StreamExecuteTestSuiteRoute)
-    // @ts-expect-error - SSE Response Type mismatch
     streamExecuteTestSuite: RouteHandler<typeof TestSuiteRoutes.StreamExecuteTestSuiteRoute> =
         async (c) => {
             const { testSuiteId } = c.req.valid("param");

@@ -18,6 +18,9 @@ export class ProjectController {
                 createProjectDto.projectName,
                 createProjectDto.fileIds as types.file.FileId[],
             );
+            if (!newProject) {
+                return c.json({ code: 500, message: "Failed to create project" }, 500 as any);
+            }
             return c.json(newProject, 201);
         } catch (error) {
             const err = error as { message?: string };
@@ -36,6 +39,9 @@ export class ProjectController {
                 url,
                 maxPages,
             );
+            if (!newProject) {
+                return c.json({ code: 500, message: "Failed to create project" }, 500 as any);
+            }
             return c.json(newProject, 201);
         } catch (error) {
             const err = error as { message?: string };

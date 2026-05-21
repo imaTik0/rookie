@@ -13,6 +13,7 @@ export const PlannerRoutes = {
                         schema: z.object({
                             projectId: z.string().describe("ID of the project to analyze"),
                             maxGoals: z.number().int().min(1).max(15).optional().default(5).describe("Maximum number of goals to generate"),
+                            initialContext: z.string().optional().default("{}").describe("Initial context JSON for the executions"),
                         }),
                     },
                 },

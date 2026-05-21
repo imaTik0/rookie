@@ -29,17 +29,20 @@ export interface PopulatedProject {
 
 export interface ReportModel {
     _id: types.report.ReportId;
-    testSuiteId: types.test.TestSuiteId;
+    testSuiteId?: types.test.TestSuiteId;
     projectId: types.project.ProjectId;
     status: types.report.ReportStatus;
-    type: "CODE_GENERATION" | "TEST_SCENARIO";
+    type: "CODE_GENERATION" | "TEST_SCENARIO" | "MASTER_PLAN";
     initialContext: string;
     executionPlan: unknown;
     steps: types.report.StepResult[];
     finalOutput?: string;
     createdAt: Date;
     durationMs?: number;
-    masterPlanId?: types.planner.MasterPlanId;
+    masterPlanId?: string;
+    masterPlanGoals?: string[];
+    masterPlanReports?: types.report.ReportId[];
+    structuredSummary?: types.planner.StructuredMasterSummary;
 }
 
 export interface TestSuite {
@@ -55,12 +58,4 @@ export interface TestSuite {
     updatedAt: Date;
 }
 
-export interface MasterPlanReport {
-    _id: types.planner.MasterPlanId;
-    projectId: types.project.ProjectId;
-    goals: string[];
-    reports: types.report.ReportId[];
-    finalSummary: string;
-    structuredSummary?: types.planner.StructuredMasterSummary;
-    createdAt: Date;
-}
+

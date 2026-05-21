@@ -39,9 +39,9 @@ const GAP_TEXT_COLORS: Record<string, string> = {
 interface MasterPlanDetail {
     id: string;
     projectId: string;
-    goals: string[];
-    reports: string[];
-    finalSummary: string;
+    masterPlanGoals?: string[];
+    masterPlanReports?: string[];
+    detailedResults?: { finalOutput?: string };
     createdAt: string;
     structuredSummary?: {
         executiveSummary: string;
@@ -69,7 +69,7 @@ export default function MasterPlanViewer({
     const passRate = s ? s.overallPassRate : 0;
     const passedCount = s ? s.goalsBreakdown.filter(g => g.status === "SUCCESS").length : 0;
     const failedCount = s ? s.goalsBreakdown.filter(g => g.status !== "SUCCESS").length : 0;
-    const totalGoals = plan.goals.length;
+    const totalGoals = plan.masterPlanGoals?.length || 0;
 
     const totalTaxonomy = s ? Object.values(s.failureTaxonomy).reduce((a, b) => a + b, 0) : 0;
 
@@ -224,7 +224,7 @@ export default function MasterPlanViewer({
                     </CardHeader>
                     <CardContent className="p-0">
                         <div className="divide-y divide-gray-100">
-                            {(s?.goalsBreakdown ?? plan.goals.map(g => ({ goal: g, status: "UNKNOWN", reportId: null, keyFindings: "" }))).map((item, idx) => (
+                            {(s?.goalsBreakdown ?? (plan.masterPlanGoals || []).map(g => ({ goal: g, status: "UNKNOWN", reportId: null, keyFindings: "" }))).map((item, idx) => (
                                 <div key={idx} className="flex items-start gap-4 p-4 hover:bg-gray-50/60 transition-colors">
                                     <div className="mt-0.5 shrink-0">
                                         {item.status === "SUCCESS"
@@ -340,12 +340,12 @@ export default function MasterPlanViewer({
                 )}
 
                 {/* Fallback: show raw finalSummary if no structured data */}
-                {!s && plan.finalSummary && (
+                {!s && plan.detailedResults?.finalOutput && (
                     <Card className="border-none shadow-sm bg-white">
                         <CardContent className="pt-6 pb-6 px-6">
                             <div
                                 className="prose prose-sm prose-slate max-w-none"
-                                dangerouslySetInnerHTML={{ __html: marked.parse(plan.finalSummary) as string }}
+                                dangerouslySetInnerHTML={{ __html: marked.parse(plan.detailedResults.finalOutput) as string }}
                             />
                         </CardContent>
                     </Card>

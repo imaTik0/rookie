@@ -17,7 +17,7 @@ export class TestSuiteService {
             functionTemplate: data.functionTemplate,
             minimalStoryLength: data.minimalStoryLength,
             maximalStoryLength: data.maximalStoryLength,
-            mode: data.mode as types.test.TestSuiteMode,
+            mode: data.mode as "CODE_GENERATION" | "TEST_SCENARIO",
             userGoal: data.userGoal,
         });
         return this.mapDbToApi(newDbSuite);
@@ -47,7 +47,7 @@ export class TestSuiteService {
                 maximalStoryLength: data.maximalStoryLength,
                 minimalStoryLength: data.minimalStoryLength,
                 projectId: data.projectId as types.project.ProjectId,
-                mode: data.mode as types.test.TestSuiteMode,
+                mode: data.mode as "CODE_GENERATION" | "TEST_SCENARIO",
                 userGoal: data.userGoal,
             },
         );

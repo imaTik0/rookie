@@ -2,7 +2,6 @@ import { ProjectRepository } from "./ProjectRepository.ts";
 import { FileService } from "./FileService.ts";
 import { PromptService } from "./PromptService.ts";
 import { Executor } from "./Executor.ts";
-import { MasterPlanRepository } from "./MasterPlanRepository.ts";
 import { TestSuiteRepository } from "./TestSuiteRepository.ts";
 import { ReportRepository } from "./ReportRepository.ts";
 import * as types from "../types/index.ts";
@@ -14,11 +13,10 @@ export class PlannerService {
         private promptService: PromptService,
         private executor: Executor,
         private testSuiteRepository: TestSuiteRepository,
-        private masterPlanRepository: MasterPlanRepository,
         private reportRepository: ReportRepository,
     ) {}
 
-    public async runMasterPlan(projectId: types.project.ProjectId, maxGoals: number = 5, onProgress?: (msg: string) => void) {
+    public async runMasterPlan(projectId: types.project.ProjectId, maxGoals: number = 5, initialContext: string = "{}", onProgress?: (msg: string) => void) {
         onProgress?.(JSON.stringify({ type: "INIT", projectId }));
         
         // 1. Fetch project files
@@ -55,7 +53,7 @@ export class PlannerService {
             // Create a temporary TestSuite
             const testSuite = await this.testSuiteRepository.create({
                 projectId,
-                initialContext: "{}",
+                initialContext: initialContext,
                 minimalStoryLength: 1,
                 maximalStoryLength: 3,
                 mode: "CODE_GENERATION",
@@ -98,19 +96,24 @@ export class PlannerService {
         
         onProgress?.(JSON.stringify({ type: "SUMMARY_GENERATED", summary: markdown, structured }));
 
-        // 5. Store MasterPlanReport with structured summary
-        const masterPlan = await this.masterPlanRepository.create({
+        // 5. Store Master Plan as a Report in the reports collection
+        const masterPlan = await this.reportRepository.create({
             projectId,
-            goals,
-            reports: reportIds,
-            finalSummary: markdown,
+            status: "SUCCESS",
+            type: "MASTER_PLAN",
+            initialContext,
+            executionPlan: null,
+            steps: [],
+            detailedResults: { finalOutput: markdown },
+            masterPlanGoals: goals,
+            masterPlanReports: reportIds,
             structuredSummary: structured,
-        });
+        } as any);
 
-        // 6. Back-link each partial report to this master plan
+        // 6. Back-link each partial report to this master plan report
         await Promise.all(
             reportIds.map(rid =>
-                this.reportRepository.setMasterPlanId(rid, masterPlan._id as types.planner.MasterPlanId)
+                this.reportRepository.setMasterPlanId(rid, masterPlan._id as string)
             )
         );
 

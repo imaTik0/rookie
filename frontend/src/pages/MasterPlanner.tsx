@@ -20,6 +20,7 @@ export default function MasterPlanner() {
     const [projects, setProjects] = useState<{ id: string; projectName: string }[]>([]);
     const [projectId, setProjectId] = useState("");
     const [maxGoals, setMaxGoals] = useState<number>(5);
+    const [initialContext, setInitialContext] = useState<string>("{}");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
 
@@ -62,7 +63,7 @@ export default function MasterPlanner() {
             const res = await fetch("http://localhost:3000/planner/run", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ projectId, maxGoals }),
+                body: JSON.stringify({ projectId, maxGoals, initialContext }),
             });
 
             if (!res.ok) {
@@ -228,14 +229,30 @@ export default function MasterPlanner() {
                                 disabled={loading}
                             />
                         </div>
-                        <button
-                            onClick={handleRunMasterPlan}
-                            disabled={loading || !projectId}
-                            className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-orange-600 text-primary-foreground hover:bg-orange-600/90 h-10 px-6 py-2 gap-2 shadow-sm"
-                        >
-                            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                            {loading ? "Planning in progress..." : "Run Master Plan"}
-                        </button>
+                    </div>
+                    <div className="flex gap-4 items-start mt-4">
+                        <div className="flex-1 space-y-2">
+                            <label className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                                Initial Context (JSON)
+                            </label>
+                            <textarea
+                                value={initialContext}
+                                onChange={(e) => setInitialContext(e.target.value)}
+                                className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
+                                disabled={loading}
+                                placeholder='{"api_key": "...", "url": "..."}'
+                            />
+                        </div>
+                        <div className="flex-none pt-7">
+                            <button
+                                onClick={handleRunMasterPlan}
+                                disabled={loading || !projectId}
+                                className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-orange-600 text-primary-foreground hover:bg-orange-600/90 h-10 px-6 py-2 gap-2 shadow-sm"
+                            >
+                                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                                {loading ? "Planning in progress..." : "Run Master Plan"}
+                            </button>
+                        </div>
                     </div>
                     {error && (
                         <div className="mt-4 p-3 bg-red-50 text-red-600 text-sm rounded-md border border-red-100 flex items-center gap-2">
