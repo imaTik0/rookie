@@ -216,9 +216,10 @@ export function createVerificationUserPrompt(
     initialDocsContent: string,
     contextFound: string,
     userGoal: string,
+    maxDocsChars: number = 50_000,
 ): string {
     // Cap combined docs to prevent token overflow in verification phase
-    const MAX_DOCS_CHARS = 50_000;
+    const MAX_DOCS_CHARS = maxDocsChars;
     let combinedDocs =
         `#### Initial Documentation:\n${initialDocsContent}\n\n#### Researched Documentation:\n${contextFound}`;
     if (combinedDocs.length > MAX_DOCS_CHARS) {
@@ -334,6 +335,7 @@ Structure:
     "AMBIGUOUS": 2,
     "INCORRECT": 1,
     "CONFIG": 0,
+    "ENVIRONMENT": 0,
     "UNKNOWN": 1
   },
   "topFailingFunctions": [

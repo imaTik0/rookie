@@ -6,6 +6,46 @@ import OpenAI from "@openai/openai";
 import { Logger } from "../../Logger.ts";
 import { emitLog, ProgressCallback } from "./helpers.ts";
 import { AgenticLoopConfig } from "./types.ts";
+import { withRetry } from "../../llm/retry.ts";
+import { countMessageTokens } from "../../llm/tokens.ts";
+
+/**
+ * Non-destructive context pruning. Instead of erasing old messages to
+ * "[PRUNED]", it compacts long, OLD tool/assistant contents to a head+tail
+ * excerpt so the most informative parts (signatures, error headers) survive.
+ * tool_calls are preserved untouched to keep tool_call/tool pairing valid.
+ */
+function compactExcerpt(text: string, head = 400, tail = 200): string {
+    if (text.length <= head + tail + 40) return text;
+    const removed = text.length - head - tail;
+    return `${text.slice(0, head)}\n…[${removed} chars trimmed to save context]…\n${
+        text.slice(text.length - tail)
+    }`;
+}
+
+function pruneMessages(messages: OpenAI.Chat.ChatCompletionMessageParam[], tokenBudget: number) {
+    // Keep system + first user (0,1) and the last 4 messages full; compact the rest.
+    for (let i = 2; i < messages.length - 4; i++) {
+        const m = messages[i] as any;
+        if (typeof m.content === "string" && m.content.length > 300) {
+            const compacted = compactExcerpt(m.content);
+            if (compacted.length < m.content.length) m.content = compacted;
+        }
+    }
+    return countContextTokens(messages) <= tokenBudget;
+}
+
+function countContextTokens(messages: OpenAI.Chat.ChatCompletionMessageParam[]): number {
+    return messages.reduce((sum, m) => sum + countMessageTokens(m as any), 0);
+}
+
+function safeParse(json: string): unknown {
+    try {
+        return JSON.parse(json || "{}");
+    } catch {
+        return { _raw: json };
+    }
+}
 
 export async function runAgenticLoop(
     openai: OpenAI,
@@ -18,49 +58,48 @@ export async function runAgenticLoop(
     let iterations = 0;
     let isReady = false;
 
+    // Token budget: explicit setting, else derive from the char budget (~4 chars/token).
+    const tokenBudget = config.maxContextTokens ??
+        (config.maxContextChars ? Math.floor(config.maxContextChars / 4) : Infinity);
+
     while (iterations < maxIterations && !isReady) {
         logger.log(`${phaseLabel} Iteration ${iterations + 1}...`);
         emitLog(onProgress, `${phaseLabel} Iteration ${iterations + 1}...`);
 
-        // Estimate tokens before sending to catch context bloat early
-        const estimatedChars = messages.reduce((sum, m) => {
-            const content = typeof m.content === "string" ? m.content : "";
-            const toolCalls = (m as any).tool_calls ? JSON.stringify((m as any).tool_calls) : "";
-            return sum + content.length + toolCalls.length;
-        }, 0);
-        const estimatedTokens = Math.ceil(estimatedChars / 4);
+        // Accurate token accounting via a real tokenizer.
+        let contextTokens = countContextTokens(messages);
         logger.log(
-            `${phaseLabel} estimated context: ~${estimatedTokens} tokens (${estimatedChars} chars, ${messages.length} messages)`,
+            `${phaseLabel} context: ~${contextTokens} tokens (${messages.length} messages)`,
         );
-        emitLog(
-            onProgress,
-            `Context size: ~${estimatedTokens} tokens (${messages.length} messages)`,
-        );
+        emitLog(onProgress, `Context size: ~${contextTokens} tokens (${messages.length} messages)`);
 
-        if (config.maxContextChars && estimatedChars > config.maxContextChars && messages.length > 4) {
-            logger.log(`${phaseLabel} Context limit exceeded, pruning oldest interactions...`);
-            emitLog(onProgress, `Context limit exceeded, pruning oldest interactions...`);
-            
-            // Keep first 2 (system + user) and last 4 intact. Prune the rest.
-            for (let i = 2; i < messages.length - 4; i++) {
-                const m = messages[i];
-                if (m.role === "assistant" && typeof m.content === "string" && m.content.length > 50) {
-                    m.content = "[PRUNED TO SAVE CONTEXT]";
-                }
-                if (m.role === "tool" && typeof m.content === "string" && m.content.length > 100) {
-                    m.content = "[PRUNED TO SAVE CONTEXT]";
-                }
-            }
+        if (contextTokens > tokenBudget && messages.length > 4) {
+            logger.log(`${phaseLabel} Token budget exceeded, compacting older interactions...`);
+            emitLog(onProgress, `Token budget exceeded, compacting older interactions...`);
+            pruneMessages(messages, tokenBudget);
+            contextTokens = countContextTokens(messages);
+            emitLog(onProgress, `Context compacted to ~${contextTokens} tokens.`);
         }
 
-        const response = await openai.chat.completions.create({
-            model: modelName,
-            messages,
-            tools,
-            tool_choice: "auto",
-        });
+        const response = await withRetry(
+            () =>
+                openai.chat.completions.create({
+                    model: modelName,
+                    messages,
+                    tools,
+                    tool_choice: "auto",
+                    ...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
+                    ...(config.seed !== undefined ? { seed: config.seed } : {}),
+                } as any),
+            {
+                retries: config.maxRetries ?? 3,
+                baseDelayMs: config.retryBaseMs,
+                label: `${phaseLabel} chat.completions`,
+                logger,
+            },
+        );
 
-        const message = response.choices[0].message;
+        const message = (response as any).choices[0].message;
         messages.push(message);
 
         if (onTrace) {
@@ -91,10 +130,17 @@ export async function runAgenticLoop(
             for (const toolCall of message.tool_calls) {
                 const handler = toolHandlers[toolCall.function.name];
                 if (handler) {
-                    const result = await handler(
-                        toolCall.id,
-                        JSON.parse(toolCall.function.arguments),
-                    );
+                    // Guard the handler so a thrown error (bad args JSON, search
+                    // failure, etc.) becomes a tool result the model can react to,
+                    // instead of crashing the whole loop.
+                    let result: string;
+                    try {
+                        const args = JSON.parse(toolCall.function.arguments || "{}");
+                        result = await handler(toolCall.id, args);
+                    } catch (err) {
+                        result = `TOOL_ERROR: ${(err as Error)?.message ?? String(err)}`;
+                        logger.error(err, `${phaseLabel} tool '${toolCall.function.name}' failed`);
+                    }
                     messages.push({
                         role: "tool",
                         tool_call_id: toolCall.id,
@@ -107,7 +153,7 @@ export async function runAgenticLoop(
                             type: "TOOL_CALL",
                             content: {
                                 tool: toolCall.function.name,
-                                args: JSON.parse(toolCall.function.arguments),
+                                args: safeParse(toolCall.function.arguments),
                                 result: result,
                                 phase: phaseLabel
                             }

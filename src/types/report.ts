@@ -11,7 +11,13 @@ export type DetailedResults = {
     [key: string]: any;
 };
 
-export type DocumentationGap = "MISSING" | "AMBIGUOUS" | "INCORRECT" | "CONFIG" | "UNKNOWN";
+export type DocumentationGap =
+    | "MISSING"
+    | "AMBIGUOUS"
+    | "INCORRECT"
+    | "CONFIG"
+    | "ENVIRONMENT"
+    | "UNKNOWN";
 
 export interface FailureAnalysis {
     errorMessage: string;

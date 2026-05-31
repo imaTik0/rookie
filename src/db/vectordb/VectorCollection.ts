@@ -67,11 +67,21 @@ export class VectorCollection<T extends Record<string, unknown>> {
         }
     }
 
+    /**
+     * Hybrid dense + BM25 sparse search fused with Reciprocal Rank Fusion.
+     * The "sparse" prefetch IS the BM25 leg: documents carry BM25 term-frequency
+     * weights and the collection's sparse vector uses Qdrant's `modifier: "idf"`,
+     * so Qdrant applies the IDF component server-side — i.e. real BM25 scoring.
+     */
     async searchHybrid(
         denseVector: types.vector.DenseVector,
         sparseVector: types.vector.SparseVector,
         limit: number = 5,
     ): Promise<types.vector.SearchResult<T>[]> {
+        // Empty sparse query (e.g. only stopwords) → dense-only is the correct path.
+        if (!sparseVector.indices || sparseVector.indices.length === 0) {
+            return await this.search(denseVector, limit);
+        }
         try {
             const results = await this.client.vectorClient.query(this.collectionName, {
                 prefetch: [
@@ -96,6 +106,13 @@ export class VectorCollection<T extends Record<string, unknown>> {
                 errorMsg.includes("Wrong input") ||
                 errorMsg.includes("requires specified vector name")
             ) {
+                // BM25 leg unavailable (e.g. collection predates the sparse/idf config).
+                // Fall back to dense-only, but make it visible rather than silent.
+                console.warn(
+                    `[VectorCollection] hybrid BM25 search failed for "${this.collectionName}" ` +
+                        `(${errorMsg.slice(0, 160)}); falling back to dense-only. ` +
+                        `Re-create the collection to enable BM25 (sparse + idf modifier).`,
+                );
                 const results = await this.client.vectorClient.query(this.collectionName, {
                     query: denseVector,
                     limit,

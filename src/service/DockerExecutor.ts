@@ -6,6 +6,11 @@ export interface ExecutorConfig {
     timeoutMs: number;
     networkAccess: boolean;
     networkName?: string;
+    // ─── Hardening (applied when `hardening` is true) ───────────────────────
+    hardening: boolean;
+    /** Numeric user[:group] to run as. Empty string = image default (usually root). */
+    user: string;
+    pidsLimit: number;
 }
 
 export interface ExecutionResult {
@@ -19,6 +24,14 @@ export interface ExecutionResult {
 export interface LanguageDefinition {
     image: string;
     command: string[];
+}
+
+export interface ExecuteOptions {
+    timeoutMs?: number;
+    /** Extra npm packages to install before running (node only). */
+    packages?: string[];
+    /** Bash commands to run before the program (node only) — e.g. create fixtures. */
+    setup?: string;
 }
 
 export const LANGUAGES: Record<string, LanguageDefinition> = {
@@ -47,6 +60,9 @@ export class DockerExecutor {
             cpuLimit: "0.5",
             timeoutMs: 5000,
             networkAccess: false,
+            hardening: true,
+            user: "1000:1000",
+            pidsLimit: 256,
             ...config,
         };
     }
@@ -54,9 +70,11 @@ export class DockerExecutor {
     public async execute(
         lang: keyof typeof LANGUAGES | LanguageDefinition,
         code: string,
-        timeoutOverride?: number,
+        timeoutOverrideOrOptions?: number | ExecuteOptions,
     ): Promise<ExecutionResult> {
-        const timeoutMs = timeoutOverride || this.config.timeoutMs;
+        const options: ExecuteOptions = typeof timeoutOverrideOrOptions === "number"
+            ? { timeoutMs: timeoutOverrideOrOptions }
+            : (timeoutOverrideOrOptions || {});
         const langDef = typeof lang === "string" ? LANGUAGES[lang] : lang;
         if (!langDef) throw new Error(`Language '${lang}' not supported.`);
 
@@ -65,18 +83,14 @@ export class DockerExecutor {
             ? `--network=${this.config.networkName}`
             : (this.config.networkAccess ? "" : "--network=none");
 
-        const memoryArg = `--memory=${this.config.memoryLimit}`;
-        const cpuArg = `--cpus=${this.config.cpuLimit}`;
-        const capAddArg = "";
-
         const args = [
             "run",
             "-i",
             "--rm",
-            memoryArg,
-            cpuArg,
+            `--memory=${this.config.memoryLimit}`,
+            `--cpus=${this.config.cpuLimit}`,
             networkArg,
-            capAddArg,
+            ...this.hardeningArgs(),
             langDef.image,
             ...langDef.command,
         ].filter(Boolean);
@@ -94,20 +108,7 @@ export class DockerExecutor {
 
         let finalStdinContent = code;
         if (lang === "node") {
-            const executionCommand = "node run.js";
-            const delimiter = crypto.randomUUID().replace(/-/g, "");
-            const codeBlock = code.trim()
-                ? `cat << '${delimiter}' > run.js\n${code}\n${delimiter}`
-                : "";
-
-            finalStdinContent = `
-set -e
-mkdir -p /eval && cd /eval
-npm init -y > /dev/null 2>&1
-npm pkg set type="module"
-${codeBlock}
-${executionCommand}
-`;
+            finalStdinContent = this.buildNodeScript(code, options.packages || [], options.setup);
         }
 
         try {
@@ -118,7 +119,7 @@ ${executionCommand}
             timeoutId = setTimeout(() => {
                 isTimeout = true;
                 process.kill();
-            }, this.config.timeoutMs);
+            }, options.timeoutMs || this.config.timeoutMs);
 
             const output = await process.output();
 
@@ -147,5 +148,63 @@ ${executionCommand}
         } finally {
             if (timeoutId) clearTimeout(timeoutId);
         }
+    }
+
+    /**
+     * Container hardening flags for running UNTRUSTED, AI-generated code.
+     * Note on egress: full host-allowlisting cannot be done with plain `docker run`
+     * flags. For real egress control, create `rookie-network` as an `--internal`
+     * network plus an egress proxy, or set ROOKIE_SANDBOX_NETWORK_MODE=none for
+     * offline library testing. These flags cover the in-container attack surface.
+     */
+    private hardeningArgs(): string[] {
+        if (!this.config.hardening) return [];
+        const args = [
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            `--pids-limit=${this.config.pidsLimit}`,
+            // Read-only root FS; only the writable work area below is mutable.
+            "--read-only",
+            // World-writable tmpfs so a non-root user can build/run there.
+            "--tmpfs=/eval:rw,exec,size=512m,mode=1777",
+            "--tmpfs=/tmp:rw,exec,size=128m,mode=1777",
+            "-w", "/eval",
+            "-e", "HOME=/eval",
+            "-e", "npm_config_cache=/eval/.npm",
+        ];
+        if (this.config.user) args.push("--user", this.config.user);
+        return args;
+    }
+
+    private buildNodeScript(code: string, packages: string[], setup?: string): string {
+        const delimiter = crypto.randomUUID().replace(/-/g, "");
+        const codeBlock = code.trim()
+            ? `cat << '${delimiter}' > run.js\n${code}\n${delimiter}`
+            : "";
+        const setupBlock = setup && setup.trim() ? setup : "";
+
+        // De-dupe + shell-safe quote each package spec.
+        const uniquePkgs = [...new Set(packages.filter(Boolean))];
+        const installBlock = uniquePkgs.length > 0
+            ? `npm install --no-audit --no-fund --loglevel=error ${
+                uniquePkgs.map((p) => `'${p.replace(/'/g, "")}'`).join(" ")
+            } 2>&1 || echo "ROOKIE_NPM_INSTALL_FAILED"`
+            : "";
+
+        // When hardening is on the workdir/tmpfs are already prepared; otherwise mkdir.
+        const prep = this.config.hardening
+            ? "cd /eval"
+            : "mkdir -p /eval && cd /eval";
+
+        return `
+set -e
+${prep}
+npm init -y > /dev/null 2>&1
+npm pkg set type="module" > /dev/null 2>&1
+${installBlock}
+${setupBlock}
+${codeBlock}
+node run.js
+`;
     }
 }

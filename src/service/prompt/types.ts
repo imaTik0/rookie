@@ -72,4 +72,12 @@ export interface AgenticLoopConfig {
     phaseLabel: string;
     onTrace?: (event: import("../../types/index.ts").trace.TraceEvent) => Promise<void>;
     maxContextChars?: number;
+    /** Token budget before non-destructive pruning kicks in. */
+    maxContextTokens?: number;
+    /** Determinism controls applied to every model call in the loop. */
+    temperature?: number;
+    seed?: number;
+    /** Transient-error retry controls. */
+    maxRetries?: number;
+    retryBaseMs?: number;
 }

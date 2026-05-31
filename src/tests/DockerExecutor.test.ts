@@ -138,7 +138,7 @@ Deno.test("DockerExecutor - Node.js (Interpreted)", async (t) => {
             const content = fs.readFileSync('setup.txt', 'utf8');
             console.log("From file:", content.trim());
         `;
-        const result = await executor.execute("node", code, [], setup);
+        const result = await executor.execute("node", code, { setup });
 
         assertEquals(result.exitCode, 0);
         assertStringIncludes(result.stdout, "From file: Setup string");
@@ -154,7 +154,7 @@ Deno.test("DockerExecutor - Node.js (Interpreted)", async (t) => {
             const content = fs.readFileSync('test_dir/nested.txt', 'utf8');
             console.log("Nested:", content.trim());
         `;
-        const result = await executor.execute("node", code, [], setup);
+        const result = await executor.execute("node", code, { setup });
 
         assertEquals(result.exitCode, 0);
         assertStringIncludes(result.stdout, "Nested: Nested file");

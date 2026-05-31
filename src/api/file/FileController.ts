@@ -86,7 +86,7 @@ export class FileController {
         headers.set("Content-Disposition", `attachment; filename="${apiMetadata.filename}"`);
         headers.set("Content-Length", apiMetadata.size.toString());
 
-        return new Response(buffer, {
+        return new Response(buffer as unknown as BodyInit, {
             status: 200,
             headers: headers,
         });

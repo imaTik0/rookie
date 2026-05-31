@@ -26,6 +26,10 @@ import {
 } from "./prompt/types.ts";
 import * as templates from "./prompt/templates.ts";
 import { runAgenticLoop } from "./prompt/agenticLoop.ts";
+import { LlmComplete, rerankResults } from "../rag/Reranker.ts";
+import { z } from "zod";
+import { chatStructured, coerceJson } from "../llm/StructuredLlm.ts";
+import * as schemas from "../llm/schemas.ts";
 
 export type { CodeGenerationResponse, PromptOptions, StructuredResponse } from "./prompt/types.ts";
 
@@ -38,6 +42,46 @@ export class PromptService {
         private configService: ConfigService,
         private traceRepository: TraceRepository,
     ) {}
+
+    /** Common deterministic generation params (temperature/seed) for raw chat calls. */
+    private llmParams(): Record<string, unknown> {
+        const llm = this.configService.values.llm;
+        return { temperature: llm.temperature, ...(llm.seed !== undefined ? { seed: llm.seed } : {}) };
+    }
+
+    /**
+     * Extra knobs for the agentic loop config (NOT for raw create() calls — these
+     * would be invalid OpenAI body params). Includes determinism + retry + token budget.
+     */
+    private loopParams(): Record<string, unknown> {
+        const llm = this.configService.values.llm;
+        return {
+            temperature: llm.temperature,
+            ...(llm.seed !== undefined ? { seed: llm.seed } : {}),
+            maxRetries: llm.maxRetries,
+            retryBaseMs: llm.retryBaseMs,
+            maxContextTokens: this.configService.values.limits.maxContextTokens,
+        };
+    }
+
+    /** Request a JSON object from the model and validate it against a zod schema. */
+    private structured<T>(system: string, user: string, schema: z.ZodType<T>): Promise<T> {
+        const llm = this.configService.values.llm;
+        return chatStructured<T>({
+            openai: this.openai,
+            model: this.configService.values.openAI.modelName,
+            system,
+            user,
+            schema,
+            mode: llm.structuredOutputMode,
+            temperature: llm.temperature,
+            seed: llm.seed,
+            maxRepairAttempts: llm.maxRepairAttempts,
+            maxRetries: llm.maxRetries,
+            retryBaseMs: llm.retryBaseMs,
+            logger: this.logger,
+        });
+    }
 
     public async promptForApiUsageScenario(
         vectorCollectionName: string,
@@ -87,6 +131,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             maxIterations: this.configService.values.limits.maxResearchIterations,
             maxContextChars: this.configService.values.limits.maxContextChars,
             phaseLabel: "Scenario Research",
+            ...this.loopParams(),
             onTrace: traceTracker
         });
 
@@ -117,19 +162,11 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             this.logger.log(`Prompting OpenAI (Steps: ${stepRange})...`);
             emitLog(onProgress, `Prompting OpenAI (Steps: ${stepRange})...`);
 
-            const response = await this.openai.chat.completions.create({
-                model: this.configService.values.openAI.modelName,
-                messages: [
-                    { role: "system", content: genSystemPrompt },
-                    { role: "user", content: userPrompt },
-                ],
-                response_format: { type: "json_object" },
-            });
-
-            const jsonString = response.choices[0]?.message?.content;
-            if (!jsonString) throw new Error("Received empty response from OpenAI.");
-
-            return JSON.parse(jsonString) as StructuredResponse;
+            return await this.structured(
+                genSystemPrompt,
+                userPrompt,
+                schemas.ScenarioSchema,
+            ) as StructuredResponse;
         } catch (error) {
             this.logger.error(error, "Error communicating with OpenAI");
             throw new Error("Failed to get response from OpenAI.");
@@ -152,19 +189,11 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         const initialDocsContent = this.formatSearchResults(initialSearchResults);
 
         try {
-            const response = await this.openai.chat.completions.create({
-                model: this.configService.values.openAI.modelName,
-                messages: [
-                    { role: "system", content: templates.ROUTER_SYSTEM_PROMPT },
-                    { role: "user", content: templates.createRouterUserPrompt(initialDocsContent, userGoal) },
-                ],
-                response_format: { type: "json_object" },
-            });
-
-            const content = response.choices[0]?.message?.content;
-            if (!content) throw new Error("Empty response from planner LLM");
-
-            return JSON.parse(content) as RouterPlanResponse;
+            return await this.structured(
+                templates.ROUTER_SYSTEM_PROMPT,
+                templates.createRouterUserPrompt(initialDocsContent, userGoal),
+                schemas.RouterPlanSchema,
+            ) as RouterPlanResponse;
         } catch (error) {
             this.logger.error(error, "Failed to generate execution plan");
             return { steps: [] };
@@ -319,6 +348,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             maxIterations: this.configService.values.limits.maxResearchIterations,
             maxContextChars: this.configService.values.limits.maxContextChars,
             phaseLabel: "Agentic RAG Research",
+            ...this.loopParams(),
             onTrace: traceTracker
         });
 
@@ -350,10 +380,10 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
     ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
         // Smartly prune documentation before verification to stay within token budget
         const query = userGoal.substring(0, 2000);
-        const MAX_DOCS_CHARS = 50_000;
-        
+        const maxDocsChars = this.configService.values.limits.maxScenarioDocsChars;
+
         const combinedRaw = `#### Initial Documentation:\n${initialDocsContent}\n\n#### Researched Documentation:\n${contextFound}`;
-        const smartDocs = await this.rankAndFilterDocs(combinedRaw, query, MAX_DOCS_CHARS);
+        const smartDocs = await this.rankAndFilterDocs(combinedRaw, query, maxDocsChars);
 
         this.logger.log(`Agentic RAG Verification Phase (Smoke Testing)...`);
         emitLog(onProgress, `Agentic RAG Verification Phase... Smoke testing examples in Docker.`);
@@ -366,6 +396,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                     "", // Doc fragments now in contextFound string passed as smartDocs
                     smartDocs,
                     userGoal,
+                    maxDocsChars,
                 ),
             },
         ];
@@ -429,6 +460,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             maxIterations: this.configService.values.limits.maxVerificationIterations,
             maxContextChars: this.configService.values.limits.maxContextChars,
             phaseLabel: "Verification",
+            ...this.loopParams(),
             onTrace: traceTracker
         });
     }
@@ -474,19 +506,19 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             )
             .join("\n\n---\n");
 
-        const genResponse = await this.openai.chat.completions.create({
+        const genUserPrompt =
+            `### TESTED EXAMPLES HISTORY:\n${testedHistory}\n\n### TASK\nExtract the working examples from the history above and format them precisely into the requested JSON structure.`;
+
+        const genResponse: any = await this.openai.chat.completions.create({
             model: this.configService.values.openAI.modelName,
             messages: [
                 { role: "system", content: templates.GENERATION_SYSTEM_PROMPT },
-                {
-                    role: "user",
-                    content:
-                        `### TESTED EXAMPLES HISTORY:\n${testedHistory}\n\n### TASK\nExtract the working examples from the history above and format them precisely into the requested JSON structure.`,
-                },
+                { role: "user", content: genUserPrompt },
             ],
             response_format: { type: "json_object" },
             stream: true,
-        });
+            ...this.llmParams(),
+        } as any);
 
         let jsonString = "";
         for await (const chunk of genResponse) {
@@ -497,7 +529,16 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             }
         }
 
-        return JSON.parse(jsonString) as CodeGenerationResponse;
+        // Validate the streamed JSON; if malformed, do one non-streaming repair pass.
+        const coerced = coerceJson(jsonString, schemas.CodeGenerationSchema);
+        if (coerced.ok) return coerced.data as CodeGenerationResponse;
+
+        this.logger.error(`Streamed generation JSON invalid (${coerced.error}); repairing...`);
+        return await this.structured(
+            templates.GENERATION_SYSTEM_PROMPT,
+            genUserPrompt,
+            schemas.CodeGenerationSchema,
+        ) as CodeGenerationResponse;
     }
 
     private formatSearchResults(
@@ -510,6 +551,44 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                 }\n`
             )
             .join("\n");
+    }
+
+    /** Shared chat closure used by the reranker; honours determinism config. */
+    private buildLlmComplete(): LlmComplete {
+        return async (system, user) => {
+            const llm = this.configService.values.llm;
+            const resp = await this.openai.chat.completions.create({
+                model: this.configService.values.openAI.modelName,
+                messages: [
+                    { role: "system", content: system },
+                    { role: "user", content: user },
+                ],
+                temperature: llm.temperature,
+                ...(llm.seed !== undefined ? { seed: llm.seed } : {}),
+            } as any);
+            return resp.choices[0]?.message?.content || "";
+        };
+    }
+
+    /** Rerank hybrid-retrieval results (no-op unless `reranker.mode` is set). */
+    public async rerankSearchResults(
+        query: string,
+        results: types.vector.SearchResult<types.file.FileShard>[],
+        limit: number,
+    ): Promise<types.vector.SearchResult<types.file.FileShard>[]> {
+        const cfg = this.configService.values.reranker;
+        if (cfg.mode === "off") return results.slice(0, limit);
+        return await rerankResults(
+            query,
+            results,
+            limit,
+            (r) => r.payload?.content || "",
+            cfg,
+            {
+                llmComplete: cfg.mode === "llm" ? this.buildLlmComplete() : undefined,
+                logger: this.logger,
+            },
+        );
     }
 
     private async performRAGSearch(
@@ -526,11 +605,18 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             const dense = await this.embeddingService.embed(query);
             const sparse = this.embeddingService.sparseEmbed(query);
 
-            return await collection.searchHybrid(
+            // When reranking is enabled, over-fetch then let the reranker cut to `limit`.
+            const rerankCfg = this.configService.values.reranker;
+            const fetchLimit = rerankCfg.mode === "off"
+                ? limit
+                : Math.max(limit, rerankCfg.topN);
+
+            const raw = await collection.searchHybrid(
                 dense[0] as types.vector.DenseVector,
                 sparse,
-                limit,
+                fetchLimit,
             );
+            return await this.rerankSearchResults(query, raw, limit);
         } catch (error) {
             const err = error as types.vector.QdrantError;
             const errorData = err?.data?.status?.error || err?.message || String(error);
@@ -567,7 +653,8 @@ Generate ONLY the search query string, no explanation.`;
             const response = await this.openai.chat.completions.create({
                 model: this.configService.values.openAI.modelName,
                 messages: [{ role: "user", content: prompt }],
-            });
+                ...this.llmParams(),
+            } as any);
 
             return response.choices[0]?.message?.content?.trim() ||
                 `${error} ${context}`.substring(0, 500);
@@ -583,10 +670,10 @@ Generate ONLY the search query string, no explanation.`;
         relatedDocs: string,
         stepDescription: string,
     ): Promise<types.report.FailureAnalysis> {
-        const prompt =
-            `You are a Documentation Quality Analyst. A code example that was written based on library documentation has CRASHED. Your job is to classify WHY it failed by comparing the error to the documentation.
-
-### THE ERROR
+        const system =
+            `You are a Documentation Quality Analyst. A code example that was written based on library documentation has CRASHED. Your job is to classify WHY it failed by comparing the error to the documentation.`;
+        const user =
+            `### THE ERROR
 ${errorMessage}
 
 ### THE CODE THAT CRASHED
@@ -601,36 +688,41 @@ ${stepDescription}
 ### YOUR TASK
 Determine:
 1. Which function/method call caused the crash
-2. Whether the documentation is MISSING (no docs exist for this function), AMBIGUOUS (docs exist but are unclear/confusing), INCORRECT (docs say one thing but the library does another), CONFIG (library needs undocumented configuration/setup), or UNKNOWN (cannot determine)
+2. Classify the documentationGap as exactly one of:
+   - MISSING (no docs exist for this function)
+   - AMBIGUOUS (docs exist but are unclear/confusing)
+   - INCORRECT (docs say one thing but the library does another)
+   - CONFIG (library needs configuration/setup that the docs omit)
+   - ENVIRONMENT (the failure is a tooling/runtime problem — missing dependency, install failure, sandbox limit — NOT a documentation problem)
+   - UNKNOWN (cannot determine)
 3. Your reasoning
 4. A concrete suggestion for how the documentation should be fixed
-5. **PINPOINTED FRAGMENT**: Quote the EXACT fragment from the provided documentation that is wrong or missing information. **CRITICAL**: Include the filename at the beginning of the fragment (e.g., "[api.md]: the problematic line...").
-6. **PROPOSED FRAGMENT**: Provide a corrected or improved version of that documentation fragment.
+5. PINPOINTED FRAGMENT: Quote the EXACT fragment from the provided documentation that is wrong or missing. Include the filename at the start (e.g. "[api.md]: the problematic line...").
+6. PROPOSED FRAGMENT: A corrected/improved version of that documentation fragment.
 
 Respond with a JSON object:
 {
     "errorMessage": "the key error line",
     "failedFunction": "the function/method that crashed",
-    "documentationGap": "MISSING" | "AMBIGUOUS" | "INCORRECT" | "CONFIG" | "UNKNOWN",
+    "documentationGap": "MISSING | AMBIGUOUS | INCORRECT | CONFIG | ENVIRONMENT | UNKNOWN",
     "reasoning": "why you classified it this way",
     "suggestedDocsFix": "concrete suggestion for documentation improvement",
     "pinpointedFragment": "exact quote from the docs",
     "proposedFragment": "how the documentation should look like"
 }`;
 
-        try {
-            const response = await this.openai.chat.completions.create({
-                model: this.configService.values.openAI.modelName,
-                messages: [{ role: "user", content: prompt }],
-                response_format: { type: "json_object" },
-            });
+        const votes = this.configService.values.classifier.votes;
+        const candidates: types.report.FailureAnalysis[] = [];
+        for (let i = 0; i < votes; i++) {
+            try {
+                const result = await this.structured(system, user, schemas.FailureAnalysisSchema);
+                candidates.push(result as unknown as types.report.FailureAnalysis);
+            } catch (error) {
+                this.logger.error(error, `Failed to classify failure (vote ${i + 1})`);
+            }
+        }
 
-            const json = response.choices[0]?.message?.content;
-            if (!json) throw new Error("Empty response");
-
-            return JSON.parse(json) as types.report.FailureAnalysis;
-        } catch (error) {
-            this.logger.error(error, "Failed to classify failure");
+        if (candidates.length === 0) {
             return {
                 errorMessage: errorMessage.substring(0, 200),
                 failedFunction: "unknown",
@@ -639,6 +731,26 @@ Respond with a JSON object:
                 suggestedDocsFix: "Manual review required",
             };
         }
+
+        // Self-consistency: majority vote on the category, then return a
+        // representative full analysis that agrees with the winning category.
+        const winningGap = this.majorityGap(candidates.map((c) => c.documentationGap));
+        return candidates.find((c) => c.documentationGap === winningGap) ?? candidates[0];
+    }
+
+    private majorityGap(gaps: types.report.DocumentationGap[]): types.report.DocumentationGap {
+        const counts = new Map<types.report.DocumentationGap, number>();
+        for (const g of gaps) counts.set(g, (counts.get(g) || 0) + 1);
+        let best = gaps[0];
+        let bestCount = 0;
+        for (const g of gaps) {
+            const c = counts.get(g)!;
+            if (c > bestCount) {
+                bestCount = c;
+                best = g;
+            }
+        }
+        return best;
     }
 
     private async rankAndFilterDocs(
@@ -648,8 +760,9 @@ Respond with a JSON object:
     ): Promise<string> {
         if (content.length <= maxChars) return content;
 
-        // Split by document markers or double newlines
-        const chunks = content.split(/--- DOCUMENT \d+ ---/).filter((c) => c.trim().length > 0);
+        // Split by document markers (formatSearchResults emits
+        // "--- DOCUMENT N (Score: x) ---", so match the trailing metadata too).
+        const chunks = content.split(/--- DOCUMENT \d+[^\n]*---/).filter((c) => c.trim().length > 0);
         if (chunks.length <= 1) {
             // If no markers, fallback to double newlines
             const fallbackChunks = content.split("\n\n").filter((c) => c.trim().length > 0);
@@ -666,17 +779,14 @@ Respond with a JSON object:
         maxChars: number,
     ): Promise<string> {
         try {
-            const queryVector = (await this.embeddingService.embed(query))[0];
-            const chunkVectors = await Promise.all(
-                chunks.map(async (c) => ({
-                    content: c,
-                    vector: (await this.embeddingService.embed(c.substring(0, 3000)))[0],
-                })),
-            );
+            // Single batched embeddings request for the query + all chunks.
+            const inputs = [query, ...chunks.map((c) => c.substring(0, 3000))];
+            const vectors = await this.embeddingService.embedBatch(inputs);
+            const queryVector = vectors[0];
 
-            const scoredChunks = chunkVectors.map((cv) => ({
-                content: cv.content,
-                score: this.cosineSimilarity(queryVector, cv.vector as number[]),
+            const scoredChunks = chunks.map((content, i) => ({
+                content,
+                score: this.cosineSimilarity(queryVector, vectors[i + 1] as number[]),
             }));
 
             scoredChunks.sort((a, b) => b.score - a.score);
@@ -756,6 +866,7 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
             maxIterations: this.configService.values.limits.maxResearchIterations,
             maxContextChars: this.configService.values.limits.maxContextChars,
             phaseLabel: "Goals Research",
+            ...this.loopParams(),
             onTrace: traceTracker
         });
 
@@ -773,28 +884,12 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
         const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(0, this.configService.values.limits.maxContextChars);
 
         try {
-            const response = await this.openai.chat.completions.create({
-                model: this.configService.values.openAI.modelName,
-                messages: [
-                    { role: "system", content: templates.PLANNER_GOALS_SYSTEM_PROMPT },
-                    { role: "user", content: templates.createPlannerGoalsUserPrompt(contextFound, maxGoals) },
-                ],
-                response_format: { type: "json_object" },
-            });
-
-            const content = response.choices[0]?.message?.content;
-            if (!content) throw new Error("Empty response");
-
-            let parsed = JSON.parse(content);
-            if (!Array.isArray(parsed)) {
-                const maybeArray = Object.values(parsed).find(Array.isArray);
-                if (maybeArray) {
-                    parsed = maybeArray;
-                } else {
-                    parsed = [JSON.stringify(parsed)];
-                }
-            }
-            return (parsed as string[]).slice(0, maxGoals);
+            const parsed = await this.structured(
+                templates.PLANNER_GOALS_SYSTEM_PROMPT,
+                templates.createPlannerGoalsUserPrompt(contextFound, maxGoals),
+                schemas.GoalsSchema,
+            );
+            return parsed.goals.slice(0, maxGoals);
         } catch (error) {
             this.logger.error(error, "Failed to parse user goals from LLM");
             return ["Explore API documentation and verify endpoints."];
@@ -805,19 +900,11 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
         this.logger.log(`Generating master summary report...`);
 
         try {
-            const response = await this.openai.chat.completions.create({
-                model: this.configService.values.openAI.modelName,
-                messages: [
-                    { role: "system", content: templates.PLANNER_SUMMARY_SYSTEM_PROMPT },
-                    { role: "user", content: templates.createPlannerSummaryUserPrompt(JSON.stringify(reportsData, null, 2)) },
-                ],
-                response_format: { type: "json_object" },
-            });
-
-            const content = response.choices[0]?.message?.content;
-            if (!content) throw new Error("Empty response from summary LLM");
-
-            const structured = JSON.parse(content) as types.planner.StructuredMasterSummary;
+            const structured = await this.structured(
+                templates.PLANNER_SUMMARY_SYSTEM_PROMPT,
+                templates.createPlannerSummaryUserPrompt(JSON.stringify(reportsData, null, 2)),
+                schemas.MasterSummarySchema,
+            ) as unknown as types.planner.StructuredMasterSummary;
 
             // Build a fallback markdown from the structured data
             const markdown = structured.executiveSummary || "See structured summary for details.";

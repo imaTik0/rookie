@@ -9,6 +9,7 @@ import { TestSuiteRepository } from "./TestSuiteRepository.ts";
 import { DockerExecutor } from "./DockerExecutor.ts";
 import { ReportRepository } from "./ReportRepository.ts";
 import { ConfigService } from "./ConfigService.ts";
+import { isEnvironmentError, parseImportedPackages } from "../sandbox/depDetect.ts";
 
 export class Executor {
     private dockerExecutor: DockerExecutor;
@@ -24,11 +25,19 @@ export class Executor {
         private reportRepository: ReportRepository,
         private configService: ConfigService,
     ) {
+        const sb = this.configService.values.sandbox;
+        // networkMode: "none" → offline; "network"/named → attach to that docker network.
+        const offline = sb.networkMode === "none";
         this.dockerExecutor = new DockerExecutor({
             timeoutMs: 60000,
             memoryLimit: "2048m",
-            networkAccess: true,
-            networkName: "rookie-network",
+            networkAccess: !offline,
+            networkName: offline
+                ? undefined
+                : (sb.networkMode === "network" ? sb.networkName : sb.networkMode),
+            hardening: sb.hardening,
+            user: sb.user,
+            pidsLimit: sb.pidsLimit,
         });
     }
 
@@ -134,36 +143,13 @@ export class Executor {
                     ? JSON.stringify(execResult.error)
                     : String(execResult.error);
 
-                const refinedQuery = await this.promptService.refineSearchQuery(
-                    stepReport.error || "Unknown error",
-                    example.explanation || example.title,
-                );
-                stepReport.relatedKnowledge = await this.findRelatedKnowledge(
+                await this.analyzeStepFailure(
                     testSuite.projectId,
-                    refinedQuery,
-                );
-
-                // LLM failure classification
-                const relatedDocsText = (stepReport.relatedKnowledge || [])
-                    .map((k: any) => {
-                        const payload = k.payload || {};
-                        const fileName = payload.metadata?.fileName || "unknown_file";
-                        const line = payload.metadata?.lineNumber ? ` [Line: ${payload.metadata.lineNumber}]` : "";
-                        return `--- DOCUMENT: ${fileName}${line} ---\n${payload.content || JSON.stringify(k)}`;
-                    })
-                    .join("\n\n").substring(0, 15000);
-                stepReport.failureAnalysis = await this.promptService.classifyFailure(
-                    stepReport.error,
+                    stepReport,
                     example.fullProgram,
-                    relatedDocsText,
                     `${example.title}: ${example.explanation}`,
-                );
-                onProgress?.(
-                    JSON.stringify({
-                        type: "log",
-                        content:
-                            `Failure classified as: ${stepReport.failureAnalysis.documentationGap} - ${stepReport.failureAnalysis.reasoning}`,
-                    }),
+                    example.explanation || example.title,
+                    onProgress,
                 );
             }
             stepsResults.push(stepReport);
@@ -251,36 +237,13 @@ export class Executor {
                     ? JSON.stringify(execResult.error)
                     : String(execResult.error);
 
-                const refinedQuery = await this.promptService.refineSearchQuery(
-                    stepReport.error || "Unknown error",
-                    call.stepExplanation,
-                );
-                stepReport.relatedKnowledge = await this.findRelatedKnowledge(
+                await this.analyzeStepFailure(
                     testSuite.projectId,
-                    refinedQuery,
-                );
-
-                // LLM failure classification
-                const relatedDocsText = (stepReport.relatedKnowledge || [])
-                    .map((k: any) => {
-                        const payload = k.payload || {};
-                        const fileName = payload.metadata?.fileName || "unknown_file";
-                        const line = payload.metadata?.lineNumber ? ` [Line: ${payload.metadata.lineNumber}]` : "";
-                        return `--- DOCUMENT: ${fileName}${line} ---\n${payload.content || JSON.stringify(k)}`;
-                    })
-                    .join("\n\n").substring(0, 15000);
-                stepReport.failureAnalysis = await this.promptService.classifyFailure(
-                    stepReport.error,
+                    stepReport,
                     call.fetch,
-                    relatedDocsText,
                     call.stepExplanation,
-                );
-                onProgress?.(
-                    JSON.stringify({
-                        type: "log",
-                        content:
-                            `Failure classified as: ${stepReport.failureAnalysis.documentationGap} - ${stepReport.failureAnalysis.reasoning}`,
-                    }),
+                    call.stepExplanation,
+                    onProgress,
                 );
             }
             stepsResults.push(stepReport);
@@ -306,28 +269,89 @@ export class Executor {
         return await this.reportRepository.create(reportData);
     }
 
+    /**
+     * Diagnose a failed step. Environment/tooling failures (missing dependency,
+     * sandbox limit, etc.) are classified directly as ENVIRONMENT so the
+     * documentation isn't wrongly blamed. Genuine failures go to the LLM
+     * documentation-gap classifier with RAG-retrieved related docs.
+     */
+    private async analyzeStepFailure(
+        projectId: string,
+        stepReport: types.report.StepResult,
+        code: string,
+        description: string,
+        queryContext: string,
+        onProgress?: (msg: string) => void,
+    ): Promise<void> {
+        const error = stepReport.error || "Unknown error";
+
+        if (isEnvironmentError(error)) {
+            stepReport.failureAnalysis = {
+                errorMessage: error.substring(0, 200),
+                failedFunction: "n/a (environment)",
+                documentationGap: "ENVIRONMENT",
+                reasoning:
+                    "Failure was caused by the execution environment/tooling (e.g. a missing dependency, failed install, or sandbox limit), not by the documentation.",
+                suggestedDocsFix:
+                    "No documentation change required. Verify the runtime, dependencies and sandbox configuration.",
+            };
+            onProgress?.(
+                JSON.stringify({
+                    type: "log",
+                    content: `Failure classified as: ENVIRONMENT - ${stepReport.failureAnalysis.reasoning}`,
+                }),
+            );
+            return;
+        }
+
+        const refinedQuery = await this.promptService.refineSearchQuery(error, queryContext);
+        stepReport.relatedKnowledge = await this.findRelatedKnowledge(projectId, refinedQuery);
+
+        const relatedDocsText = (stepReport.relatedKnowledge || [])
+            .map((k: any) => {
+                const payload = k.payload || {};
+                const fileName = payload.metadata?.fileName || "unknown_file";
+                const line = payload.metadata?.lineNumber
+                    ? ` [Line: ${payload.metadata.lineNumber}]`
+                    : "";
+                return `--- DOCUMENT: ${fileName}${line} ---\n${payload.content || JSON.stringify(k)}`;
+            })
+            .join("\n\n").substring(0, 15000);
+
+        stepReport.failureAnalysis = await this.promptService.classifyFailure(
+            error,
+            code,
+            relatedDocsText,
+            description,
+        );
+        onProgress?.(
+            JSON.stringify({
+                type: "log",
+                content:
+                    `Failure classified as: ${stepReport.failureAnalysis.documentationGap} - ${stepReport.failureAnalysis.reasoning}`,
+            }),
+        );
+    }
+
     private async findRelatedKnowledge(projectId: string, query: string) {
         try {
-            const vCollection = await this.vectorCollectionFactory.createCollection(projectId);
+            const vCollection = await this.vectorCollectionFactory.createCollection<
+                types.file.FileShard
+            >(projectId);
+            const limit = this.configService.values.limits.relatedDocsLimit;
+            const rerankCfg = this.configService.values.reranker;
+            const fetchLimit = rerankCfg.mode === "off" ? limit : Math.max(limit, rerankCfg.topN);
+
             const [dense, sparse] = await Promise.all([
                 this.embeddingService.embed(query),
-                this.embeddingService.sparseEmbed(query),
+                Promise.resolve(this.embeddingService.sparseEmbed(query)),
             ]);
-            return await vCollection.searchHybrid(dense[0], sparse, this.configService.values.limits.relatedDocsLimit);
+            const raw = await vCollection.searchHybrid(dense[0], sparse, fetchLimit);
+            return await this.promptService.rerankSearchResults(query, raw, limit);
         } catch (err) {
             this.logger.error(err, "Failed to perform hybrid search for related knowledge");
             return [];
         }
-    }
-
-    private extractCodeBlocks(markdown: string): string[] {
-        const regex = /```javascript\n([\s\S]*?)\n```/g;
-        const blocks = [];
-        let match;
-        while ((match = regex.exec(markdown)) !== null) {
-            blocks.push(match[1]);
-        }
-        return blocks;
     }
 
     private async runStepInDocker(
@@ -339,6 +363,15 @@ export class Executor {
         error?: unknown;
         logs: string;
     }> {
+        // Install any third-party packages the generated code imports, so library
+        // examples actually run instead of failing with MODULE_NOT_FOUND.
+        const packages = this.configService.values.sandbox.autoInstallDeps
+            ? parseImportedPackages(userCode)
+            : [];
+        if (packages.length > 0) {
+            this.logger.log(`Sandbox installing packages: ${packages.join(", ")}`);
+        }
+
         const script = `
                 import fs from 'fs';
                 const ctx = ${JSON.stringify(currentCtx)};
@@ -379,7 +412,7 @@ export class Executor {
             const execResult = await this.dockerExecutor.execute(
                 "node",
                 script,
-                60000,
+                { timeoutMs: 60000, packages },
             );
             const fullLogs = `STDOUT:\n${execResult.stdout}\n\nSTDERR:\n${execResult.stderr}`;
 

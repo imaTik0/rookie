@@ -21,24 +21,22 @@ export class FileProcessorService {
         for (let i = 0; i < files.length; i += BATCH_SIZE) {
             const batch = files.slice(i, i + BATCH_SIZE);
 
-            const points: types.vector.VectorPoint<types.file.FileShard>[] = [];
+            // One batched embeddings request per batch instead of one per chunk.
+            const denseVectors = await this.embeddingService.embedBatch(
+                batch.map((f) => f.content),
+            );
 
-            for (const file of batch) {
-                const [dense, sparse] = await Promise.all([
-                    this.embeddingService.embed(file.content),
-                    Promise.resolve(this.embeddingService.sparseEmbed(file.content)),
-                ]);
-
-                const point: types.vector.VectorPoint<types.file.FileShard> = {
+            const points: types.vector.VectorPoint<types.file.FileShard>[] = batch.map(
+                (file, j) => ({
                     id: uuidv4() as types.core.VectorPointId,
                     vector: {
-                        "dense": dense[0],
-                        "sparse": sparse,
+                        "dense": denseVectors[j],
+                        // Document-side BM25 weights (IDF added server-side by Qdrant).
+                        "sparse": this.embeddingService.sparseEmbedDocument(file.content),
                     },
                     payload: file,
-                };
-                points.push(point);
-            }
+                }),
+            );
 
             await vectorCollection.upsertPoints(points);
         }
