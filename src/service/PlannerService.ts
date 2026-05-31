@@ -27,17 +27,21 @@ export class PlannerService {
             project.files.map((fileId) => this.fileService.downloadFile(fileId)),
         );
         const validFiles = files.filter((f): f is NonNullable<typeof f> => !!f);
-        const docsContent = validFiles.map((f) => new TextDecoder().decode(f.buffer)).join("\n\n");
 
-        if (!docsContent) {
-            throw new Error("No documentation content found for this project.");
+        if (validFiles.length === 0) {
+            throw new Error("No documentation files found for this project.");
         }
 
         // 2. Generate user goals
         onProgress?.(JSON.stringify({ type: "log", content: "Analyzing documentation and generating user goals..." }));
-        const goals = await this.promptService.promptForUserGoals(docsContent, maxGoals, (msg) => {
-            onProgress?.(JSON.stringify({ type: "log", content: msg }));
-        });
+        const goals = await this.promptService.promptForUserGoals(
+            project._id as string,
+            validFiles,
+            maxGoals,
+            (msg) => {
+                onProgress?.(JSON.stringify({ type: "log", content: msg }));
+            }
+        );
 
         onProgress?.(JSON.stringify({ type: "GOALS_GENERATED", goals }));
 

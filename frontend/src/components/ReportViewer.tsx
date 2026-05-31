@@ -27,7 +27,7 @@ const MarkdownRenderer = ({ content }: { content: string }) => {
 
     return (
         <div
-            className="prose prose-sm max-w-full text-gray-700 prose-headings:text-gray-900 prose-a:text-orange-500 prose-code:text-orange-600 prose-code:bg-gray-100 prose-pre:bg-gray-50 prose-pre:border prose-pre:border-gray-200"
+            className="prose prose-invert max-w-full prose-headings:bg-gradient-to-r prose-headings:from-gray-200 prose-headings:to-gray-500 prose-headings:bg-clip-text prose-headings:text-transparent prose-a:text-white hover:prose-a:text-gray-300 transition-all duration-300"
             dangerouslySetInnerHTML={{ __html: html as string }}
         />
     );
@@ -36,27 +36,31 @@ const MarkdownRenderer = ({ content }: { content: string }) => {
 const StatusBadge = ({ status }: { status: string }) => {
     const config: Record<string, any> = {
         SUCCESS: {
-            bg: "bg-emerald-500/20",
-            border: "border-emerald-500/30",
+            bg: "bg-emerald-500/10",
+            border: "border-emerald-500/20",
             text: "text-emerald-400",
+            shadow: "shadow-[0_0_10px_rgba(16,185,129,0.1)]",
             icon: <CheckCircle size={14} className="mr-1.5" />,
         },
         FAILED: {
-            bg: "bg-rose-500/20",
-            border: "border-rose-500/30",
+            bg: "bg-rose-500/10",
+            border: "border-rose-500/20",
             text: "text-rose-400",
+            shadow: "shadow-[0_0_10px_rgba(244,63,94,0.1)]",
             icon: <XCircle size={14} className="mr-1.5" />,
         },
         PARTIAL_FAILURE: {
-            bg: "bg-amber-500/20",
-            border: "border-amber-500/30",
+            bg: "bg-amber-500/10",
+            border: "border-amber-500/20",
             text: "text-amber-400",
+            shadow: "shadow-[0_0_10px_rgba(245,158,11,0.1)]",
             icon: <AlertTriangle size={14} className="mr-1.5" />,
         },
         RUNNING: {
-            bg: "bg-blue-500/20",
-            border: "border-blue-500/30",
-            text: "text-orange-500",
+            bg: "bg-white/5",
+            border: "border-white/10",
+            text: "text-gray-300",
+            shadow: "shadow-[0_0_10px_rgba(255,255,255,0.05)]",
             icon: <Loader size={14} className="mr-1.5 animate-spin" />,
         },
     };
@@ -64,7 +68,7 @@ const StatusBadge = ({ status }: { status: string }) => {
 
     return (
         <span
-            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border ${current.bg} ${current.border} ${current.text}`}
+            className={`inline-flex items-center px-3 py-1.5 rounded-full text-[10px] font-mono uppercase tracking-wider border backdrop-blur-md transition-all duration-300 hover:-translate-y-0.5 ${current.bg} ${current.border} ${current.text} ${current.shadow}`}
         >
             {current.icon}
             {status}
@@ -73,20 +77,20 @@ const StatusBadge = ({ status }: { status: string }) => {
 };
 
 const CodeBlock = ({ code, language = "javascript" }: { code: string; language?: string }) => (
-    <div className="bg-gray-50 rounded-xl overflow-hidden border border-gray-200 shadow-inner">
-        <div className="bg-white px-4 py-2.5 flex items-center justify-between border-b border-gray-200">
-            <span className="text-xs text-gray-600 font-medium uppercase tracking-wider">
+    <div className="bg-[#151517]/40 backdrop-blur-xl rounded-xl overflow-hidden border border-white/10 transition-all duration-300 hover:shadow-2xl hover:shadow-white/5 hover:border-white/20 group">
+        <div className="px-4 py-2.5 flex items-center justify-between border-b border-white/10 bg-white/5 group-hover:bg-white/10 transition-colors duration-300">
+            <span className="text-[10px] text-gray-400 font-mono uppercase tracking-wider">
                 {language}
             </span>
             <button
                 onClick={() => navigator.clipboard.writeText(code)}
-                className="text-gray-500 hover:text-orange-500 transition-colors"
+                className="text-gray-500 hover:text-white active:scale-95 transition-all duration-300 p-1 rounded-md hover:bg-white/10"
                 title="Copy"
             >
                 <Copy size={14} />
             </button>
         </div>
-        <pre className="p-4 text-xs text-emerald-400 font-mono overflow-x-auto max-h-96">
+        <pre className="p-5 text-xs text-gray-300 font-mono overflow-x-auto max-h-96">
       <code>{code}</code>
         </pre>
     </div>
@@ -101,8 +105,8 @@ const RelatedKnowledgeItem = ({ item }: { item: any }) => {
 
     if (!content) {
         return (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                <pre className="text-xs text-amber-600 whitespace-pre-wrap font-mono overflow-x-auto">
+            <div className="bg-white/5 border border-amber-500/20 backdrop-blur-xl rounded-xl p-4 transition-all duration-300 hover:shadow-xl">
+                <pre className="text-xs text-amber-400 whitespace-pre-wrap font-mono overflow-x-auto">
           {JSON.stringify(item, null, 2)}
                 </pre>
             </div>
@@ -110,31 +114,33 @@ const RelatedKnowledgeItem = ({ item }: { item: any }) => {
     }
 
     return (
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm mb-4 transition-all">
+        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden mb-3 transition-all duration-300 hover:shadow-2xl hover:shadow-white/5 hover:-translate-y-0.5">
             <div
-                className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center cursor-pointer hover:bg-gray-100 transition-colors"
+                className="px-5 py-4 border-b border-transparent flex justify-between items-center cursor-pointer hover:bg-white/5 transition-colors duration-300"
                 onClick={() => setIsExpanded(!isExpanded)}
             >
                 <div className="flex items-center gap-3">
-                    <FileText size={16} className={`${isExpanded ? "text-orange-500" : "text-gray-400"}`} />
-                    <span className="text-sm font-semibold text-gray-800">
+                    <FileText size={16} className={`transition-colors duration-300 ${isExpanded ? "text-gray-400/80" : "text-gray-500"}`} />
+                    <span className="text-sm font-medium text-gray-200">
                         {metadata.fileName || "Knowledge Base Match"}
                     </span>
                     {metadata.lineNumber && (
-                        <span className="text-[10px] text-gray-400 font-mono">
+                        <span className="text-[10px] text-gray-500 font-mono bg-[#151517]/40 px-2 py-0.5 rounded-full border border-white/10">
                             Line: {metadata.lineNumber}
                         </span>
                     )}
                 </div>
                 <div className="flex items-center gap-4">
-                    <span className="text-[10px] text-gray-400 font-mono bg-white px-2 py-0.5 rounded border border-gray-200">
+                    <span className="text-[10px] text-gray-400 font-mono bg-[#151517]/40 px-2.5 py-1 rounded-full border border-white/10 shadow-inner">
                         Score: {typeof score === "number" ? score.toFixed(4) : "N/A"}
                     </span>
-                    {isExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                    <div className="text-gray-500 bg-white/5 p-1 rounded-full border border-white/5">
+                        {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </div>
                 </div>
             </div>
             {isExpanded && (
-                <div className="p-5 bg-white border-t border-gray-100 animate-in fade-in slide-in-from-top-1 duration-200">
+                <div className="p-5 border-t border-white/10 bg-[#151517]/20 backdrop-blur-md">
                     <MarkdownRenderer content={content} />
                 </div>
             )}
@@ -161,39 +167,43 @@ const StepDetail = ({ step }: { step: any }) => {
 
     return (
         <div
-            className={`rounded-xl mb-4 bg-white shadow-lg overflow-hidden border ${
-                isFailed ? "border-rose-500/30 shadow-rose-900/10" : "border-gray-200"
+            className={`rounded-xl mb-4 bg-white/5 backdrop-blur-xl overflow-hidden border transition-all duration-300 hover:shadow-2xl hover:-translate-y-1 ${
+                isFailed ? "border-rose-500/30 hover:shadow-[0_0_15px_rgba(244,63,94,0.1)]" : "border-white/10 hover:shadow-white/5"
             }`}
         >
             <div
-                className="p-5 flex items-center justify-between cursor-pointer hover:bg-gray-100/50 transition-colors"
+                className="p-5 flex items-center justify-between cursor-pointer hover:bg-white/5 transition-colors duration-300"
                 onClick={() => setIsOpen(!isOpen)}
             >
                 <div className="flex items-center gap-4">
                     <div
-                        className={`p-2.5 rounded-xl ${
+                        className={`p-2.5 rounded-xl border backdrop-blur-md shadow-inner transition-transform duration-300 ${
                             isFailed
-                                ? "bg-rose-500/20 text-rose-400 shadow-inner shadow-rose-500/20"
-                                : "bg-emerald-500/20 text-emerald-400 shadow-inner shadow-emerald-500/20"
+                                ? "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                                : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
                         }`}
                     >
                         {isFailed
-                            ? <X size={20} className="stroke-[3px]" />
-                            : <Check size={20} className="stroke-[3px]" />}
+                            ? <X size={18} className="stroke-[3px]" />
+                            : <Check size={18} className="stroke-[3px]" />}
                     </div>
                     <div>
-                        <h3 className="font-bold text-gray-900 text-base">Step {step.stepIndex}</h3>
-                        <p className="text-sm text-gray-600 mt-0.5">{step.stepDescription}</p>
+                        <h3 className="font-semibold text-transparent bg-clip-text bg-gradient-to-r from-gray-100 to-gray-400 text-sm tracking-wide">
+                            Step {step.stepIndex}
+                        </h3>
+                        <p className="text-xs text-gray-400 mt-1 font-sans">{step.stepDescription}</p>
                     </div>
                 </div>
-                {isOpen
-                    ? <ChevronUp className="text-gray-500" />
-                    : <ChevronDown className="text-gray-500" />}
+                <div className="text-gray-500 bg-white/5 p-1.5 rounded-full border border-white/5 transition-transform duration-300">
+                    {isOpen
+                        ? <ChevronUp size={16} />
+                        : <ChevronDown size={16} />}
+                </div>
             </div>
 
             {isOpen && (
-                <div className="border-t border-gray-200 bg-gray-50">
-                    <div className="flex border-b border-gray-200 px-2 pt-2">
+                <div className="border-t border-white/10 bg-[#151517]/20">
+                    <div className="flex border-b border-white/10 px-5 gap-2 overflow-x-auto no-scrollbar">
                         {["logs", "analysis", "script", "context", "related"].map((tab) => {
                             if (tab === "related" && !hasRelated) return null;
                             if (tab === "analysis" && !hasAnalysis) return null;
@@ -201,10 +211,10 @@ const StepDetail = ({ step }: { step: any }) => {
                                 <button
                                     key={tab}
                                     onClick={() => setActiveTab(tab)}
-                                    className={`px-5 py-2.5 text-sm font-medium transition-all rounded-t-lg mx-1 ${
+                                    className={`px-4 py-3 text-[11px] font-mono uppercase tracking-widest transition-all duration-300 border-b-2 active:scale-95 whitespace-nowrap ${
                                         activeTab === tab
-                                            ? "bg-gray-100 text-gray-900 shadow-sm"
-                                            : "text-gray-500 hover:text-gray-700 hover:bg-white"
+                                            ? "border-gray-200 text-gray-200"
+                                            : "border-transparent text-gray-500 hover:text-gray-300 hover:border-gray-600/50"
                                     }`}
                                 >
                                     {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -215,9 +225,9 @@ const StepDetail = ({ step }: { step: any }) => {
 
                     <div className="p-6">
                         {activeTab === "logs" && (
-                            <div className="space-y-4">
+                            <div className="space-y-5">
                                 {step.error && (
-                                    <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 shadow-inner">
+                                    <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-5 backdrop-blur-md shadow-[0_0_15px_rgba(244,63,94,0.05)]">
                                         <pre className="text-rose-400/90 text-xs font-mono whitespace-pre-wrap">{step.error}</pre>
                                     </div>
                                 )}
@@ -228,96 +238,96 @@ const StepDetail = ({ step }: { step: any }) => {
                             </div>
                         )}
                         {activeTab === "analysis" && step.failureAnalysis && (
-                            <div className="space-y-4">
+                            <div className="space-y-5">
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div className="bg-white border border-gray-200 rounded-xl p-4">
-                                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-5 transition-all duration-300 hover:bg-white/10">
+                                        <p className="text-[10px] text-gray-400 font-mono uppercase tracking-widest mb-1.5">
                                             Documentation Gap
                                         </p>
                                         <p
-                                            className={`text-lg font-bold ${
+                                            className={`text-sm font-mono font-semibold ${
                                                 step.failureAnalysis.documentationGap === "MISSING"
-                                                    ? "text-rose-600"
+                                                    ? "text-rose-400"
                                                     : step.failureAnalysis.documentationGap ===
                                                             "AMBIGUOUS"
-                                                    ? "text-amber-600"
+                                                    ? "text-amber-400"
                                                     : step.failureAnalysis.documentationGap ===
                                                             "INCORRECT"
-                                                    ? "text-red-600"
+                                                    ? "text-red-400"
                                                     : step.failureAnalysis.documentationGap ===
                                                             "CONFIG"
-                                                    ? "text-blue-600"
-                                                    : "text-gray-600"
+                                                    ? "text-blue-400"
+                                                    : "text-gray-300"
                                             }`}
                                         >
                                             {step.failureAnalysis.documentationGap}
                                         </p>
                                     </div>
-                                    <div className="bg-white border border-gray-200 rounded-xl p-4">
-                                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-5 transition-all duration-300 hover:bg-white/10">
+                                        <p className="text-[10px] text-gray-400 font-mono uppercase tracking-widest mb-1.5">
                                             Failed Function
                                         </p>
-                                        <p className="text-sm font-mono font-semibold text-gray-900">
+                                        <p className="text-sm font-mono font-semibold text-gray-200">
                                             {step.failureAnalysis.failedFunction}
                                         </p>
                                     </div>
                                 </div>
-                                <div className="bg-white border border-gray-200 rounded-xl p-4">
-                                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">
+                                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-5 transition-all duration-300 hover:bg-white/10">
+                                    <p className="text-[10px] text-gray-400 font-mono uppercase tracking-widest mb-3">
                                         Reasoning
                                     </p>
-                                    <p className="text-sm text-gray-700 leading-relaxed">
+                                    <p className="text-sm text-gray-300 leading-relaxed font-sans">
                                         {step.failureAnalysis.reasoning}
                                     </p>
                                 </div>
                                 {step.failureAnalysis.pinpointedFragment && (
-                                    <div className="bg-rose-50 border border-rose-200 rounded-xl p-4">
-                                        <p className="text-xs text-rose-600 uppercase tracking-wider mb-2 font-bold">
+                                    <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-5 backdrop-blur-md">
+                                        <p className="text-[10px] text-rose-400/90 font-mono uppercase tracking-widest mb-3 font-semibold">
                                             Pinpointed Documentation Fragment (Problematic)
                                         </p>
-                                        <div className="bg-white border border-rose-100 rounded-lg p-3 shadow-inner">
-                                            <pre className="text-xs text-gray-700 font-mono whitespace-pre-wrap italic">
+                                        <div className="bg-[#151517]/40 border border-white/5 rounded-lg p-4 shadow-inner">
+                                            <pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap italic">
                                                 "{step.failureAnalysis.pinpointedFragment}"
                                             </pre>
                                         </div>
                                     </div>
                                 )}
-                                <div className="bg-orange-50 border border-orange-200 rounded-xl p-4">
-                                    <p className="text-xs text-orange-600 uppercase tracking-wider mb-2">
+                                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-5 transition-all duration-300 hover:bg-white/10">
+                                    <p className="text-[10px] text-gray-400 font-mono uppercase tracking-widest mb-3">
                                         Suggested Documentation Fix
                                     </p>
-                                    <p className="text-sm text-gray-800 leading-relaxed mb-4">
+                                    <p className="text-sm text-gray-300 leading-relaxed mb-5 font-sans">
                                         {step.failureAnalysis.suggestedDocsFix}
                                     </p>
                                     {step.failureAnalysis.proposedFragment && (
-                                        <div className="mt-4">
-                                            <p className="text-[10px] text-orange-500 uppercase tracking-widest mb-2 font-bold">
+                                        <div className="mt-5 border-t border-white/10 pt-5">
+                                            <p className="text-[10px] text-gray-400 font-mono uppercase tracking-widest mb-3 font-semibold">
                                                 Proposed Documentation Update
                                             </p>
-                                            <div className="bg-white border border-orange-100 rounded-lg overflow-hidden shadow-sm">
-                                                <div className="bg-emerald-50 px-3 py-1.5 border-b border-emerald-100 flex items-center gap-2">
-                                                    <CheckCircle size={12} className="text-emerald-500" />
-                                                    <span className="text-[10px] text-emerald-600 font-bold uppercase">Corrected version</span>
+                                            <div className="bg-[#151517]/40 backdrop-blur-xl border border-white/10 rounded-xl overflow-hidden shadow-inner">
+                                                <div className="bg-emerald-500/10 px-4 py-2 border-b border-emerald-500/20 flex items-center gap-2">
+                                                    <CheckCircle size={14} className="text-emerald-400" />
+                                                    <span className="text-[10px] text-emerald-400 font-mono uppercase tracking-widest">Corrected version</span>
                                                 </div>
-                                                <div className="p-3">
+                                                <div className="p-5">
                                                     <MarkdownRenderer content={step.failureAnalysis.proposedFragment} />
                                                 </div>
                                             </div>
                                         </div>
                                     )}
                                 </div>
-                                <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-                                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">
+                                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl p-5 transition-all duration-300 hover:bg-white/10">
+                                    <p className="text-[10px] text-gray-400 font-mono uppercase tracking-widest mb-3">
                                         Full Error Message
                                     </p>
-                                    <pre className="text-xs text-rose-600 font-mono whitespace-pre-wrap">{step.failureAnalysis.errorMessage}</pre>
+                                    <pre className="text-xs text-rose-400/90 font-mono whitespace-pre-wrap bg-[#151517]/40 p-4 rounded-lg shadow-inner">{step.failureAnalysis.errorMessage}</pre>
                                 </div>
                             </div>
                         )}
                         {activeTab === "script" && <CodeBlock code={step.scriptContent} />}
                         {activeTab === "context" && (
-                            <div className="bg-gray-50 rounded-xl border border-gray-200 p-4 shadow-inner">
-                                <pre className="text-xs text-orange-600 font-mono overflow-auto max-h-96">
+                            <div className="bg-[#151517]/40 backdrop-blur-xl rounded-xl border border-white/10 p-5 shadow-inner">
+                                <pre className="text-xs text-gray-300 font-mono overflow-auto max-h-96">
                   {JSON.stringify(step.contextAfter, null, 2)}
                                 </pre>
                             </div>
@@ -341,28 +351,28 @@ export default function ReportViewer({ report, onBack }: { report: any; onBack: 
     const isCodeGeneration = report.type === "CODE_GENERATION";
 
     return (
-        <div className="flex flex-col h-full bg-gray-50 overflow-y-auto">
-            <div className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-md">
-                <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="flex flex-col h-full bg-[#1c1c1e] text-gray-200 overflow-y-auto selection:bg-gray-500/30 font-sans">
+            <div className="bg-[#151517]/60 backdrop-blur-2xl border-b border-white/10 sticky top-0 z-20 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+                <div className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
                     <div className="flex items-center gap-5">
                         <button
                             onClick={onBack}
-                            className="p-2.5 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors text-gray-700"
+                            className="p-2.5 bg-white/5 border border-white/10 rounded-xl text-gray-400 hover:text-white hover:bg-white/10 active:scale-95 transition-all duration-300 hover:shadow-lg hover:shadow-white/5"
                             title="Back to Stream"
                         >
-                            <ArrowLeft size={18} />
+                            <ArrowLeft size={16} />
                         </button>
                         <div>
-                            <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                                <Activity className="text-orange-500" size={20} />
+                            <h1 className="text-sm font-semibold flex items-center gap-2.5 bg-gradient-to-r from-gray-100 to-gray-400 bg-clip-text text-transparent tracking-wide">
+                                <Activity className="text-gray-400" size={16} />
                                 {isCodeGeneration
                                     ? "Code Generation Report"
                                     : "Test Execution Report"}
                             </h1>
-                            <p className="text-xs text-gray-600 mt-1 font-mono">
-                                Suite: <span className="text-gray-700">{report.testSuiteId}</span> •
-                                {" "}
-                                {new Date(report.createdAt).toLocaleString()}
+                            <p className="text-[10px] text-gray-500 mt-1.5 font-mono uppercase tracking-widest flex items-center gap-2">
+                                <span>Suite: <span className="text-gray-300 font-semibold">{report.testSuiteId}</span></span>
+                                <span className="w-1 h-1 rounded-full bg-gray-600"></span>
+                                <span>{new Date(report.createdAt).toLocaleString()}</span>
                             </p>
                         </div>
                     </div>
@@ -370,25 +380,37 @@ export default function ReportViewer({ report, onBack }: { report: any; onBack: 
                 </div>
             </div>
 
-            <div className="max-w-6xl mx-auto w-full px-6 py-10 space-y-10">
+            <div className="max-w-6xl mx-auto w-full px-6 py-10 space-y-10 relative">
+                {/* Decorative background blurs */}
+                <div className="absolute top-0 left-1/4 w-96 h-96 bg-white/5 rounded-full blur-[128px] -z-10 pointer-events-none" />
+                <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-white/5 rounded-full blur-[128px] -z-10 pointer-events-none" />
+
                 {isCodeGeneration && report.detailedResults?.finalOutput && (
-                    <div className="bg-white p-8 rounded-2xl shadow-xl border border-gray-200">
-                        <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3 border-b border-gray-200 pb-4">
-                            <FileCode className="text-orange-600" /> Generated Deliverables
+                    <div className="bg-white/5 backdrop-blur-xl p-8 rounded-2xl border border-white/10 shadow-2xl transition-all duration-300 hover:border-white/20">
+                        <h2 className="text-sm font-semibold bg-gradient-to-r from-gray-200 to-gray-500 bg-clip-text text-transparent mb-6 flex items-center gap-3 border-b border-white/10 pb-4">
+                            <div className="p-1.5 bg-white/5 rounded-lg border border-white/5">
+                                <FileCode className="text-gray-400" size={16} />
+                            </div>
+                            Generated Deliverables
                         </h2>
-                        <MarkdownRenderer content={report.detailedResults.finalOutput} />
+                        <div className="bg-[#151517]/20 p-6 rounded-xl border border-white/5 shadow-inner">
+                            <MarkdownRenderer content={report.detailedResults.finalOutput} />
+                        </div>
                     </div>
                 )}
 
                 <div>
-                    <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3 border-b border-gray-200 pb-4">
-                        <Activity className="text-orange-500" /> Execution Diagnostics & Validation
+                    <h2 className="text-[11px] font-mono uppercase tracking-widest text-gray-400 mb-6 flex items-center gap-3 border-b border-white/10 pb-4 ml-1">
+                        <Activity className="text-gray-500" size={14} />
+                        Execution Diagnostics & Validation
                     </h2>
                     <div className="space-y-4">
                         {steps.length === 0 && (
-                            <p className="text-gray-500 italic">
-                                No execution steps found in this report.
-                            </p>
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-8 text-center backdrop-blur-xl">
+                                <p className="text-gray-500 text-sm font-mono tracking-wide">
+                                    No execution steps found in this report.
+                                </p>
+                            </div>
                         )}
                         {steps.map((step: any) => <StepDetail key={step.stepIndex} step={step} />)}
                     </div>

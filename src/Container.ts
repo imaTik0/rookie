@@ -10,6 +10,7 @@ import { VectorConnection } from "./db/vectordb/VectorManger.ts";
 import { VectorCollectionFactory } from "./db/vectordb/VectorCollectionFactory.ts";
 import { EmbeddingService } from "./service/EmbeddingService.ts";
 import OpenAI from "@openai/openai";
+import { TraceRepository } from "./db/mongo/TraceRepository.ts";
 
 export class Container extends IOC {
     constructor() {
@@ -28,6 +29,7 @@ export class Container extends IOC {
         this.register(App);
         this.register(MigrationManager);
         this.register(VectorCollectionFactory);
+        this.register(TraceRepository);
         this.registerFactory(
             "logger",
             (
@@ -60,6 +62,10 @@ export class Container extends IOC {
 
     registerOpenAIFetcher(openAI: OpenAI) {
         this.registerValue("openai", openAI);
+    }
+
+    registerOpenAIEmbeddingFetcher(openAI: OpenAI) {
+        this.registerValue("openaiEmbedding", openAI);
     }
 
     getMigrationManager() {

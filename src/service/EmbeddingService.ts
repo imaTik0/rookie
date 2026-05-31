@@ -7,20 +7,24 @@ export class EmbeddingService {
     private dimensions: number;
 
     constructor(
-        private openai: OpenAI,
+        private openaiEmbedding: OpenAI,
         private configService: ConfigService,
     ) {
-        // Hard-set to a model accommodating 8192 context window. Config model will be ignored.
-        this.modelName = "text-embedding-3-small";
-        this.dimensions = configService.values.embeddings.vectorSize || 384;
+        this.modelName = configService.values.embeddings.embeddingModel;
+        this.dimensions = configService.values.embeddings.vectorSize;
     }
 
     async embed(text: string): Promise<types.vector.DenseVector[]> {
-        const response = await this.openai.embeddings.create({
+        const payload: any = {
             model: this.modelName,
             input: text,
-            dimensions: this.dimensions,
-        });
+        };
+        // Not all local models support overriding dimensions
+        if (this.dimensions && this.dimensions > 0) {
+            payload.dimensions = this.dimensions;
+        }
+
+        const response = await this.openaiEmbedding.embeddings.create(payload);
         return response.data.map((d: any) => d.embedding);
     }
 

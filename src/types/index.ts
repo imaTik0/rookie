@@ -5,3 +5,4 @@ export * as report from "./report.ts";
 export * as vector from "./vector.ts";
 export * as core from "./core.ts";
 export * as planner from "./planner.ts";
+export * as trace from "./trace.ts";

@@ -95,10 +95,9 @@ export class DockerExecutor {
         let finalStdinContent = code;
         if (lang === "node") {
             const executionCommand = "node run.js";
+            const delimiter = crypto.randomUUID().replace(/-/g, "");
             const codeBlock = code.trim()
-                ? `cat << 'ENDEVALCODE' > run.js
-${code}
-ENDEVALCODE`
+                ? `cat << '${delimiter}' > run.js\n${code}\n${delimiter}`
                 : "";
 
             finalStdinContent = `

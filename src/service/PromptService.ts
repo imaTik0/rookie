@@ -3,17 +3,16 @@ import { Logger } from "../Logger.ts";
 import { EmbeddingService } from "./EmbeddingService.ts";
 import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
 import * as types from "../types/index.ts";
-
+import { ConfigService } from "./ConfigService.ts";
+import { TraceRepository } from "../db/mongo/TraceRepository.ts";
 import {
-    DEFAULT_SEARCH_LIMIT,
-    MAX_CONTEXT_CHARS,
-    MAX_RESEARCH_ITERATIONS,
-    MAX_RESULT_CHARS,
-    MAX_SCENARIO_DOCS_CHARS,
-    MAX_VERIFICATION_ITERATIONS,
-    MODEL_NAME,
     SEARCH_TOOL,
     SMOKE_TEST_TOOL,
+    LIST_FILES_TOOL,
+    READ_FILE_TOOL,
+    HEAD_FILE_TOOL,
+    TAIL_FILE_TOOL,
+    GREP_FILE_TOOL,
 } from "./prompt/constants.ts";
 import { emitLog, emitToken, ProgressCallback } from "./prompt/helpers.ts";
 import {
@@ -23,6 +22,7 @@ import {
     SmokeTestCallback,
     SmokeTestToolArgs,
     StructuredResponse,
+    RouterPlanResponse,
 } from "./prompt/types.ts";
 import * as templates from "./prompt/templates.ts";
 import { runAgenticLoop } from "./prompt/agenticLoop.ts";
@@ -35,23 +35,78 @@ export class PromptService {
         private logger: Logger,
         private embeddingService: EmbeddingService,
         private vectorCollectionFactory: VectorCollectionFactory,
+        private configService: ConfigService,
+        private traceRepository: TraceRepository,
     ) {}
 
     public async promptForApiUsageScenario(
-        docs: string,
+        vectorCollectionName: string,
+        files: { metadata: any; buffer: Uint8Array }[],
         startingContext: string,
         options: PromptOptions = {},
         onProgress?: ProgressCallback,
     ): Promise<StructuredResponse> {
-        const query = `${options.userPreferences || ""} ${startingContext}`.substring(0, 2000);
+        const goal = `Generate a comprehensive test scenario. Preferences: ${options.userPreferences || "None"}. Steps: ${options.minimalLength || 10}-${options.maximalLength || 20}.`;
         
-        const smartDocs = await this.rankAndFilterDocs(docs, query, MAX_SCENARIO_DOCS_CHARS);
-        const smartCtx = await this.rankAndFilterDocs(startingContext, query, MAX_CONTEXT_CHARS);
+        // 1. Router
+        const plan = await this.promptForExecutionPlan(vectorCollectionName, goal, onProgress);
+        const planStepsStr = plan.steps.map(s => `- ${s.stepExplanation} (Action: ${s.action})`).join("\n");
 
-        const systemPrompt = templates.createSystemPrompt(options.mandatoryImports);
+        // 2. Research / Exploration using agentic loop
+        const systemPrompt = `You are a Research Agent planning a test scenario. 
+Your goal is to gather the exact API functions and context needed.
+Follow this plan:
+${planStepsStr}
+
+When you have found all necessary functions and endpoints, reply with EXACTLY "READY_FOR_GENERATION".`;
+
+        const messages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[] = [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: `Start your research to generate a ${options.minimalLength || 10}-${options.maximalLength || 20} steps scenario.` }
+        ];
+
+        const toolHandlers = {
+            search_knowledge_base: async (_id: string, rawArgs: any) => {
+                const args = rawArgs as SearchToolArgs;
+                emitLog(onProgress, `Agent searching: "${args.query}"`);
+                const results = await this.performRAGSearch(vectorCollectionName, args.query, this.configService.values.limits.defaultSearchLimit);
+                const truncated = results.map((r) => ({ ...r, payload: r.payload ? { ...r.payload, content: (r.payload.content || "").substring(0, this.configService.values.limits.maxResultChars) } : r.payload }));
+                return JSON.stringify(truncated);
+            },
+            ...this.createVfsToolHandlers(files, onProgress)
+        };
+
+        const traceTracker = await this.createTraceTracker("Research Phase", goal);
+
+        const finalMessages = await runAgenticLoop(this.openai, this.logger, onProgress, {
+            modelName: this.configService.values.openAI.modelName,
+            messages,
+            tools: [SEARCH_TOOL, LIST_FILES_TOOL, READ_FILE_TOOL, HEAD_FILE_TOOL, TAIL_FILE_TOOL, GREP_FILE_TOOL],
+            toolHandlers,
+            readySignal: "READY_FOR_GENERATION",
+            maxIterations: this.configService.values.limits.maxResearchIterations,
+            maxContextChars: this.configService.values.limits.maxContextChars,
+            phaseLabel: "Scenario Research",
+            onTrace: traceTracker
+        });
+
+        // 3. Generation Phase
+        const agentSynthesis = finalMessages
+            .filter((m) => m.role === "assistant" && typeof m.content === "string" && m.content)
+            .map((m) => m.content as string)
+            .join("\n\n");
+
+        const toolResults = finalMessages
+            .filter((m) => m.role === "tool")
+            .map((m) => typeof m.content === "string" ? m.content : "")
+            .join("\n\n");
+
+        const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(0, this.configService.values.limits.maxContextChars);
+
+        const genSystemPrompt = templates.createSystemPrompt(options.mandatoryImports);
         const userPrompt = templates.createUserPrompt(
-            smartDocs,
-            smartCtx,
+            contextFound,
+            startingContext,
             options.minimalLength || 10,
             options.maximalLength || 20,
             options.userPreferences,
@@ -63,9 +118,9 @@ export class PromptService {
             emitLog(onProgress, `Prompting OpenAI (Steps: ${stepRange})...`);
 
             const response = await this.openai.chat.completions.create({
-                model: MODEL_NAME,
+                model: this.configService.values.openAI.modelName,
                 messages: [
-                    { role: "system", content: systemPrompt },
+                    { role: "system", content: genSystemPrompt },
                     { role: "user", content: userPrompt },
                 ],
                 response_format: { type: "json_object" },
@@ -81,6 +136,41 @@ export class PromptService {
         }
     }
 
+    public async promptForExecutionPlan(
+        vectorCollectionName: string,
+        userGoal: string,
+        onProgress?: ProgressCallback,
+    ): Promise<RouterPlanResponse> {
+        this.logger.log(`Routing/Planning steps for goal: "${userGoal}"`);
+        emitLog(onProgress, `Analyzing task and planning execution steps...`);
+
+        const initialSearchResults = await this.performRAGSearch(
+            vectorCollectionName,
+            userGoal,
+            this.configService.values.limits.defaultSearchLimit,
+        );
+        const initialDocsContent = this.formatSearchResults(initialSearchResults);
+
+        try {
+            const response = await this.openai.chat.completions.create({
+                model: this.configService.values.openAI.modelName,
+                messages: [
+                    { role: "system", content: templates.ROUTER_SYSTEM_PROMPT },
+                    { role: "user", content: templates.createRouterUserPrompt(initialDocsContent, userGoal) },
+                ],
+                response_format: { type: "json_object" },
+            });
+
+            const content = response.choices[0]?.message?.content;
+            if (!content) throw new Error("Empty response from planner LLM");
+
+            return JSON.parse(content) as RouterPlanResponse;
+        } catch (error) {
+            this.logger.error(error, "Failed to generate execution plan");
+            return { steps: [] };
+        }
+    }
+
     public async promptForCodeGenerationWithAgenticRAG(
         vectorCollectionName: string,
         userGoal: string,
@@ -90,20 +180,58 @@ export class PromptService {
         this.logger.log(`Starting Agentic RAG for goal: "${userGoal}"`);
         emitLog(onProgress, `Starting Agentic RAG for goal: "${userGoal}"`);
 
-        const { initialDocsContent, contextFound, messages: researchMessages } = await this.runResearchPhase(
+        let { initialDocsContent, contextFound, messages: researchMessages } = await this.runResearchPhase(
             vectorCollectionName,
             userGoal,
             onProgress,
         );
 
-        const verificationMessages = await this.runVerificationPhase(
-            vectorCollectionName,
-            initialDocsContent,
-            contextFound,
-            userGoal,
-            onProgress,
-            smokeTestCallback,
-        );
+        let verificationMessages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[] = [];
+        let isVerified = false;
+        let feedbackIterations = 0;
+        const maxFeedbackLoops = 3;
+
+        while (!isVerified && feedbackIterations < maxFeedbackLoops) {
+            verificationMessages = await this.runVerificationPhase(
+                vectorCollectionName,
+                initialDocsContent,
+                contextFound,
+                userGoal,
+                onProgress,
+                smokeTestCallback,
+            );
+
+            const lastMessage = verificationMessages[verificationMessages.length - 1];
+            const content = lastMessage.content;
+            
+            if (typeof content === "string" && content.includes("NEEDS_RESEARCH:")) {
+                const queryMatch = content.match(/NEEDS_RESEARCH:\s*(.*)/);
+                if (queryMatch && queryMatch[1]) {
+                    const query = queryMatch[1].trim();
+                    this.logger.log(`Verification agent requested more research: "${query}"`);
+                    emitLog(onProgress, `Verification agent requested more research: "${query}"`);
+                    
+                    const additionalDocs = await this.performRAGSearch(
+                        vectorCollectionName, 
+                        query, 
+                        this.configService.values.limits.defaultSearchLimit
+                    );
+                    const formattedAdditionalDocs = JSON.stringify(additionalDocs.map(r => ({
+                        ...r,
+                        payload: r.payload ? {
+                            ...r.payload,
+                            content: (r.payload.content || "").substring(0, this.configService.values.limits.maxResultChars)
+                        } : r.payload
+                    })));
+
+                    contextFound += `\n\n### ADDITIONAL RAG SEARCH RESULTS FOR "${query}" ###\n` + formattedAdditionalDocs;
+                    feedbackIterations++;
+                    continue;
+                }
+            }
+            
+            isVerified = true;
+        }
 
         const response = await this.runGenerationPhase(verificationMessages, onProgress);
         const fullHistory = [...researchMessages, ...verificationMessages];
@@ -148,7 +276,7 @@ export class PromptService {
         const initialSearchResults = await this.performRAGSearch(
             vectorCollectionName,
             userGoal,
-            DEFAULT_SEARCH_LIMIT,
+            this.configService.values.limits.defaultSearchLimit,
         );
         const initialDocsContent = this.formatSearchResults(initialSearchResults);
 
@@ -160,6 +288,8 @@ export class PromptService {
             },
         ];
 
+        const traceTracker = await this.createTraceTracker("Agentic RAG Research", userGoal);
+
         const finalMessages = await runAgenticLoop(this.openai, this.logger, onProgress, {
             messages,
             tools: [SEARCH_TOOL],
@@ -170,23 +300,26 @@ export class PromptService {
                     const results = await this.performRAGSearch(
                         vectorCollectionName,
                         args.query,
-                        DEFAULT_SEARCH_LIMIT,
+                        this.configService.values.limits.defaultSearchLimit,
                     );
                     const truncated = results.map((r) => ({
                         ...r,
                         payload: r.payload
                             ? {
                                 ...r.payload,
-                                content: (r.payload.content || "").substring(0, MAX_RESULT_CHARS),
+                                content: (r.payload.content || "").substring(0, this.configService.values.limits.maxResultChars),
                             }
                             : r.payload,
                     }));
                     return JSON.stringify(truncated);
                 },
             },
+            modelName: this.configService.values.openAI.modelName,
             readySignal: "READY_FOR_GENERATION",
-            maxIterations: MAX_RESEARCH_ITERATIONS,
+            maxIterations: this.configService.values.limits.maxResearchIterations,
+            maxContextChars: this.configService.values.limits.maxContextChars,
             phaseLabel: "Agentic RAG Research",
+            onTrace: traceTracker
         });
 
         const agentSynthesis = finalMessages
@@ -201,7 +334,7 @@ export class PromptService {
 
         const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(
             0,
-            MAX_CONTEXT_CHARS,
+            this.configService.values.limits.maxContextChars,
         );
 
         return { initialDocsContent, contextFound, messages: finalMessages };
@@ -237,6 +370,8 @@ export class PromptService {
             },
         ];
 
+        const traceTracker = await this.createTraceTracker("Verification Phase", userGoal);
+
         return runAgenticLoop(this.openai, this.logger, onProgress, {
             messages,
             tools: [SMOKE_TEST_TOOL, SEARCH_TOOL],
@@ -250,14 +385,14 @@ export class PromptService {
                     const results = await this.performRAGSearch(
                         vectorCollectionName,
                         args.query,
-                        DEFAULT_SEARCH_LIMIT,
+                        this.configService.values.limits.defaultSearchLimit,
                     );
                     const truncated = results.map((r) => ({
                         ...r,
                         payload: r.payload
                             ? {
                                 ...r.payload,
-                                content: (r.payload.content || "").substring(0, MAX_RESULT_CHARS),
+                                content: (r.payload.content || "").substring(0, this.configService.values.limits.maxResultChars),
                             }
                             : r.payload,
                     }));
@@ -289,9 +424,12 @@ export class PromptService {
                     return testResult;
                 },
             },
+            modelName: this.configService.values.openAI.modelName,
             readySignal: "VERIFICATION_COMPLETE",
-            maxIterations: MAX_VERIFICATION_ITERATIONS,
+            maxIterations: this.configService.values.limits.maxVerificationIterations,
+            maxContextChars: this.configService.values.limits.maxContextChars,
             phaseLabel: "Verification",
+            onTrace: traceTracker
         });
     }
 
@@ -337,7 +475,7 @@ export class PromptService {
             .join("\n\n---\n");
 
         const genResponse = await this.openai.chat.completions.create({
-            model: MODEL_NAME,
+            model: this.configService.values.openAI.modelName,
             messages: [
                 { role: "system", content: templates.GENERATION_SYSTEM_PROMPT },
                 {
@@ -368,7 +506,7 @@ export class PromptService {
         return results
             .map((res, i) =>
                 `--- DOCUMENT ${i + 1} (Score: ${res.score}) ---\n${
-                    (res.payload?.content || "No content").substring(0, MAX_RESULT_CHARS)
+                    (res.payload?.content || "No content").substring(0, this.configService.values.limits.maxResultChars)
                 }\n`
             )
             .join("\n");
@@ -377,7 +515,7 @@ export class PromptService {
     private async performRAGSearch(
         collectionName: string,
         query: string,
-        limit: number = DEFAULT_SEARCH_LIMIT,
+        limit: number = this.configService.values.limits.defaultSearchLimit,
     ): Promise<types.vector.SearchResult<types.file.FileShard>[]> {
         try {
             this.logger.log(query);
@@ -427,7 +565,7 @@ Generate ONLY the search query string, no explanation.`;
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: MODEL_NAME,
+                model: this.configService.values.openAI.modelName,
                 messages: [{ role: "user", content: prompt }],
             });
 
@@ -482,7 +620,7 @@ Respond with a JSON object:
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: MODEL_NAME,
+                model: this.configService.values.openAI.modelName,
                 messages: [{ role: "user", content: prompt }],
                 response_format: { type: "json_object" },
             });
@@ -564,46 +702,102 @@ Respond with a JSON object:
             dotProduct += vecA[i] * vecB[i];
             normA += vecA[i] * vecA[i];
             normB += vecB[i] * vecB[i];
-        }
+                }
         if (normA === 0 || normB === 0) return 0;
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    public async promptForUserGoals(docs: string, maxGoals: number = 5, onProgress?: ProgressCallback): Promise<string[]> {
-        this.logger.log(`Generating user goals from documentation...`);
-        emitLog(onProgress, `Generating user goals from documentation...`);
+    public async promptForUserGoals(
+        vectorCollectionName: string,
+        files: { metadata: any; buffer: Uint8Array }[],
+        maxGoals: number = 5,
+        onProgress?: ProgressCallback,
+    ): Promise<string[]> {
+        this.logger.log(`Generating user goals using agentic loop...`);
+        emitLog(onProgress, `Generating user goals using agentic loop...`);
+
+        // 1. Router
+        const goal = `Explore the project and identify up to ${maxGoals} primary user goals or test scenarios for this API/library.`;
+        const plan = await this.promptForExecutionPlan(vectorCollectionName, goal, onProgress);
+        const planStepsStr = plan.steps.map(s => `- ${s.stepExplanation} (Action: ${s.action})`).join("\n");
+
+        // 2. Research / Exploration
+        const systemPrompt = `You are a Research Agent finding user goals.
+Your goal is to gather enough context to suggest ${maxGoals} distinct user goals.
+Follow this plan:
+${planStepsStr}
+
+When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
+
+        const messages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[] = [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: `Start your research.` }
+        ];
+
+        const toolHandlers = {
+            search_knowledge_base: async (_id: string, rawArgs: any) => {
+                const args = rawArgs as SearchToolArgs;
+                emitLog(onProgress, `Agent searching: "${args.query}"`);
+                const results = await this.performRAGSearch(vectorCollectionName, args.query, this.configService.values.limits.defaultSearchLimit);
+                const truncated = results.map((r) => ({ ...r, payload: r.payload ? { ...r.payload, content: (r.payload.content || "").substring(0, this.configService.values.limits.maxResultChars) } : r.payload }));
+                return JSON.stringify(truncated);
+            },
+            ...this.createVfsToolHandlers(files, onProgress)
+        };
+
+        const traceTracker = await this.createTraceTracker("Goals Generation Phase", "Discover documentation goals");
+
+        const finalMessages = await runAgenticLoop(this.openai, this.logger, onProgress, {
+            modelName: this.configService.values.openAI.modelName,
+            messages,
+            tools: [SEARCH_TOOL, LIST_FILES_TOOL, READ_FILE_TOOL, HEAD_FILE_TOOL, TAIL_FILE_TOOL, GREP_FILE_TOOL],
+            toolHandlers,
+            readySignal: "READY_FOR_GENERATION",
+            maxIterations: this.configService.values.limits.maxResearchIterations,
+            maxContextChars: this.configService.values.limits.maxContextChars,
+            phaseLabel: "Goals Research",
+            onTrace: traceTracker
+        });
+
+        // 3. Generation Phase
+        const agentSynthesis = finalMessages
+            .filter((m) => m.role === "assistant" && typeof m.content === "string" && m.content)
+            .map((m) => m.content as string)
+            .join("\n\n");
+
+        const toolResults = finalMessages
+            .filter((m) => m.role === "tool")
+            .map((m) => typeof m.content === "string" ? m.content : "")
+            .join("\n\n");
+
+        const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(0, this.configService.values.limits.maxContextChars);
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: MODEL_NAME,
+                model: this.configService.values.openAI.modelName,
                 messages: [
                     { role: "system", content: templates.PLANNER_GOALS_SYSTEM_PROMPT },
-                    { role: "user", content: templates.createPlannerGoalsUserPrompt(docs, maxGoals) },
+                    { role: "user", content: templates.createPlannerGoalsUserPrompt(contextFound, maxGoals) },
                 ],
-                response_format: { type: "json_object" }, // Wait, the prompt asks for an array. Let's wrap in an object for JSON mode.
+                response_format: { type: "json_object" },
             });
 
-            // Wait, if response_format is json_object, the prompt must ask for an object. Let's fix that in templates in next step, or just parse it.
-            // Actually, if it's an array, json_object might throw an error. Let me use default text response.
-            // But for now, let's just parse whatever it returns.
             const content = response.choices[0]?.message?.content;
             if (!content) throw new Error("Empty response");
 
             let parsed = JSON.parse(content);
             if (!Array.isArray(parsed)) {
-                // If the LLM wrapped it in an object like { "goals": [...] }
                 const maybeArray = Object.values(parsed).find(Array.isArray);
                 if (maybeArray) {
                     parsed = maybeArray;
                 } else {
-                    throw new Error("Could not find an array of goals in the response");
+                    parsed = [JSON.stringify(parsed)];
                 }
             }
-
-            return parsed as string[];
+            return (parsed as string[]).slice(0, maxGoals);
         } catch (error) {
-            this.logger.error(error, "Failed to generate user goals");
-            return [];
+            this.logger.error(error, "Failed to parse user goals from LLM");
+            return ["Explore API documentation and verify endpoints."];
         }
     }
 
@@ -612,7 +806,7 @@ Respond with a JSON object:
 
         try {
             const response = await this.openai.chat.completions.create({
-                model: MODEL_NAME,
+                model: this.configService.values.openAI.modelName,
                 messages: [
                     { role: "system", content: templates.PLANNER_SUMMARY_SYSTEM_PROMPT },
                     { role: "user", content: templates.createPlannerSummaryUserPrompt(JSON.stringify(reportsData, null, 2)) },
@@ -644,5 +838,71 @@ Respond with a JSON object:
                 markdown: "Failed to generate summary report.",
             };
         }
+    }
+
+    private createVfsToolHandlers(files: { metadata: any; buffer: Uint8Array }[], onProgress?: ProgressCallback) {
+        return {
+            list_files: async () => {
+                emitLog(onProgress, "Agent listing VFS files.");
+                return files.map(f => f.metadata.filename).join("\n") || "No files available.";
+            },
+            read_file: async (_id: string, args: any) => {
+                emitLog(onProgress, `Agent reading file: ${args.filename}`);
+                const file = files.find(f => f.metadata.filename === args.filename);
+                if (!file) return `File not found: ${args.filename}`;
+                return new TextDecoder().decode(file.buffer);
+            },
+            head_file: async (_id: string, args: any) => {
+                const linesCount = args.lines || 50;
+                emitLog(onProgress, `Agent reading head of file: ${args.filename} (${linesCount} lines)`);
+                const file = files.find(f => f.metadata.filename === args.filename);
+                if (!file) return `File not found: ${args.filename}`;
+                const content = new TextDecoder().decode(file.buffer);
+                return content.split("\n").slice(0, linesCount).join("\n");
+            },
+            tail_file: async (_id: string, args: any) => {
+                const linesCount = args.lines || 50;
+                emitLog(onProgress, `Agent reading tail of file: ${args.filename} (${linesCount} lines)`);
+                const file = files.find(f => f.metadata.filename === args.filename);
+                if (!file) return `File not found: ${args.filename}`;
+                const content = new TextDecoder().decode(file.buffer);
+                const lines = content.split("\n");
+                return lines.slice(Math.max(0, lines.length - linesCount)).join("\n");
+            },
+            grep_file: async (_id: string, args: any) => {
+                emitLog(onProgress, `Agent grepping file: ${args.filename} for pattern: ${args.pattern}`);
+                const file = files.find(f => f.metadata.filename === args.filename);
+                if (!file) return `File not found: ${args.filename}`;
+                const content = new TextDecoder().decode(file.buffer);
+                const lines = content.split("\n");
+                let result = "";
+                let regex: RegExp;
+                try {
+                    regex = new RegExp(args.pattern, "i");
+                } catch {
+                    return `Invalid regex pattern: ${args.pattern}`;
+                }
+                for (let i = 0; i < lines.length; i++) {
+                    if (regex.test(lines[i])) {
+                        result += `[Line ${i+1}]: ${lines[i]}\n`;
+                    }
+                }
+                return result || `No matches found for ${args.pattern} in ${args.filename}`;
+            }
+        };
+    }
+
+    private async createTraceTracker(phase: string, goal?: string, testSuiteId?: string) {
+        const trace = await this.traceRepository.create({
+            id: crypto.randomUUID() as any,
+            phase,
+            goal,
+            testSuiteId,
+            events: []
+        });
+
+        return async (event: import("../types/index.ts").trace.TraceEvent) => {
+            await this.traceRepository.addEvent(trace.id, event);
+        };
     }
 }

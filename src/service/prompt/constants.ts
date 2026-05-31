@@ -1,15 +1,5 @@
 import OpenAI from "@openai/openai";
 
-// ─── Model & Limits ─────────────────────────────────────────────────────────
-
-export const MODEL_NAME = "gpt-5.4";
-export const MAX_RESEARCH_ITERATIONS = 5;
-export const MAX_VERIFICATION_ITERATIONS = 5;
-export const DEFAULT_SEARCH_LIMIT = 10;
-export const RELATED_DOCS_LIMIT = 25;
-export const MAX_RESULT_CHARS = 3000;
-export const MAX_CONTEXT_CHARS = 50_000;
-export const MAX_SCENARIO_DOCS_CHARS = 100_000;
 
 // ─── Tool Definitions ────────────────────────────────────────────────────────
 
@@ -46,6 +36,78 @@ export const SMOKE_TEST_TOOL: OpenAI.Chat.ChatCompletionTool = {
                 },
             },
             required: ["code"],
+        },
+    },
+};
+
+export const LIST_FILES_TOOL: OpenAI.Chat.ChatCompletionTool = {
+    type: "function",
+    function: {
+        name: "list_files",
+        description: "List all files available in the project context.",
+        parameters: { type: "object", properties: {} },
+    },
+};
+
+export const READ_FILE_TOOL: OpenAI.Chat.ChatCompletionTool = {
+    type: "function",
+    function: {
+        name: "read_file",
+        description: "Read the entire content of a specific file.",
+        parameters: {
+            type: "object",
+            properties: {
+                filename: { type: "string", description: "The name of the file to read" },
+            },
+            required: ["filename"],
+        },
+    },
+};
+
+export const HEAD_FILE_TOOL: OpenAI.Chat.ChatCompletionTool = {
+    type: "function",
+    function: {
+        name: "head_file",
+        description: "Read the first N lines of a file.",
+        parameters: {
+            type: "object",
+            properties: {
+                filename: { type: "string" },
+                lines: { type: "number", description: "Number of lines to read", default: 50 },
+            },
+            required: ["filename"],
+        },
+    },
+};
+
+export const TAIL_FILE_TOOL: OpenAI.Chat.ChatCompletionTool = {
+    type: "function",
+    function: {
+        name: "tail_file",
+        description: "Read the last N lines of a file.",
+        parameters: {
+            type: "object",
+            properties: {
+                filename: { type: "string" },
+                lines: { type: "number", description: "Number of lines to read", default: 50 },
+            },
+            required: ["filename"],
+        },
+    },
+};
+
+export const GREP_FILE_TOOL: OpenAI.Chat.ChatCompletionTool = {
+    type: "function",
+    function: {
+        name: "grep_file",
+        description: "Search for a specific string or pattern inside a file.",
+        parameters: {
+            type: "object",
+            properties: {
+                filename: { type: "string" },
+                pattern: { type: "string", description: "The string or regex pattern to search for" },
+            },
+            required: ["filename", "pattern"],
         },
     },
 };

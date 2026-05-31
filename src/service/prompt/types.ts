@@ -39,11 +39,21 @@ export interface SmokeTestToolArgs {
     code: string;
 }
 
-// ─── SmokeTest Callback ─────────────────────────────────────────────────────
-
 export type SmokeTestCallback = (
     code: string,
 ) => Promise<string>;
+
+export interface ReadFileArgs { filename: string; }
+export interface HeadFileArgs { filename: string; lines: number; }
+export interface TailFileArgs { filename: string; lines: number; }
+export interface GrepFileArgs { filename: string; pattern: string; }
+
+export interface RouterPlanResponse {
+    steps: {
+        stepExplanation: string;
+        action: string;
+    }[];
+}
 
 // ─── Agentic Loop Types ─────────────────────────────────────────────────────
 
@@ -53,10 +63,13 @@ export type ToolHandler = (
 ) => Promise<string>;
 
 export interface AgenticLoopConfig {
+    modelName: string;
     messages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[];
     tools: import("@openai/openai").default.Chat.ChatCompletionTool[];
     toolHandlers: Record<string, ToolHandler>;
     readySignal: string;
     maxIterations: number;
     phaseLabel: string;
+    onTrace?: (event: import("../../types/index.ts").trace.TraceEvent) => Promise<void>;
+    maxContextChars?: number;
 }

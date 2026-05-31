@@ -8,7 +8,7 @@ import { PromptService } from "./PromptService.ts";
 import { TestSuiteRepository } from "./TestSuiteRepository.ts";
 import { DockerExecutor } from "./DockerExecutor.ts";
 import { ReportRepository } from "./ReportRepository.ts";
-import { RELATED_DOCS_LIMIT } from "./prompt/constants.ts";
+import { ConfigService } from "./ConfigService.ts";
 
 export class Executor {
     private dockerExecutor: DockerExecutor;
@@ -22,6 +22,7 @@ export class Executor {
         private vectorCollectionFactory: VectorCollectionFactory,
         private embeddingService: EmbeddingService,
         private reportRepository: ReportRepository,
+        private configService: ConfigService,
     ) {
         this.dockerExecutor = new DockerExecutor({
             timeoutMs: 60000,
@@ -69,7 +70,7 @@ export class Executor {
 
     private async executeCodeGeneration(
         testSuite: types.test.TestSuite,
-        _files: { buffer: Uint8Array }[],
+        _files: { metadata: any, buffer: Uint8Array }[],
         startTime: number,
         onProgress?: (msg: string) => void,
     ) {
@@ -150,7 +151,7 @@ export class Executor {
                         const line = payload.metadata?.lineNumber ? ` [Line: ${payload.metadata.lineNumber}]` : "";
                         return `--- DOCUMENT: ${fileName}${line} ---\n${payload.content || JSON.stringify(k)}`;
                     })
-                    .join("\n\n");
+                    .join("\n\n").substring(0, 15000);
                 stepReport.failureAnalysis = await this.promptService.classifyFailure(
                     stepReport.error,
                     example.fullProgram,
@@ -193,16 +194,16 @@ export class Executor {
 
     private async executeTestScenario(
         testSuite: types.test.TestSuite,
-        files: { buffer: Uint8Array }[],
+        files: { metadata: any, buffer: Uint8Array }[],
         startTime: number,
         onProgress?: (msg: string) => void,
     ) {
-        const docs = files.map((f) => new TextDecoder().decode(f.buffer)).join("\n");
         onProgress?.(
             JSON.stringify({ type: "log", content: "Generating Test Scenario execution plan..." }),
         );
         const plan = await this.promptService.promptForApiUsageScenario(
-            docs,
+            testSuite.projectId as string,
+            files,
             testSuite.initialContext,
             {
                 minimalLength: testSuite.minimalStoryLength,
@@ -267,7 +268,7 @@ export class Executor {
                         const line = payload.metadata?.lineNumber ? ` [Line: ${payload.metadata.lineNumber}]` : "";
                         return `--- DOCUMENT: ${fileName}${line} ---\n${payload.content || JSON.stringify(k)}`;
                     })
-                    .join("\n\n");
+                    .join("\n\n").substring(0, 15000);
                 stepReport.failureAnalysis = await this.promptService.classifyFailure(
                     stepReport.error,
                     call.fetch,
@@ -312,7 +313,7 @@ export class Executor {
                 this.embeddingService.embed(query),
                 this.embeddingService.sparseEmbed(query),
             ]);
-            return await vCollection.searchHybrid(dense[0], sparse, RELATED_DOCS_LIMIT);
+            return await vCollection.searchHybrid(dense[0], sparse, this.configService.values.limits.relatedDocsLimit);
         } catch (err) {
             this.logger.error(err, "Failed to perform hybrid search for related knowledge");
             return [];
@@ -338,15 +339,17 @@ export class Executor {
         error?: unknown;
         logs: string;
     }> {
-        const cleanedUserCode = userCode.replace("export default", "const runStep =");
         const script = `
+                import fs from 'fs';
                 const ctx = ${JSON.stringify(currentCtx)};
-
-                ${cleanedUserCode}
+                const userCode = ${JSON.stringify(userCode)};
+                
+                fs.writeFileSync('./userStep.js', userCode);
 
                 ; (async () => {
                     try {
-                        const runFunc = typeof runStep === 'function' ? runStep : (ctx) => { /* no-op if no default export */ };
+                        const userModule = await import('./userStep.js');
+                        const runFunc = typeof userModule.default === 'function' ? userModule.default : (ctx) => { /* no-op */ };
                         const output = await runFunc(ctx);
                         console.log("___RESULT_START___");
                         console.log(JSON.stringify(output || { result: null, ctx }));

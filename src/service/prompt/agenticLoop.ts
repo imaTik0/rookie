@@ -4,7 +4,6 @@
  */
 import OpenAI from "@openai/openai";
 import { Logger } from "../../Logger.ts";
-import { MODEL_NAME } from "./constants.ts";
 import { emitLog, ProgressCallback } from "./helpers.ts";
 import { AgenticLoopConfig } from "./types.ts";
 
@@ -14,7 +13,7 @@ export async function runAgenticLoop(
     onProgress: ProgressCallback,
     config: AgenticLoopConfig,
 ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
-    const { messages, tools, toolHandlers, readySignal, maxIterations, phaseLabel } = config;
+    const { modelName, messages, tools, toolHandlers, readySignal, maxIterations, phaseLabel, onTrace } = config;
 
     let iterations = 0;
     let isReady = false;
@@ -38,8 +37,24 @@ export async function runAgenticLoop(
             `Context size: ~${estimatedTokens} tokens (${messages.length} messages)`,
         );
 
+        if (config.maxContextChars && estimatedChars > config.maxContextChars && messages.length > 4) {
+            logger.log(`${phaseLabel} Context limit exceeded, pruning oldest interactions...`);
+            emitLog(onProgress, `Context limit exceeded, pruning oldest interactions...`);
+            
+            // Keep first 2 (system + user) and last 4 intact. Prune the rest.
+            for (let i = 2; i < messages.length - 4; i++) {
+                const m = messages[i];
+                if (m.role === "assistant" && typeof m.content === "string" && m.content.length > 50) {
+                    m.content = "[PRUNED TO SAVE CONTEXT]";
+                }
+                if (m.role === "tool" && typeof m.content === "string" && m.content.length > 100) {
+                    m.content = "[PRUNED TO SAVE CONTEXT]";
+                }
+            }
+        }
+
         const response = await openai.chat.completions.create({
-            model: MODEL_NAME,
+            model: modelName,
             messages,
             tools,
             tool_choice: "auto",
@@ -47,6 +62,24 @@ export async function runAgenticLoop(
 
         const message = response.choices[0].message;
         messages.push(message);
+
+        if (onTrace) {
+            await onTrace({
+                id: crypto.randomUUID(),
+                timestamp: Date.now(),
+                type: "LLM_CALL",
+                content: {
+                    messages: messages.slice(0, -1),
+                    response: message,
+                    phase: phaseLabel
+                },
+                tokens: response.usage ? {
+                    promptTokens: response.usage.prompt_tokens,
+                    completionTokens: response.usage.completion_tokens,
+                    totalTokens: response.usage.total_tokens
+                } : undefined
+            });
+        }
 
         // Stream the model's thoughts to the frontend
         if (message.content && !message.content.includes(readySignal)) {
@@ -67,9 +100,22 @@ export async function runAgenticLoop(
                         tool_call_id: toolCall.id,
                         content: result,
                     });
+                    if (onTrace) {
+                        await onTrace({
+                            id: crypto.randomUUID(),
+                            timestamp: Date.now(),
+                            type: "TOOL_CALL",
+                            content: {
+                                tool: toolCall.function.name,
+                                args: JSON.parse(toolCall.function.arguments),
+                                result: result,
+                                phase: phaseLabel
+                            }
+                        });
+                    }
                 }
             }
-        } else if (message.content?.includes(readySignal)) {
+        } else if (message.content?.includes(readySignal) || message.content?.includes("NEEDS_RESEARCH:")) {
             isReady = true;
         }
 
