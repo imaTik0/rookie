@@ -22,6 +22,20 @@ export class VectorCollectionFactory {
         return new VectorCollection<T>(this.vectorConnection, name);
     }
 
+    async dropCollection(name: string): Promise<void> {
+        try {
+            await this.vectorConnection.vectorClient.deleteCollection(name);
+        } catch {
+            // Collection may not exist — that's fine
+        } finally {
+            this.existingCollections.delete(name);
+        }
+    }
+
+    invalidateCache(name: string): void {
+        this.existingCollections.delete(name);
+    }
+
     private async ensureCollectionExists(name: string, vectorSize: number) {
         if (this.existingCollections.has(name)) {
             return;

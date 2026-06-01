@@ -155,4 +155,14 @@ export class ProjectRepository extends BaseRepository<types.project.ProjectId, d
             { $pull: { files: fileId } },
         );
     }
+
+    async findProjectIdsByFileId(
+        fileId: types.file.FileId,
+    ): Promise<types.project.ProjectId[]> {
+        const docs = await this.getCollection()
+            .find({ files: fileId })
+            .project({ _id: 1 })
+            .toArray();
+        return docs.map((d: { _id: unknown }) => d._id as types.project.ProjectId);
+    }
 }

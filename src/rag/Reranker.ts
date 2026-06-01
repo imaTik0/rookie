@@ -113,6 +113,7 @@ async function rerankViaApi<T>(
     if (!cfg.baseURL) return null;
     const documents = candidates.map((c) => getText(c).slice(0, 4000));
     const res = await fetch(`${cfg.baseURL.replace(/\/$/, "")}/rerank`, {
+        signal: AbortSignal.timeout(10_000),
         method: "POST",
         headers: {
             "content-type": "application/json",

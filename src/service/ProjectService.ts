@@ -7,6 +7,7 @@ import { FileHelpers } from "./FileHelpers.ts";
 import { DocCrawler } from "./DocCrawler.ts";
 import * as db from "../db/mongo/Model.ts";
 import { Buffer } from "node:buffer";
+import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
 
 export class ProjectService {
     constructor(
@@ -15,6 +16,7 @@ export class ProjectService {
         private fileProcessorService: FileProcessorService,
         private fileHelpers: FileHelpers,
         private docCrawler: DocCrawler,
+        private vectorCollectionFactory: VectorCollectionFactory,
     ) {}
 
     private async validateFileIds(fileIds: types.file.FileId[]): Promise<void> {
@@ -113,13 +115,41 @@ export class ProjectService {
     ) {
         if (updateDto.fileIds) {
             await this.validateFileIds(updateDto.fileIds as types.file.FileId[]);
+
+            const current = await this.projectRepository.get(projectId);
+            if (current) {
+                const oldSet = new Set(current.files);
+                const newSet = new Set(updateDto.fileIds);
+                const removed = current.files.filter((id) => !newSet.has(id));
+                const added = updateDto.fileIds.filter((id) => !oldSet.has(id));
+
+                if (removed.length > 0) {
+                    const col = await this.vectorCollectionFactory.createCollection(projectId);
+                    for (const fileId of removed) {
+                        await col.deleteByFileId(fileId).catch(() => {});
+                    }
+                }
+
+                if (added.length > 0) {
+                    const allChunks: types.file.FileShard[] = [];
+                    for (const fileId of added) {
+                        const file = await this.fileRepository.get(fileId);
+                        if (file) allChunks.push(...this.fileHelpers.chunkDbFile(file));
+                    }
+                    if (allChunks.length > 0) {
+                        await this.fileProcessorService.processAndStore(allChunks, projectId);
+                    }
+                }
+            }
         }
+
         await this.projectRepository.update(projectId, updateDto);
         const populated = await this.projectRepository.getPopulated(projectId);
         return populated ? this.mapDbToApi(populated) : null;
     }
 
     async deleteProject(projectId: types.project.ProjectId): Promise<boolean> {
+        await this.vectorCollectionFactory.dropCollection(projectId);
         return await this.projectRepository.delete(projectId);
     }
 
@@ -129,19 +159,29 @@ export class ProjectService {
             return null;
         }
         await this.validateFileIds(fileIds);
+
+        // Only index files not already in this project to prevent duplicate vectors.
+        const alreadyIndexed = new Set(project.files);
+        const toIndex = fileIds.filter((id) => !alreadyIndexed.has(id));
+
         await this.projectRepository.addFiles(projectId, fileIds);
 
-        for (const fileId of fileIds) {
+        const errors: string[] = [];
+        for (const fileId of toIndex) {
+            const file = await this.fileRepository.get(fileId);
+            if (!file) continue;
             try {
-                const file = await this.fileRepository.get(fileId);
-                if (!file) continue;
                 await this.fileProcessorService.processAndStore(
                     this.fileHelpers.chunkDbFile(file),
                     projectId,
                 );
             } catch (error) {
-                console.error(`Failed to process file ${fileId} for project ${projectId}:`, error);
+                errors.push(`${fileId}: ${(error as Error).message}`);
             }
+        }
+
+        if (errors.length > 0) {
+            throw new Error(`Indexing failed for ${errors.length} file(s):\n${errors.join("\n")}`);
         }
 
         const populated = await this.projectRepository.getPopulated(projectId);
@@ -153,6 +193,12 @@ export class ProjectService {
         if (!project) {
             return null;
         }
+
+        const col = await this.vectorCollectionFactory.createCollection(projectId);
+        for (const fileId of fileIds) {
+            await col.deleteByFileId(fileId).catch(() => {});
+        }
+
         await this.projectRepository.removeFiles(projectId, fileIds);
         const populated = await this.projectRepository.getPopulated(projectId);
         return populated ? this.mapDbToApi(populated) : null;

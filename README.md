@@ -4,17 +4,20 @@
 
 # Rookie API
 
-Rookie API is an AI-driven platform designed to evaluate and validate the quality of technical documentation. By treating Large Language Models (LLMs) as "Virtual Developers," the system tests whether your API documentation is clear, accurate, and complete enough for an automated agent to understand and interact with your services.
+Rookie is an autonomous system for evaluating the quality of API documentation. The core idea is simple: if a large language model, given only the documentation, cannot write and successfully execute code that integrates with the API — the documentation has a gap worth fixing.
 
-The primary goal is not just to automate tests, but to use AI as a litmus test for documentation: if a "Senior Virtual Engineer" can't write a working test based on your docs, your documentation needs improvement.
+The system combines an agentic RAG pipeline with code execution in isolated Docker containers. A **Master Planner** generates realistic developer goals from the documentation; an **Agentic RAG loop** (Research → Verification → Generation) then attempts to implement each goal from scratch. Every failure is semantically classified — `MISSING`, `AMBIGUOUS`, `INCORRECT`, `CONFIG`, or `ENVIRONMENT` — and paired with a pinpointed documentation fragment and a suggested fix.
+
+This inverts traditional API testing: instead of checking whether software meets its specification, Rookie checks whether the specification is sufficient to use the software.
 
 ## Key Features
 
-- **Documentation Quality Testing**: Uses LLMs as surrogate developers to verify if documentation is sufficient for real-world integration.
-- **AI-Native Test Generation**: Test scenarios are dynamically planned and coded by LLMs by reading your provided API specifications.
-- **Isolated Execution**: All AI-generated code is executed within secure, ephemeral Docker containers, ensuring no side effects on the host system.
-- **RAG-based Diagnosis**: If a test fails because of a documentation gap, the system uses Retrieval-Augmented Generation (RAG) to identify the missing or confusing information.
-- **Local Embeddings**: Uses `@xenova/transformers` for local embedding generation, keeping your sensitive documentation on-premise.
+- **Empirical documentation evaluation**: Quality is measured by whether an LLM can write working code from the docs — not by static linting or schema validation.
+- **Semantic gap classification**: Failures are diagnosed as missing information, ambiguous descriptions, incorrect examples, misconfigured requirements, or environment issues.
+- **Agentic RAG pipeline**: Three-phase loop (Research → Verification → Code Generation) with self-correcting retrieval and iterative execution feedback.
+- **Isolated sandbox execution**: Generated code runs in ephemeral, hardened Docker containers — no side effects on the host, no mock data, real HTTP calls only.
+- **Hybrid retrieval (BM25 + dense)**: Reciprocal Rank Fusion over sparse BM25 and dense vector search minimises irrelevant context reaching the LLM.
+- **Runs fully local**: Compatible with any OpenAI-compatible backend — Ollama, vLLM, LM Studio — including small open-source models like Qwen or Gemma.
 
 ## Tech Stack
 
@@ -22,10 +25,11 @@ The primary goal is not just to automate tests, but to use AI as a litmus test f
 - **Web Framework**: [Hono](https://hono.dev/) (with `zod-openapi`)
 - **Databases**:
   - **MongoDB**: Stores project metadata, file definitions, test suites, and execution reports.
-  - **Qdrant**: Vector database for storing documentation embeddings used in RAG.
+  - **Qdrant**: Vector database for hybrid BM25 + dense search over documentation chunks.
 - **AI/ML**:
-  - **OpenAI (GPT-4/o1)**: For planning test steps and generating JavaScript execution code.
-  - **Xenova Transformers**: For local text embedding generation.
+  - **Any OpenAI-compatible backend**: Chat model for planning, code generation, and failure classification (OpenAI, Ollama, vLLM, LM Studio, …).
+  - **Any OpenAI-compatible embeddings API**: Dense embeddings for RAG (Ollama `nomic-embed-text`, OpenAI `text-embedding-3-small`, …).
+  - **BM25 (built-in)**: Sparse retrieval computed in-process; IDF applied server-side by Qdrant.
 - **Isolation**: **Docker** for running untrusted, AI-generated test scripts.
 
 ## Getting Started
@@ -49,7 +53,9 @@ Ensure your MongoDB and Qdrant instances are accessible.
 
 ### Configuration
 
-The application can be configured via environment variables or a configuration file.
+Copy `.env` to set your values — the server loads it automatically (`deno task start` uses `--env-file`).
+
+#### Core infrastructure
 
 | Variable                       | Description               | Default                     |
 | ------------------------------ | ------------------------- | --------------------------- |
@@ -59,14 +65,19 @@ The application can be configured via environment variables or a configuration f
 | `ROOKIE_MONGO_DB_NAME`         | MongoDB database name     | `rookie_db`                 |
 | `ROOKIE_QDRANT_HOST`           | Qdrant host               | `127.0.0.1`                 |
 | `ROOKIE_QDRANT_PORT`           | Qdrant port               | `6333`                      |
+
+#### LLM and embeddings
+
+| Variable                       | Description               | Default                     |
+| ------------------------------ | ------------------------- | --------------------------- |
 | `ROOKIE_OPENAI_KEY`            | LLM API key (`ROOKIE_OPEAN_AI_KEY` still accepted) | (Required) |
 | `ROOKIE_OPENAI_BASE_URL`       | LLM endpoint (OpenAI-compatible; set for Ollama/vLLM) | OpenAI |
 | `ROOKIE_OPENAI_MODEL_NAME`     | Chat model                | `gpt-4o-mini`               |
-| `ROOKIE_EMBEDDING_MODEL`       | Model for embeddings      | `nomic-embed-text`          |
-| `ROOKIE_EMBEDDING_VECTOR_SIZE` | Vector size for the model | `768`                       |
-| `ROOKIE_EMBEDDING_BASE_URL`    | Embeddings endpoint (OpenAI-compatible) | OpenAI |
+| `ROOKIE_EMBEDDING_MODEL`       | Embeddings model name     | `nomic-embed-text`          |
+| `ROOKIE_EMBEDDING_VECTOR_SIZE` | Vector dimensions for the model | `768`                 |
+| `ROOKIE_EMBEDDING_BASE_URL`    | Embeddings endpoint (OpenAI-compatible) | OpenAI     |
 
-### Quality / determinism
+#### Quality / determinism
 
 | Variable                        | Description                                             | Default       |
 | ------------------------------- | ------------------------------------------------------- | ------------- |
@@ -78,15 +89,32 @@ The application can be configured via environment variables or a configuration f
 | `ROOKIE_LLM_RETRY_BASE_MS`      | Base backoff delay (exponential + jitter)               | `500`         |
 | `ROOKIE_MAX_CONTEXT_TOKENS`     | Token budget before non-destructive loop compaction     | `12000`       |
 | `ROOKIE_CLASSIFIER_VOTES`       | Self-consistency votes in the failure classifier        | `3`           |
-| `ROOKIE_RERANKER_MODE`          | `off` \| `llm` \| `api` (cross-encoder rerank)          | `off`         |
-| `ROOKIE_BM25_K1` / `_B` / `_AVG_LEN` | BM25 sparse-vector parameters                      | `1.5/0.75/256`|
+| `ROOKIE_BM25_K1` / `_B` / `_AVG_LEN` | BM25 sparse-vector parameters                    | `1.5/0.75/256`|
 
-> `json_schema` mode now derives a strict JSON Schema from the zod schemas
-> automatically (zod v4 `toJSONSchema`). If a server rejects it, Rookie degrades
-> to `json_object` at runtime — so it is safe to try on capable models and
-> harmless on small ones.
+> `json_schema` mode derives a strict JSON Schema from the zod definitions automatically. If a server rejects it, Rookie degrades to `json_object` at runtime — safe to try on capable models, harmless on small ones.
 
-### Sandbox (untrusted-code execution)
+#### Agent limits
+
+| Variable                              | Description                                              | Default  |
+| ------------------------------------- | -------------------------------------------------------- | -------- |
+| `ROOKIE_MAX_RESEARCH_ITERATIONS`      | Max RAG research iterations per agentic loop             | `5`      |
+| `ROOKIE_MAX_VERIFICATION_ITERATIONS`  | Max verification iterations per agentic loop             | `5`      |
+| `ROOKIE_DEFAULT_SEARCH_LIMIT`         | Number of chunks fetched per search call                 | `10`     |
+| `ROOKIE_RELATED_DOCS_LIMIT`           | Final number of chunks passed to the failure classifier  | `25`     |
+| `ROOKIE_MAX_RESULT_CHARS`             | Max characters of a Docker execution result kept in context | `3000` |
+| `ROOKIE_MAX_CONTEXT_CHARS`            | Max characters of accumulated agent context              | `50000`  |
+| `ROOKIE_MAX_SCENARIO_DOCS_CHARS`      | Max characters of docs passed for scenario planning      | `100000` |
+
+#### Chunking
+
+> **Note:** changing these values requires re-indexing all projects (`DELETE /projects/:id` and re-create).
+
+| Variable                | Description                                        | Default |
+| ----------------------- | -------------------------------------------------- | ------- |
+| `ROOKIE_CHUNK_SIZE`     | Target chunk size in characters                    | `1200`  |
+| `ROOKIE_CHUNK_OVERLAP`  | Overlap carried into the next chunk for continuity | `150`   |
+
+#### Sandbox (untrusted-code execution)
 
 | Variable                          | Description                                        | Default          |
 | --------------------------------- | -------------------------------------------------- | ---------------- |
@@ -100,6 +128,66 @@ The application can be configured via environment variables or a configuration f
 > `docker run` flags cannot allowlist outbound hosts. For real egress control,
 > create `rookie-network` as an `--internal` network plus an egress proxy, or set
 > `ROOKIE_SANDBOX_NETWORK_MODE=none` for offline library testing.
+
+### Reranking
+
+Rookie re-ranks the top-N BM25+dense candidates before passing them to the LLM, improving precision and reducing noise in the context window. Reranking is **enabled by default** (`llm` mode) and requires no extra services — it reuses the chat model already configured.
+
+#### Mode: `llm` (default — zero extra setup)
+
+Uses the configured chat model to sort retrieved chunks by relevance. Works with any backend including Ollama. Slower than a dedicated cross-encoder but requires no additional infrastructure.
+
+```bash
+ROOKIE_RERANKER_MODE=llm
+ROOKIE_RERANKER_TOP_N=20   # rank this many candidates, return ROOKIE_RELATED_DOCS_LIMIT
+```
+
+#### Mode: `api` (recommended for best quality — cross-encoder)
+
+Calls a Jina/Cohere/TEI-compatible `/rerank` endpoint. A cross-encoder scores each (query, chunk) pair jointly and significantly outperforms listwise LLM reranking.
+
+**Option A — local, free, no GPU required (CPU-only TEI + BGE reranker):**
+
+```bash
+docker run --rm -p 8080:80 \
+  ghcr.io/huggingface/text-embeddings-inference:cpu-1.6 \
+  --model-id BAAI/bge-reranker-v2-m3
+```
+
+Then configure Rookie:
+
+```bash
+ROOKIE_RERANKER_MODE=api
+ROOKIE_RERANKER_BASE_URL=http://localhost:8080
+ROOKIE_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+ROOKIE_RERANKER_TOP_N=20
+```
+
+**Option B — Jina AI (free cloud tier, 1 M tokens/month):**
+
+Create a free API key at [jina.ai](https://jina.ai) and set:
+
+```bash
+ROOKIE_RERANKER_MODE=api
+ROOKIE_RERANKER_BASE_URL=https://api.jina.ai/v1
+ROOKIE_RERANKER_API_KEY=<your-jina-key>
+ROOKIE_RERANKER_MODEL=jina-reranker-v2-base-multilingual
+ROOKIE_RERANKER_TOP_N=20
+```
+
+| Variable                | Description                                                          | Default |
+| ----------------------- | -------------------------------------------------------------------- | ------- |
+| `ROOKIE_RERANKER_MODE`  | `off` \| `llm` \| `api` (cross-encoder rerank)                       | `llm`   |
+| `ROOKIE_RERANKER_TOP_N` | Rerank this many top candidates before returning `relatedDocsLimit`  | `20`    |
+| `ROOKIE_RERANKER_BASE_URL` | Base URL of a Jina/Cohere/TEI `/rerank` endpoint (api mode only)  | —       |
+| `ROOKIE_RERANKER_API_KEY`  | Bearer token for the reranker endpoint (api mode only)            | —       |
+| `ROOKIE_RERANKER_MODEL`    | Model name passed to the reranker endpoint (api mode only)        | —       |
+
+#### Mode: `off`
+
+Disables reranking entirely. Candidates are returned in raw BM25+dense retrieval order. Not recommended — retrieval noise directly increases hallucination risk in generated code.
+
+---
 
 ### Running with small / local models (Qwen, Gemma, …)
 
@@ -129,7 +217,7 @@ Notes for small models:
 ### Running the App (Backend)
 
 ```bash
-# Start the production server
+# Start the production server (loads .env automatically)
 deno task start
 
 # Start in development mode with hot-reload and pretty logging
@@ -138,7 +226,7 @@ deno task watch
 
 ### Running the Frontend (Agentic RAG Monitor)
 
-The project includes a modern React frontend Built with Vite to monitor the LLM execution in real-time.
+The project includes a React + Vite frontend for real-time monitoring of LLM execution.
 
 ```bash
 cd frontend
@@ -146,18 +234,20 @@ npm install
 npm run dev
 ```
 
-The frontend will be available at `http://localhost:5173`. You can enter a Test Suite ID and watch the Agentic RAG execute with token-by-token streaming.
+The frontend will be available at `http://localhost:5173`.
 
 ## Workflow
 
-1. **Upload Documentation**: Upload API specifications or text descriptions to a project.
-2. **Indexing**: The system processes files, generates embeddings, and stores them in Qdrant.
-3. **Define Test Suite**: Specify the testing goals and initial context (e.g., auth tokens).
+1. **Add Documentation**: Upload API specification files directly, or crawl a documentation website:
+   - `POST /files` + `POST /projects` — upload local files and create a project
+   - `POST /projects/from-url` — provide a URL; Rookie crawls up to N pages, stores them as Markdown, and indexes everything automatically
+2. **Indexing**: The system chunks each file structure-aware (heading boundaries, fenced code blocks preserved), generates BM25 sparse + dense embeddings, and stores them in Qdrant.
+3. **Define Test Suite**: Specify the testing goal, execution mode (`TEST_SCENARIO` or `CODE_GENERATION`), and initial context (e.g., auth tokens as JSON).
 4. **Execution**:
-   - LLM analyzes the documentation and plans a sequence of API calls.
-   - Each step is converted into JavaScript code.
-   - Code runs in a Docker container; state (`ctx`) is passed between steps.
-5. **Reporting**: Review detailed execution logs and results.
+   - **Master Planner** generates diverse, realistic user goals from the documentation.
+   - For each goal, an **Agentic RAG loop** (Research → Verification → Generation) produces and runs JavaScript code in a Docker sandbox.
+   - State (`ctx`) is passed between steps; failures are classified semantically (MISSING / AMBIGUOUS / INCORRECT / CONFIG / ENVIRONMENT).
+5. **Reporting**: Review structured reports with per-step failure analysis, related documentation fragments, and suggested fixes.
 
 ## API Documentation
 

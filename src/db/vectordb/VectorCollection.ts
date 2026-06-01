@@ -10,6 +10,15 @@ export class VectorCollection<T extends Record<string, unknown>> {
         this.collectionName = collectionName;
     }
 
+    async deleteByFileId(fileId: string): Promise<void> {
+        await this.client.vectorClient.delete(this.collectionName, {
+            wait: true,
+            filter: {
+                must: [{ key: "metadata.fileId", match: { value: fileId } }],
+            },
+        } as never);
+    }
+
     async upsertPoints(points: types.vector.VectorPoint<T>[]): Promise<void> {
         try {
             await this.client.vectorClient.upsert(this.collectionName, {

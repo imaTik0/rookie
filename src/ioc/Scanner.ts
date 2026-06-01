@@ -46,10 +46,11 @@ export class Scanner {
                         }
                     }
                 } catch (e) {
-                    console.log(
+                    console.error(
                         `Error during registering module ${entryPath} in IOC`,
                         e,
                     );
+                    throw e;
                 }
             }
         }

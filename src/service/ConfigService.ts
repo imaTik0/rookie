@@ -57,7 +57,12 @@ export interface ConfigValues {
         /** Approximate average document length in tokens (FastEmbed-style, avoids global stats). */
         avgLen: number;
     };
-    /** Optional reranking of retrieved chunks. Off by default to stay fast on small setups. */
+    /** Document chunking parameters. Changing these requires re-indexing all projects. */
+    chunking: {
+        chunkSize: number;
+        chunkOverlap: number;
+    };
+    /** Reranking of retrieved chunks. Defaults to LLM-based reranking (no extra service needed). */
     reranker: {
         mode: "off" | "llm" | "api";
         /** For "api" mode: a Jina/TEI-compatible /rerank endpoint. */
@@ -166,8 +171,12 @@ export class ConfigService {
                 b: envNum("ROOKIE_BM25_B", 0.75),
                 avgLen: envNum("ROOKIE_BM25_AVG_LEN", 256),
             },
+            chunking: {
+                chunkSize: envNum("ROOKIE_CHUNK_SIZE", 1200),
+                chunkOverlap: envNum("ROOKIE_CHUNK_OVERLAP", 150),
+            },
             reranker: {
-                mode: (Deno.env.get("ROOKIE_RERANKER_MODE") as "off" | "llm" | "api") || "off",
+                mode: (Deno.env.get("ROOKIE_RERANKER_MODE") as "off" | "llm" | "api") || "llm",
                 baseURL: Deno.env.get("ROOKIE_RERANKER_BASE_URL"),
                 apiKey: Deno.env.get("ROOKIE_RERANKER_API_KEY"),
                 model: Deno.env.get("ROOKIE_RERANKER_MODEL"),

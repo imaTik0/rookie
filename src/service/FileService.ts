@@ -4,12 +4,14 @@ import * as types from "../types/index.ts";
 import * as db from "../db/mongo/Model.ts";
 import { Buffer } from "node:buffer";
 import { FileProcessorService } from "./FileProcessorService.ts";
+import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
 
 export class FileService {
     constructor(
         private fileRepository: FileRepository,
         private projectRepository: ProjectRepository,
         private fileProcessorService: FileProcessorService,
+        private vectorCollectionFactory: VectorCollectionFactory,
     ) {}
 
     async uploadFile(file: File, fileBuffer: Buffer): Promise<Omit<db.File, "data">> {
@@ -44,6 +46,19 @@ export class FileService {
     }
 
     async deleteFile(fileId: types.file.FileId): Promise<boolean> {
+        // Collect project IDs before removing from MongoDB so we know which
+        // Qdrant collections to clean up.
+        const projectIds = await this.projectRepository.findProjectIdsByFileId(fileId);
+
+        for (const projectId of projectIds) {
+            try {
+                const col = await this.vectorCollectionFactory.createCollection(projectId);
+                await col.deleteByFileId(fileId);
+            } catch {
+                // Best-effort: collection may not exist if indexing never ran
+            }
+        }
+
         await this.projectRepository.removeFileFromAllProjects(fileId);
         return this.fileRepository.delete(fileId);
     }

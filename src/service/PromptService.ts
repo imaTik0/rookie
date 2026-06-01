@@ -30,6 +30,7 @@ import { LlmComplete, rerankResults } from "../rag/Reranker.ts";
 import { z } from "zod";
 import { chatStructured, coerceJson } from "../llm/StructuredLlm.ts";
 import * as schemas from "../llm/schemas.ts";
+import { majorityVote } from "../eval/metrics.ts";
 
 export type { CodeGenerationResponse, PromptOptions, StructuredResponse } from "./prompt/types.ts";
 
@@ -734,23 +735,8 @@ Respond with a JSON object:
 
         // Self-consistency: majority vote on the category, then return a
         // representative full analysis that agrees with the winning category.
-        const winningGap = this.majorityGap(candidates.map((c) => c.documentationGap));
+        const winningGap = majorityVote(candidates.map((c) => c.documentationGap));
         return candidates.find((c) => c.documentationGap === winningGap) ?? candidates[0];
-    }
-
-    private majorityGap(gaps: types.report.DocumentationGap[]): types.report.DocumentationGap {
-        const counts = new Map<types.report.DocumentationGap, number>();
-        for (const g of gaps) counts.set(g, (counts.get(g) || 0) + 1);
-        let best = gaps[0];
-        let bestCount = 0;
-        for (const g of gaps) {
-            const c = counts.get(g)!;
-            if (c > bestCount) {
-                bestCount = c;
-                best = g;
-            }
-        }
-        return best;
     }
 
     private async rankAndFilterDocs(

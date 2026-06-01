@@ -3,6 +3,8 @@ export type FileId = string & { __fileId: never };
 export interface FileShard extends Record<string, unknown> {
     content: string;
     metadata: {
+        /** Source file ID — used to delete chunks from Qdrant when the file is removed. */
+        fileId?: string;
         chunkId: number;
         chunkSize: number;
         fileName: string;

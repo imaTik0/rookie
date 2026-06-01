@@ -2,6 +2,7 @@ import * as path from "@std/path";
 import * as types from "../types/index.ts";
 import * as db from "../db/mongo/Model.ts";
 import striptags from "striptags";
+import { ConfigService } from "./ConfigService.ts";
 
 interface ChunkingOptions {
     chunkSize: number;
@@ -22,14 +23,18 @@ const SUPPORTED_TEXT_MIMES = [
 export class FileHelpers {
     private readonly textDecoder: TextDecoder;
 
-    constructor() {
+    constructor(private configService: ConfigService) {
         this.textDecoder = new TextDecoder("utf-8");
     }
 
     public chunkDbFile(
         dbFile: db.File,
-        options: ChunkingOptions = { chunkSize: 1200, chunkOverlap: 150 },
+        options?: ChunkingOptions,
     ): types.file.FileShard[] {
+        const opts: ChunkingOptions = options ?? {
+            chunkSize: this.configService.values.chunking.chunkSize,
+            chunkOverlap: this.configService.values.chunking.chunkOverlap,
+        };
         if (!this._isChunkable(dbFile.mimetype)) {
             throw new Error(
                 `File is not chunkable (MIME type ${dbFile.mimetype} is not supported text).`,
@@ -43,20 +48,24 @@ export class FileHelpers {
             content = striptags(content);
         }
 
-        return this._chunkText(content, dbFile.filename, options);
+        return this._chunkText(content, dbFile.filename, opts, dbFile._id);
     }
 
     public async chunkFileFromPath(
         filePath: string,
-        options: ChunkingOptions = { chunkSize: 1200, chunkOverlap: 150 },
+        options?: ChunkingOptions,
     ): Promise<types.file.FileShard[]> {
+        const opts: ChunkingOptions = options ?? {
+            chunkSize: this.configService.values.chunking.chunkSize,
+            chunkOverlap: this.configService.values.chunking.chunkOverlap,
+        };
         let content = await Deno.readTextFile(filePath);
         const ext = path.extname(filePath).toLowerCase();
         if (ext === ".html" || ext === ".htm" || ext === ".xml") {
             content = striptags(content);
         }
         const fileName = path.basename(filePath);
-        return this._chunkText(content, fileName, options);
+        return this._chunkText(content, fileName, opts);
     }
 
     private _isHtmlLike(mimetype: string): boolean {
@@ -114,6 +123,7 @@ export class FileHelpers {
         content: string,
         fileName: string,
         options: ChunkingOptions,
+        fileId?: string,
     ): types.file.FileShard[] {
         if (content.length === 0) return [];
 
@@ -140,6 +150,7 @@ export class FileHelpers {
                 chunks.push({
                     content: chunkContent,
                     metadata: {
+                        fileId,
                         fileName,
                         chunkId: chunkNumber++,
                         chunkSize: chunkContent.length,

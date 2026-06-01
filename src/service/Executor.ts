@@ -53,10 +53,18 @@ export class Executor {
         );
         const startTime = Date.now();
         const testSuite = await this.testSuiteRepository.get(testSuiteId);
-        if (!testSuite) return null;
+        if (!testSuite) {
+            this.logger.error(new Error("Not found"), `TestSuite ${testSuiteId} not found`);
+            onProgress?.(JSON.stringify({ type: "log", content: `TestSuite ${testSuiteId} not found` }));
+            return null;
+        }
 
         const project = await this.projectRepository.get(testSuite.projectId);
-        if (!project) return null;
+        if (!project) {
+            this.logger.error(new Error("Not found"), `Project ${testSuite.projectId} not found (referenced by TestSuite ${testSuiteId})`);
+            onProgress?.(JSON.stringify({ type: "log", content: `Project ${testSuite.projectId} not found` }));
+            return null;
+        }
 
         const files = await Promise.all(
             project.files.map((file) => this.fileService.downloadFile(file)),
@@ -93,7 +101,7 @@ export class Executor {
             async (code) => {
                 const execResult = await this.runStepInDocker(
                     code,
-                    JSON.parse(testSuite.initialContext)
+                    this.parseInitialContext(testSuite.initialContext)
                 );
 
                 if (execResult.success) {
@@ -125,7 +133,7 @@ export class Executor {
             );
             const execResult = await this.runStepInDocker(
                 example.fullProgram,
-                JSON.parse(testSuite.initialContext)
+                this.parseInitialContext(testSuite.initialContext)
             );
 
             const stepReport: types.report.StepResult = {
@@ -204,7 +212,7 @@ export class Executor {
             }),
         );
 
-        let context = JSON.parse(testSuite.initialContext);
+        let context = this.parseInitialContext(testSuite.initialContext);
         const stepsResults: types.report.StepResult[] = [];
         let hasFailures = false;
 
@@ -230,7 +238,9 @@ export class Executor {
             };
 
             if (execResult.success && execResult.result) {
-                context = execResult.result.ctx;
+                if (execResult.result.ctx != null) {
+                    context = execResult.result.ctx;
+                }
             } else {
                 hasFailures = true;
                 stepReport.error = typeof execResult.error === "object"
@@ -351,6 +361,15 @@ export class Executor {
         } catch (err) {
             this.logger.error(err, "Failed to perform hybrid search for related knowledge");
             return [];
+        }
+    }
+
+    private parseInitialContext(raw: string): unknown {
+        try {
+            return JSON.parse(raw);
+        } catch {
+            this.logger.error(new Error("Invalid JSON"), `initialContext is not valid JSON: "${raw.slice(0, 120)}" — using empty context`);
+            return {};
         }
     }
 
