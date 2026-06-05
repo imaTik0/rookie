@@ -57,7 +57,11 @@ export class ProjectService {
         const crawledPages = await this.docCrawler.crawl(url, onProgress, { maxPages });
 
         if (crawledPages.length === 0) {
-            throw new Error(`No pages could be crawled from ${url}`);
+            throw new Error(
+                `No pages could be crawled from ${url}. The page may be empty, return ` +
+                    `non-HTML content, or be JavaScript-rendered. Try a server-rendered docs ` +
+                    `URL, or for an API spec use the raw OpenAPI/Swagger JSON (swagger-json ingestion).`,
+            );
         }
 
         const fileIds: types.file.FileId[] = [];

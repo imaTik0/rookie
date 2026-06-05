@@ -31,6 +31,8 @@ export interface ConfigValues {
         maxScenarioDocsChars: number;
         /** Token budget for the agentic loop before non-destructive pruning kicks in. */
         maxContextTokens: number;
+        /** Max chars returned by a single VFS read_file before truncation. */
+        maxFileReadChars: number;
     };
     /** Generation/determinism knobs. Kept conservative so small local models behave predictably. */
     llm: {
@@ -61,6 +63,13 @@ export interface ConfigValues {
     chunking: {
         chunkSize: number;
         chunkOverlap: number;
+    };
+    /** HTML-to-Markdown crawler thresholds. */
+    crawler: {
+        /** Below this body text length + an SPA root marker ⇒ treat as unrendered JS shell. */
+        spaMinTextChars: number;
+        /** Below this Readability article length ⇒ fall back to direct main/body extraction. */
+        readabilityMinChars: number;
     };
     /** Reranking of retrieved chunks. Defaults to LLM-based reranking (no extra service needed). */
     reranker: {
@@ -153,6 +162,7 @@ export class ConfigService {
                 maxContextChars: Number.parseInt(Deno.env.get("ROOKIE_MAX_CONTEXT_CHARS") || "50000", 10),
                 maxScenarioDocsChars: Number.parseInt(Deno.env.get("ROOKIE_MAX_SCENARIO_DOCS_CHARS") || "100000", 10),
                 maxContextTokens: envNum("ROOKIE_MAX_CONTEXT_TOKENS", 12000),
+                maxFileReadChars: envNum("ROOKIE_MAX_FILE_READ_CHARS", 16000),
             },
             llm: {
                 temperature: envNum("ROOKIE_LLM_TEMPERATURE", 0.2),
@@ -174,6 +184,10 @@ export class ConfigService {
             chunking: {
                 chunkSize: envNum("ROOKIE_CHUNK_SIZE", 1200),
                 chunkOverlap: envNum("ROOKIE_CHUNK_OVERLAP", 150),
+            },
+            crawler: {
+                spaMinTextChars: envNum("ROOKIE_SPA_MIN_TEXT_CHARS", 200),
+                readabilityMinChars: envNum("ROOKIE_READABILITY_MIN_CHARS", 250),
             },
             reranker: {
                 mode: (Deno.env.get("ROOKIE_RERANKER_MODE") as "off" | "llm" | "api") || "llm",

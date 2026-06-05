@@ -1,5 +1,6 @@
 import { Logger } from "../Logger.ts";
-import striptags from "striptags";
+import { ConfigService } from "./ConfigService.ts";
+import { htmlToMarkdown } from "./HtmlToMarkdown.ts";
 
 export interface CrawlOptions {
     maxPages: number;
@@ -15,6 +16,14 @@ export interface CrawledPage {
     title: string;
 }
 
+interface FetchedPage {
+    url: string;
+    markdown: string;
+    title: string;
+    links: string[];
+    isLikelySpa: boolean;
+}
+
 const DEFAULT_OPTIONS: CrawlOptions = {
     maxPages: 50,
     concurrency: 2,
@@ -24,7 +33,10 @@ const DEFAULT_OPTIONS: CrawlOptions = {
 };
 
 export class DocCrawler {
-    constructor(private logger: Logger) {}
+    constructor(
+        private logger: Logger,
+        private configService: ConfigService,
+    ) {}
 
     async crawl(
         startUrl: string,
@@ -35,10 +47,16 @@ export class DocCrawler {
         const startOrigin = new URL(startUrl).origin;
         const startPathPrefix = this.getPathPrefix(startUrl);
 
+        // Standards-first: a single llms-full.txt holds the entire docs as
+        // Markdown. If present, ingest it directly and skip crawling entirely.
+        const llms = await this.tryLlmsFullTxt(startOrigin, onProgress, opts);
+        if (llms) return llms;
+
         const visited = new Set<string>();
         const queued = new Set<string>();
         const queue: string[] = [];
         const results: CrawledPage[] = [];
+        let startWasSpa = false;
 
         const startNormalized = this.normalizeUrl(startUrl);
         queue.push(startNormalized);
@@ -66,6 +84,12 @@ export class DocCrawler {
                 try {
                     const page = await this.fetchPage(url, startOrigin, startPathPrefix, opts);
                     if (!page) return null;
+
+                    if (page.isLikelySpa) {
+                        this.logger.log(`Skipping JS-rendered page (no static HTML): ${url}`);
+                        if (url === startNormalized) startWasSpa = true;
+                        return null;
+                    }
 
                     this.logger.log(
                         `Crawled: ${url} (${page.markdown.length} chars, ${page.links.length} links)`,
@@ -97,10 +121,58 @@ export class DocCrawler {
             }
         }
 
+        // The start URL was an unrendered SPA shell and nothing else was reachable.
+        // Surface an actionable error instead of a generic "no pages" message.
+        if (results.length === 0 && startWasSpa) {
+            throw new Error(
+                `The start page ${startUrl} appears to be a JavaScript-rendered app ` +
+                    `(e.g. Swagger UI) with no server-side HTML. Rookie's crawler reads static ` +
+                    `HTML only. Try either the raw OpenAPI/Swagger JSON URL (swagger-json ingestion) ` +
+                    `or a server-rendered docs URL (e.g. a Redoc or static docs site).`,
+            );
+        }
+
         this.logger.log(`Crawl complete: ${results.length} pages indexed`);
         onProgress?.(`Crawl complete: ${results.length} pages indexed`);
 
         return results;
+    }
+
+    /**
+     * Probe the origin for an `llms-full.txt` — a single Markdown file holding
+     * the entire documentation (an emerging convention for LLM consumption).
+     * Returns it as one page, or null if absent / too small to be real content.
+     */
+    private async tryLlmsFullTxt(
+        origin: string,
+        onProgress: ((msg: string) => void) | undefined,
+        opts: CrawlOptions,
+    ): Promise<CrawledPage[] | null> {
+        const url = `${origin}/llms-full.txt`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), opts.fetchTimeoutMs);
+        try {
+            const res = await fetch(url, {
+                headers: { "User-Agent": "Mozilla/5.0 (compatible; RookieBot/1.0)" },
+                signal: controller.signal,
+                redirect: "follow",
+            });
+            if (!res.ok) return null;
+            const text = (await res.text()).trim();
+            if (text.length < 500) return null; // an error page or stub, not real docs
+
+            this.logger.log(`Found llms-full.txt (${text.length} chars) — skipping HTML crawl`);
+            onProgress?.(`Found llms-full.txt — ingesting directly, skipping crawl`);
+            return [{
+                url,
+                title: "llms-full.txt",
+                markdown: `# Documentation\nSource: ${url}\n\n${text}`,
+            }];
+        } catch {
+            return null; // no llms-full.txt — fall back to crawling
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     private async fetchPage(
@@ -108,7 +180,7 @@ export class DocCrawler {
         originFilter: string,
         pathPrefix: string,
         opts: CrawlOptions,
-    ): Promise<{ url: string; markdown: string; title: string; links: string[] } | null> {
+    ): Promise<FetchedPage | null> {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), opts.fetchTimeoutMs);
 
@@ -136,70 +208,30 @@ export class DocCrawler {
             const html = await response.text();
             if (!html || html.length < 100) return null;
 
-            // Extract links from raw HTML before stripping
-            const links = this.extractLinksFromHtml(
-                html,
-                url,
+            // Readability (main-content extraction) + Turndown (DOM→Markdown,
+            // keeps tables/code). Link extraction + SPA detection happen inside.
+            const { crawler } = this.configService.values;
+            const parsed = htmlToMarkdown(html, {
+                pageUrl: url,
                 originFilter,
                 pathPrefix,
-                opts.sameDomainOnly,
-            );
+                sameDomainOnly: opts.sameDomainOnly,
+                spaMinTextChars: crawler.spaMinTextChars,
+                readabilityMinChars: crawler.readabilityMinChars,
+            });
 
-            // Extract title
-            const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-            const title = titleMatch ? titleMatch[1].trim() : this.urlToSlug(url);
-
-            // Strip HTML to clean text, keeping some structure
-            const bodyMatch = html.match(
-                /<(?:main|article|body)[^>]*>([\s\S]*?)<\/(?:main|article|body)>/i,
-            );
-            const contentHtml = bodyMatch ? bodyMatch[1] : html;
-
-            // Remove script, style tags entirely
-            let cleaned = contentHtml
-                .replace(/<script[\s\S]*?<\/script>/gi, "")
-                .replace(/<style[\s\S]*?<\/style>/gi, "");
-
-            // If we found a specific content tag (main/article), we are more aggressive with layout
-            if (
-                bodyMatch &&
-                (bodyMatch[0].toLowerCase().startsWith("<main") ||
-                    bodyMatch[0].toLowerCase().startsWith("<article"))
-            ) {
-                cleaned = cleaned
-                    .replace(/<nav[\s\S]*?<\/nav>/gi, "")
-                    .replace(/<footer[\s\S]*?<\/footer>/gi, "")
-                    .replace(/<header[\s\S]*?<\/header>/gi, "");
+            if (parsed.isLikelySpa) {
+                return { url, markdown: "", title: parsed.title, links: parsed.links, isLikelySpa: true };
             }
+            if (!parsed.markdown || parsed.markdown.length < 50) return null;
 
-            // Convert headings to markdown-like format before stripping
-            let text = cleaned
-                .replace(/<h1[^>]*>(.*?)<\/h1>/gi, "\n# $1\n")
-                .replace(/<h2[^>]*>(.*?)<\/h2>/gi, "\n## $1\n")
-                .replace(/<h3[^>]*>(.*?)<\/h3>/gi, "\n### $1\n")
-                .replace(/<h4[^>]*>(.*?)<\/h4>/gi, "\n#### $1\n")
-                .replace(/<li[^>]*>/gi, "\n- ")
-                .replace(/<br\s*\/?>/gi, "\n")
-                .replace(/<\/p>/gi, "\n\n")
-                .replace(/<\/div>/gi, "\n");
-
-            // Preserve code blocks
-            text = text.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, " `$1` ");
-            text = text.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, "\n```\n$1\n```\n");
-
-            // Strip remaining HTML
-            text = striptags(text);
-
-            // Clean up whitespace
-            text = text
-                .replace(/\n{3,}/g, "\n\n")
-                .replace(/[ \t]+/g, " ")
-                .replace(/\n /g, "\n")
-                .trim();
-
-            if (text.length < 50) return null;
-
-            return { url, markdown: `# ${title}\nSource: ${url}\n\n${text}`, title, links };
+            return {
+                url,
+                markdown: parsed.markdown,
+                title: parsed.title,
+                links: parsed.links,
+                isLikelySpa: false,
+            };
         } catch (err) {
             if ((err as Error).name === "AbortError") {
                 this.logger.log(`Timeout after ${opts.fetchTimeoutMs}ms for: ${url}`);
@@ -210,57 +242,6 @@ export class DocCrawler {
         } finally {
             clearTimeout(timer);
         }
-    }
-
-    private extractLinksFromHtml(
-        html: string,
-        currentUrl: string,
-        originFilter: string,
-        pathPrefix: string,
-        sameDomainOnly: boolean,
-    ): string[] {
-        const links: string[] = [];
-        const seen = new Set<string>();
-        const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>/gi;
-        let match;
-
-        while ((match = linkRegex.exec(html)) !== null) {
-            let href = match[1];
-
-            if (
-                href.startsWith("#") || href.startsWith("mailto:") ||
-                href.startsWith("javascript:") || href.startsWith("data:")
-            ) continue;
-            if (/\.(png|jpg|jpeg|gif|svg|ico|webp|mp4|pdf|zip|tar|gz|css|js)$/i.test(href)) {
-                continue;
-            }
-
-            try {
-                const resolved = new URL(href, currentUrl);
-                href = resolved.origin + resolved.pathname;
-            } catch {
-                continue;
-            }
-
-            if (sameDomainOnly) {
-                try {
-                    const parsed = new URL(href);
-                    if (parsed.origin !== originFilter) continue;
-                    if (pathPrefix && !parsed.pathname.startsWith(pathPrefix)) continue;
-                } catch {
-                    continue;
-                }
-            }
-
-            href = href.replace(/\/+$/, "") || href;
-
-            if (href && !seen.has(href)) {
-                seen.add(href);
-                links.push(href);
-            }
-        }
-
-        return links;
     }
 
     private getPathPrefix(url: string): string {
@@ -281,22 +262,20 @@ export class DocCrawler {
     private normalizeUrl(url: string): string {
         try {
             const parsed = new URL(url);
-            const path = parsed.pathname.replace(/\/+$/, "") || "/";
+            // Collapse duplicate slashes but keep a single trailing slash on
+            // path-only URLs (no file extension). Many static sites — including
+            // Gitea's Redoc docs — return 404 for "/api/1.22" but 200 for
+            // "/api/1.22/", so stripping unconditionally would break crawling.
+            // Check only the last path segment; require alphabetic chars so
+            // version numbers like "1.22" are not mistaken for file extensions.
+            const lastSegment = parsed.pathname.split("/").filter((s) => s.length > 0).pop() ?? "";
+            const hasExtension = /\.[a-zA-Z]{2,6}$/.test(lastSegment);
+            const stripped = parsed.pathname.replace(/\/+$/, "") || "/";
+            const hadTrailing = parsed.pathname.endsWith("/") && parsed.pathname !== "/";
+            const path = (!hasExtension && hadTrailing) ? stripped + "/" : stripped;
             return `${parsed.origin}${path}`;
         } catch {
             return url;
-        }
-    }
-
-    private urlToSlug(url: string): string {
-        try {
-            const parsed = new URL(url);
-            return parsed.pathname
-                .replace(/^\//, "")
-                .replace(/\//g, "_")
-                .replace(/[^a-zA-Z0-9_-]/g, "") || "index";
-        } catch {
-            return "page";
         }
     }
 

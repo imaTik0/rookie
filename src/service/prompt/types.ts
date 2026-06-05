@@ -80,4 +80,8 @@ export interface AgenticLoopConfig {
     /** Transient-error retry controls. */
     maxRetries?: number;
     retryBaseMs?: number;
+    /** Per-call LLM request timeout in milliseconds. Defaults to 90 s.
+     *  A fresh AbortSignal is created per retry attempt so retries are not
+     *  pre-aborted by a signal that already fired. */
+    callTimeoutMs?: number;
 }

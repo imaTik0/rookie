@@ -923,7 +923,21 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                 emitLog(onProgress, `Agent reading file: ${args.filename}`);
                 const file = files.find(f => f.metadata.filename === args.filename);
                 if (!file) return `File not found: ${args.filename}`;
-                return new TextDecoder().decode(file.buffer);
+                const content = new TextDecoder().decode(file.buffer);
+                // Cap whole-file reads: a large doc can be 200k+ tokens and would
+                // blow the model context in a single tool result. Return a head
+                // slice and steer the agent toward targeted tools for the rest.
+                const cap = this.configService.values.limits.maxFileReadChars;
+                if (content.length > cap) {
+                    const totalLines = content.split("\n").length;
+                    return content.slice(0, cap) +
+                        `\n\n…[truncated: showing first ${cap} of ${content.length} chars, ` +
+                        `${totalLines} lines total]…\n` +
+                        `This file is large. Use grep_file(pattern) to find specific ` +
+                        `endpoints/parameters, or head_file/tail_file(lines) for ranges, ` +
+                        `or search_knowledge_base(query) for semantic lookup.`;
+                }
+                return content;
             },
             head_file: async (_id: string, args: any) => {
                 const linesCount = args.lines || 50;

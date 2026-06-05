@@ -163,6 +163,6 @@ export class ProjectRepository extends BaseRepository<types.project.ProjectId, d
             .find({ files: fileId })
             .project({ _id: 1 })
             .toArray();
-        return docs.map((d: { _id: unknown }) => d._id as types.project.ProjectId);
+        return docs.map((d) => d._id as types.project.ProjectId);
     }
 }

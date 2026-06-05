@@ -17,6 +17,8 @@ This inverts traditional API testing: instead of checking whether software meets
 - **Agentic RAG pipeline**: Three-phase loop (Research → Verification → Code Generation) with self-correcting retrieval and iterative execution feedback.
 - **Isolated sandbox execution**: Generated code runs in ephemeral, hardened Docker containers — no side effects on the host, no mock data, real HTTP calls only.
 - **Hybrid retrieval (BM25 + dense)**: Reciprocal Rank Fusion over sparse BM25 and dense vector search minimises irrelevant context reaching the LLM.
+- **Robust docs ingestion**: Crawls documentation sites using Mozilla Readability (main-content extraction, strips nav/sidebar/footer) and Turndown (clean Markdown with preserved tables and code), probes the `llms-full.txt` standard, and detects unrendered JavaScript pages (e.g. Swagger UI) instead of indexing empty shells.
+- **Bounded context management**: The agentic loop keeps long research sessions within the model's context window via LLM distillation of older tool-call history into a dense factsheet — preserving extracted facts instead of truncating them.
 - **Runs fully local**: Compatible with any OpenAI-compatible backend — Ollama, vLLM, LM Studio — including small open-source models like Qwen or Gemma.
 
 ## Tech Stack
@@ -36,7 +38,7 @@ This inverts traditional API testing: instead of checking whether software meets
 
 ### Prerequisites
 
-- [Deno](https://deno.land/) (latest version)
+- [Deno](https://deno.land/) 2.x
 - [Docker](https://www.docker.com/)
 - [MongoDB](https://www.mongodb.com/)
 - [Qdrant](https://qdrant.tech/)
@@ -87,7 +89,7 @@ Copy `.env` to set your values — the server loads it automatically (`deno task
 | `ROOKIE_LLM_MAX_REPAIR_ATTEMPTS`| Repair retries when JSON fails zod validation           | `1`           |
 | `ROOKIE_LLM_MAX_RETRIES`        | Backoff retries on transient 429/5xx/network errors     | `3`           |
 | `ROOKIE_LLM_RETRY_BASE_MS`      | Base backoff delay (exponential + jitter)               | `500`         |
-| `ROOKIE_MAX_CONTEXT_TOKENS`     | Token budget before non-destructive loop compaction     | `12000`       |
+| `ROOKIE_MAX_CONTEXT_TOKENS`     | Token budget before loop compaction (per-message cap → distillation of old history → initial-context trim) | `12000` |
 | `ROOKIE_CLASSIFIER_VOTES`       | Self-consistency votes in the failure classifier        | `3`           |
 | `ROOKIE_BM25_K1` / `_B` / `_AVG_LEN` | BM25 sparse-vector parameters                    | `1.5/0.75/256`|
 
@@ -104,6 +106,7 @@ Copy `.env` to set your values — the server loads it automatically (`deno task
 | `ROOKIE_MAX_RESULT_CHARS`             | Max characters of a Docker execution result kept in context | `3000` |
 | `ROOKIE_MAX_CONTEXT_CHARS`            | Max characters of accumulated agent context              | `50000`  |
 | `ROOKIE_MAX_SCENARIO_DOCS_CHARS`      | Max characters of docs passed for scenario planning      | `100000` |
+| `ROOKIE_MAX_FILE_READ_CHARS`          | Max characters returned by a single VFS `read_file` before truncation (large files steer the agent to `grep_file` / `search_knowledge_base`) | `16000` |
 
 #### Chunking
 
@@ -113,6 +116,13 @@ Copy `.env` to set your values — the server loads it automatically (`deno task
 | ----------------------- | -------------------------------------------------- | ------- |
 | `ROOKIE_CHUNK_SIZE`     | Target chunk size in characters                    | `1200`  |
 | `ROOKIE_CHUNK_OVERLAP`  | Overlap carried into the next chunk for continuity | `150`   |
+
+#### Docs crawling (`POST /projects/from-url`)
+
+| Variable                       | Description                                                                 | Default |
+| ------------------------------ | --------------------------------------------------------------------------- | ------- |
+| `ROOKIE_SPA_MIN_TEXT_CHARS`    | Below this body-text length + a JS app root (`#swagger-ui`, `#app`, …) a page is treated as an unrendered SPA and skipped | `200` |
+| `ROOKIE_READABILITY_MIN_CHARS` | Below this extracted-article length, fall back to direct `main`/`body` extraction (for terse reference pages) | `250` |
 
 #### Sandbox (untrusted-code execution)
 
@@ -214,33 +224,46 @@ Notes for small models:
 - BM25 retrieval is computed server-side in Qdrant and is model-independent, so it stays accurate even with a weak LLM.
 - If a model's tool-calling is weak, lower `ROOKIE_MAX_RESEARCH_ITERATIONS` to avoid loops.
 
-### Running the App (Backend)
+### Install dependencies
 
 ```bash
-# Start the production server (loads .env automatically)
-deno task start
-
-# Start in development mode with hot-reload and pretty logging
-deno task watch
+# Install frontend npm deps (run once from the frontend directory)
+cd frontend && npm install
 ```
 
-### Running the Frontend (Agentic RAG Monitor)
+Deno backend dependencies are resolved automatically by Deno on first run (via `deno.json` imports).
 
-The project includes a React + Vite frontend for real-time monitoring of LLM execution.
+### Running both services
+
+The repo uses **Deno workspaces** — the root `deno.json` declares `frontend` as a workspace member and provides tasks to start both services at once via [`scripts/run-both.ts`](scripts/run-both.ts).
 
 ```bash
-cd frontend
-npm install
-npm run dev
+# Development — backend (Deno watch + pino-pretty) + frontend (Vite HMR)
+deno task dev
+
+# Production — backend + frontend preview
+deno task prod
 ```
 
-The frontend will be available at `http://localhost:5173`.
+If either process exits, the other is terminated automatically.
+
+### Running services individually
+
+```bash
+deno task watch    # backend only — hot-reload with pretty logging
+deno task start    # backend only — production
+
+deno task --cwd frontend dev      # frontend only — Vite dev server
+deno task --cwd frontend build    # frontend only — production build
+```
+
+The frontend is available at `http://localhost:5173`, the backend at `http://localhost:3000`.
 
 ## Workflow
 
 1. **Add Documentation**: Upload API specification files directly, or crawl a documentation website:
    - `POST /files` + `POST /projects` — upload local files and create a project
-   - `POST /projects/from-url` — provide a URL; Rookie crawls up to N pages, stores them as Markdown, and indexes everything automatically
+   - `POST /projects/from-url` — provide a URL; Rookie ingests it as Markdown and indexes everything automatically. Ingestion is standards-first: if the origin publishes an `llms-full.txt` it is used directly; otherwise the crawler walks up to N same-origin pages, extracting main content with Mozilla Readability and converting to Markdown with Turndown (tables and code blocks preserved). JavaScript-rendered pages (e.g. Swagger UI) are detected and skipped with an actionable error pointing to the raw OpenAPI JSON instead.
 2. **Indexing**: The system chunks each file structure-aware (heading boundaries, fenced code blocks preserved), generates BM25 sparse + dense embeddings, and stores them in Qdrant.
 3. **Define Test Suite**: Specify the testing goal, execution mode (`TEST_SCENARIO` or `CODE_GENERATION`), and initial context (e.g., auth tokens as JSON).
 4. **Execution**:
@@ -248,6 +271,34 @@ The frontend will be available at `http://localhost:5173`.
    - For each goal, an **Agentic RAG loop** (Research → Verification → Generation) produces and runs JavaScript code in a Docker sandbox.
    - State (`ctx`) is passed between steps; failures are classified semantically (MISSING / AMBIGUOUS / INCORRECT / CONFIG / ENVIRONMENT).
 5. **Reporting**: Review structured reports with per-step failure analysis, related documentation fragments, and suggested fixes.
+
+## Experiments
+
+The [`scripts/`](scripts/) directory contains a reproducible **documentation-drift** experiment that uses Rookie to detect when documentation no longer matches a newer software version.
+
+### `experiment-runner.ts`
+
+Indexes the documentation for an **old** version of a Dockerized project, then runs the Master Planner against both the old and a **new** container image. Goals that passed on the old API but fail on the new one mark documentation drift.
+
+```bash
+# Rookie must be running (defaults to http://localhost:3000)
+deno run --allow-all scripts/experiment-runner.ts --config gitea
+deno run --allow-all scripts/experiment-runner.ts --config gitea --verbose
+ROOKIE_URL=http://localhost:3000 deno run --allow-all scripts/experiment-runner.ts --config gitea
+```
+
+Phases: (1) index docs from the old image → (2) baseline: old docs × old API → (3) experiment: old docs × new API → (4) diff structured summaries and write `experiment-<config>-<ts>.json`. Targets are defined in the `EXPERIMENTS` map at the top of the file — add a key (image tags, container/health config, docs URL, planner goals, optional `setup` hook for credentials) to run the same experiment on another project.
+
+### `print-report.ts`
+
+Pretty-prints a saved experiment report with colourised tables, pass-rate bars, drift diff, and failure taxonomy.
+
+```bash
+deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json          # overview
+deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json --goals  # + goals comparison
+deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json --gaps   # + documentation gaps
+deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json --full   # everything
+```
 
 ## API Documentation
 
