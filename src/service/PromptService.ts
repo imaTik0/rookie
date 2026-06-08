@@ -205,6 +205,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
     public async promptForCodeGenerationWithAgenticRAG(
         vectorCollectionName: string,
         userGoal: string,
+        files: { metadata: any; buffer: Uint8Array }[],
         onProgress?: ProgressCallback,
         smokeTestCallback?: SmokeTestCallback,
     ): Promise<{ response: CodeGenerationResponse; history: any[] }> {
@@ -214,6 +215,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         let { initialDocsContent, contextFound, messages: researchMessages } = await this.runResearchPhase(
             vectorCollectionName,
             userGoal,
+            files,
             onProgress,
         );
 
@@ -302,6 +304,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
     private async runResearchPhase(
         vectorCollectionName: string,
         userGoal: string,
+        files: { metadata: any; buffer: Uint8Array }[],
         onProgress: ProgressCallback,
     ): Promise<{ initialDocsContent: string; contextFound: string; messages: OpenAI.Chat.ChatCompletionMessageParam[] }> {
         const initialSearchResults = await this.performRAGSearch(
@@ -323,7 +326,9 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
 
         const finalMessages = await runAgenticLoop(this.openai, this.logger, onProgress, {
             messages,
-            tools: [SEARCH_TOOL],
+            // VFS tools are advertised in the research prompt — register them here
+            // so the agent can read full files instead of only truncated search chunks.
+            tools: [SEARCH_TOOL, LIST_FILES_TOOL, READ_FILE_TOOL, HEAD_FILE_TOOL, TAIL_FILE_TOOL, GREP_FILE_TOOL],
             toolHandlers: {
                 search_knowledge_base: async (_id, rawArgs) => {
                     const args = rawArgs as SearchToolArgs;
@@ -344,6 +349,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                     }));
                     return JSON.stringify(truncated);
                 },
+                ...this.createVfsToolHandlers(files, onProgress),
             },
             modelName: this.configService.values.openAI.modelName,
             readySignal: "READY_FOR_GENERATION",

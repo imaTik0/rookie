@@ -42,10 +42,11 @@ export default function Reports() {
     const fetchReports = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API}/reports/?page=${page}&limit=${limit}`);
+            const res = await fetch(`${API}/reports?page=${page}&limit=${limit}`);
             const data = await res.json();
-            setReports(data);
-            setTotal(Number(res.headers.get("X-Total-Count") || data.length));
+            // API now returns the standard { items, meta } pagination envelope.
+            setReports(data.items ?? []);
+            setTotal(data.meta?.totalItems ?? data.items?.length ?? 0);
         } catch {
             setReports([]);
         } finally {

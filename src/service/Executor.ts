@@ -95,7 +95,7 @@ export class Executor {
 
     private async executeCodeGeneration(
         testSuite: types.test.TestSuite,
-        _files: { metadata: any, buffer: Uint8Array }[],
+        files: { metadata: any, buffer: Uint8Array }[],
         startTime: number,
         onProgress?: (msg: string) => void,
         signal?: AbortSignal,
@@ -106,6 +106,7 @@ export class Executor {
         const { response: codeGenResponse, history: conversationHistory } = await this.promptService.promptForCodeGenerationWithAgenticRAG(
             testSuite.projectId,
             testSuite.userGoal || "No goal specified",
+            files,
             onProgress,
             async (code) => {
                 const execResult = await this.runStepInDocker(
