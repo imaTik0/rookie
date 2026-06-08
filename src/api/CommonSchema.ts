@@ -20,5 +20,38 @@ export const PaginationQuerySchema = z.object({
     }),
 });
 
+/** Shared pagination metadata block, used by every paginated list response. */
+export const PaginationMetaSchema = z
+    .object({
+        totalItems: z.number().int().openapi({ example: 100 }),
+        totalPages: z.number().int().openapi({ example: 10 }),
+        currentPage: z.number().int().openapi({ example: 1 }),
+        itemsPerPage: z.number().int().openapi({ example: 10 }),
+    })
+    .openapi("PaginationMeta");
+
+/** Wrap an item schema into the standard `{ items, meta }` paginated envelope. */
+export function paginated<T extends z.ZodType>(itemSchema: T) {
+    return z.object({
+        items: z.array(itemSchema),
+        meta: PaginationMetaSchema,
+    });
+}
+
+/** Compute the pagination metadata for a page of results. */
+export function buildMeta(
+    total: number,
+    page: number,
+    limit: number,
+): z.infer<typeof PaginationMetaSchema> {
+    return {
+        totalItems: total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+        currentPage: page,
+        itemsPerPage: limit,
+    };
+}
+
 export type ErrorSchema = z.infer<typeof ErrorSchema>;
 export type PaginationQuerySchema = z.infer<typeof PaginationQuerySchema>;
+export type PaginationMeta = z.infer<typeof PaginationMetaSchema>;

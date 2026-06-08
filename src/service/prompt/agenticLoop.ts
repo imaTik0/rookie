@@ -20,7 +20,15 @@
  */
 import OpenAI from "@openai/openai";
 import { Logger } from "../../Logger.ts";
-import { emitLog, ProgressCallback } from "./helpers.ts";
+import {
+    emitAssistantEnd,
+    emitLog,
+    emitPhase,
+    emitToken,
+    emitToolCall,
+    emitToolResult,
+    ProgressCallback,
+} from "./helpers.ts";
 import { AgenticLoopConfig } from "./types.ts";
 import { withRetry } from "../../llm/retry.ts";
 import { countMessageTokens, countTokens } from "../../llm/tokens.ts";
@@ -291,6 +299,72 @@ function safeParse(json: string): unknown {
     try { return JSON.parse(json || "{}"); } catch { return { _raw: json }; }
 }
 
+interface StreamedCompletion {
+    message: OpenAI.Chat.ChatCompletionMessageParam;
+    usage?: OpenAI.Completions.CompletionUsage;
+}
+
+/**
+ * Run one streaming chat completion, emitting each content delta as a `token`
+ * event so clients can watch the model think in real time. Tool-call deltas are
+ * accumulated across chunks and reassembled into a normal assistant message, so
+ * the rest of the loop is unchanged.
+ */
+async function streamCompletion(
+    openai: OpenAI,
+    modelName: string,
+    messages: OpenAI.Chat.ChatCompletionMessageParam[],
+    tools: OpenAI.Chat.ChatCompletionTool[],
+    config: AgenticLoopConfig,
+    callTimeoutMs: number,
+    onProgress: ProgressCallback,
+): Promise<StreamedCompletion> {
+    const stream = await openai.chat.completions.create(
+        {
+            model: modelName,
+            messages,
+            tools,
+            tool_choice: "auto",
+            stream: true,
+            ...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
+            ...(config.seed !== undefined ? { seed: config.seed } : {}),
+        },
+        { signal: AbortSignal.timeout(callTimeoutMs) },
+    );
+
+    let content = "";
+    const toolAcc: Array<{ id: string; name: string; args: string }> = [];
+    let usage: OpenAI.Completions.CompletionUsage | undefined;
+
+    for await (const chunk of stream) {
+        const choice = chunk.choices?.[0];
+        if (choice?.delta?.content) {
+            content += choice.delta.content;
+            emitToken(onProgress, choice.delta.content);
+        }
+        for (const tcd of choice?.delta?.tool_calls ?? []) {
+            const i = tcd.index ?? 0;
+            const acc = (toolAcc[i] ??= { id: "", name: "", args: "" });
+            if (tcd.id) acc.id = tcd.id;
+            if (tcd.function?.name) acc.name += tcd.function.name;
+            if (tcd.function?.arguments) acc.args += tcd.function.arguments;
+        }
+        if (chunk.usage) usage = chunk.usage;
+    }
+
+    const tool_calls = toolAcc
+        .filter(Boolean)
+        .map((t) => ({ id: t.id, type: "function" as const, function: { name: t.name, arguments: t.args } }));
+
+    const message = {
+        role: "assistant",
+        content: content || null,
+        ...(tool_calls.length ? { tool_calls } : {}),
+    } as OpenAI.Chat.ChatCompletionMessageParam;
+
+    return { message, usage };
+}
+
 export async function runAgenticLoop(
     openai: OpenAI,
     logger: Logger,
@@ -311,7 +385,7 @@ export async function runAgenticLoop(
 
     while (iterations < maxIterations && !isReady) {
         logger.log(`${phaseLabel} Iteration ${iterations + 1}...`);
-        emitLog(onProgress, `${phaseLabel} Iteration ${iterations + 1}...`);
+        emitPhase(onProgress, `${phaseLabel} · iteration ${iterations + 1}`);
 
         let contextTokens = countContextTokens(messages, tools);
         logger.log(`${phaseLabel} context: ~${contextTokens} tokens (${messages.length} messages)`);
@@ -330,19 +404,8 @@ export async function runAgenticLoop(
             emitLog(onProgress, `Context after compaction: ~${contextTokens} tokens.`);
         }
 
-        const response = await withRetry(
-            () =>
-                openai.chat.completions.create(
-                    {
-                        model: modelName,
-                        messages,
-                        tools,
-                        tool_choice: "auto",
-                        ...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
-                        ...(config.seed         !== undefined ? { seed:        config.seed        } : {}),
-                    } satisfies OpenAI.Chat.ChatCompletionCreateParamsNonStreaming,
-                    { signal: AbortSignal.timeout(callTimeoutMs) },
-                ),
+        const { message, usage } = await withRetry(
+            () => streamCompletion(openai, modelName, messages, tools, config, callTimeoutMs, onProgress),
             {
                 retries:     config.maxRetries  ?? 3,
                 baseDelayMs: config.retryBaseMs,
@@ -351,7 +414,6 @@ export async function runAgenticLoop(
             },
         );
 
-        const message = response.choices[0].message as OpenAI.Chat.ChatCompletionMessageParam;
         messages.push(message);
 
         if (onTrace) {
@@ -360,11 +422,11 @@ export async function runAgenticLoop(
                 timestamp: Date.now(),
                 type:      "LLM_CALL",
                 content:   { messages: messages.slice(0, -1), response: message, phase: phaseLabel },
-                tokens: response.usage
+                tokens: usage
                     ? {
-                        promptTokens:     response.usage.prompt_tokens,
-                        completionTokens: response.usage.completion_tokens,
-                        totalTokens:      response.usage.total_tokens,
+                        promptTokens:     usage.prompt_tokens,
+                        completionTokens: usage.completion_tokens,
+                        totalTokens:      usage.total_tokens,
                     }
                     : undefined,
             });
@@ -372,14 +434,18 @@ export async function runAgenticLoop(
 
         const am = asAgentMsg(message);
 
-        if (am.content && !am.content.includes(readySignal)) {
+        // Signal end-of-stream so clients collapse the live token view into a
+        // tidy summary. The full content is included for that summary.
+        if (am.content) {
             logger.log(`${phaseLabel} Agent Thoughts: ${am.content}`);
-            emitLog(onProgress, `Agent Thoughts:\n${am.content}`);
+            emitAssistantEnd(onProgress, am.content);
         }
 
         if (am.tool_calls && am.tool_calls.length > 0) {
             for (const toolCall of am.tool_calls) {
                 const handler = toolHandlers[toolCall.function.name];
+                const parsedArgs = safeParse(toolCall.function.arguments) as Record<string, unknown>;
+                emitToolCall(onProgress, toolCall.function.name, parsedArgs);
                 let result: string;
                 if (handler) {
                     try {
@@ -394,6 +460,7 @@ export async function runAgenticLoop(
                     logger.error(null, `${phaseLabel} unregistered tool '${toolCall.function.name}'`);
                 }
 
+                emitToolResult(onProgress, toolCall.function.name, result);
                 messages.push({ role: "tool", tool_call_id: toolCall.id, content: result });
 
                 if (onTrace) {

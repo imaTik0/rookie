@@ -5,6 +5,9 @@ import { TestSuiteRoutes } from "./TestSuiteRoute.ts";
 import { Executor } from "../../service/Executor.ts";
 import { TestSuiteService } from "../../service/TestService.ts";
 import { ReportService } from "../../service/ReportService.ts";
+import { JobService } from "../../service/JobService.ts";
+import { mapJobToApi } from "../job/JobMapper.ts";
+import { buildMeta } from "../CommonSchema.ts";
 import * as types from "../../types/index.ts";
 
 @Controller("/testsuites")
@@ -13,6 +16,7 @@ export class TestSuiteController {
         private testSuiteService: TestSuiteService,
         private executor: Executor,
         private reportService: ReportService,
+        private jobService: JobService,
     ) {}
 
     @Post(TestSuiteRoutes.CreateTestSuiteRoute)
@@ -24,9 +28,15 @@ export class TestSuiteController {
 
     @Get(TestSuiteRoutes.ListTestSuitesRoute)
     listTestSuites: RouteHandler<typeof TestSuiteRoutes.ListTestSuitesRoute> = async (c) => {
-        const { page, limit } = c.req.valid("query");
-        const result = await this.testSuiteService.listTestSuites({ page, limit });
-        return c.json(result as unknown as object, 200);
+        const { page, limit, projectId } = c.req.valid("query");
+        const { testSuites, total } = await this.testSuiteService.listTestSuites(
+            { page, limit },
+            { projectId: projectId as types.project.ProjectId | undefined },
+        );
+        return c.json(
+            { items: testSuites, meta: buildMeta(total, page, limit) } as unknown as object,
+            200,
+        );
     };
 
     @Get(TestSuiteRoutes.GetTestSuiteRoute)
@@ -70,14 +80,14 @@ export class TestSuiteController {
     @Post(TestSuiteRoutes.ExecuteTestSuiteRoute)
     executeTestSuite: RouteHandler<typeof TestSuiteRoutes.ExecuteTestSuiteRoute> = async (c) => {
         const { testSuiteId } = c.req.valid("param");
-        const executionResult = await this.executor.executeTestSuite(
-            testSuiteId as types.test.TestSuiteId,
-        );
-        if (!executionResult) {
-            return c.json({ code: 404, message: "TestSuite or Project not found" }, 404);
+        // Validate up-front so a missing suite fails fast with 404 rather than
+        // surfacing only later via the job's error.
+        const suite = await this.testSuiteService.getTestSuite(testSuiteId as types.test.TestSuiteId);
+        if (!suite) {
+            return c.json({ code: 404, message: "TestSuite not found" }, 404);
         }
-        const apiReport = this.reportService.mapReportToApi(executionResult);
-        return c.json(apiReport as unknown as object, 202);
+        const job = await this.jobService.enqueue("EXECUTE_TEST_SUITE", { testSuiteId });
+        return c.json(mapJobToApi(job), 202);
     };
 
     @Get(TestSuiteRoutes.StreamExecuteTestSuiteRoute)

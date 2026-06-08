@@ -1,4 +1,4 @@
-import { ReportRepository } from "./ReportRepository.ts";
+import { ReportFilter, ReportRepository } from "./ReportRepository.ts";
 import * as db from "../db/mongo/Model.ts";
 import * as types from "../types/index.ts";
 
@@ -61,11 +61,12 @@ export class ReportService {
     async listReports(
         page: number,
         limit: number,
+        filter: ReportFilter = {},
     ): Promise<{ reports: types.report.ListReport[]; total: number }> {
-        const { reports: reportModels, total } = await this.reportRepository.listSlim({
-            page,
-            limit,
-        });
+        const { reports: reportModels, total } = await this.reportRepository.listSlim(
+            { page, limit },
+            filter,
+        );
 
         const reports = reportModels.map((model) => this.toApiListReport(model as db.ReportModel));
 

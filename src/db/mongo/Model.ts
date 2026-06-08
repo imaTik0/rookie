@@ -58,4 +58,17 @@ export interface TestSuite {
     updatedAt: Date;
 }
 
+export interface JobModel {
+    _id: types.job.JobId;
+    kind: types.job.JobKind;
+    status: types.job.JobStatus;
+    params: Record<string, unknown>;
+    result?: Record<string, unknown>;
+    error?: string;
+    progress?: string;
+    createdAt: Date;
+    startedAt?: Date;
+    finishedAt?: Date;
+}
+
 

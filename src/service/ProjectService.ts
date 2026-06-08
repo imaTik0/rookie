@@ -51,10 +51,11 @@ export class ProjectService {
         url: string,
         maxPages: number = 50,
         onProgress?: (msg: string) => void,
+        signal?: AbortSignal,
     ) {
         onProgress?.(`Starting documentation crawl for: ${url}`);
 
-        const crawledPages = await this.docCrawler.crawl(url, onProgress, { maxPages });
+        const crawledPages = await this.docCrawler.crawl(url, onProgress, { maxPages }, signal);
 
         if (crawledPages.length === 0) {
             throw new Error(

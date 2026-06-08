@@ -10,6 +10,12 @@ import { DockerExecutor } from "./DockerExecutor.ts";
 import { ReportRepository } from "./ReportRepository.ts";
 import { ConfigService } from "./ConfigService.ts";
 import { isEnvironmentError, parseImportedPackages } from "../sandbox/depDetect.ts";
+import { JobCancelledError } from "../types/job.ts";
+
+/** Throw if a cancellation signal has fired — used at execution checkpoints. */
+function throwIfAborted(signal?: AbortSignal): void {
+    if (signal?.aborted) throw new JobCancelledError();
+}
 
 export class Executor {
     private dockerExecutor: DockerExecutor;
@@ -44,7 +50,9 @@ export class Executor {
     async executeTestSuite(
         testSuiteId: types.test.TestSuiteId,
         onProgress?: (msg: string) => void,
+        signal?: AbortSignal,
     ) {
+        throwIfAborted(signal);
         onProgress?.(
             JSON.stringify({
                 type: "log",
@@ -79,9 +87,9 @@ export class Executor {
         );
 
         if (testSuite.mode === "CODE_GENERATION") {
-            return await this.executeCodeGeneration(testSuite as unknown as types.test.TestSuite, validFiles, startTime, onProgress);
+            return await this.executeCodeGeneration(testSuite as unknown as types.test.TestSuite, validFiles, startTime, onProgress, signal);
         } else {
-            return await this.executeTestScenario(testSuite as unknown as types.test.TestSuite, validFiles, startTime, onProgress);
+            return await this.executeTestScenario(testSuite as unknown as types.test.TestSuite, validFiles, startTime, onProgress, signal);
         }
     }
 
@@ -90,6 +98,7 @@ export class Executor {
         _files: { metadata: any, buffer: Uint8Array }[],
         startTime: number,
         onProgress?: (msg: string) => void,
+        signal?: AbortSignal,
     ) {
         onProgress?.(
             JSON.stringify({ type: "log", content: "Starting Agentic RAG for CODE_GENERATION..." }),
@@ -123,6 +132,7 @@ export class Executor {
 
         let i = 0;
         for (const example of codeGenResponse.examples) {
+            throwIfAborted(signal);
             i++;
             this.logger.log(`Executing generated example ${i}: ${example.title}`);
             onProgress?.(
@@ -191,6 +201,7 @@ export class Executor {
         files: { metadata: any, buffer: Uint8Array }[],
         startTime: number,
         onProgress?: (msg: string) => void,
+        signal?: AbortSignal,
     ) {
         onProgress?.(
             JSON.stringify({ type: "log", content: "Generating Test Scenario execution plan..." }),
@@ -218,6 +229,7 @@ export class Executor {
 
         let i = 0;
         for (const call of plan.calls) {
+            throwIfAborted(signal);
             i++;
             this.logger.log(`Executing step ${i}: ${call.stepExplanation}`);
             onProgress?.(

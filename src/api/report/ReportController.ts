@@ -4,6 +4,7 @@ import type { RouteHandler } from "@hono/zod-openapi";
 import { Controller, Delete, Get } from "../Decorator.ts";
 import { ReportRoutes } from "./ReportRoute.ts";
 import { ReportService } from "../../service/ReportService.ts";
+import { buildMeta } from "../CommonSchema.ts";
 import * as types from "../../types/index.ts";
 
 @Controller("/reports")
@@ -14,14 +15,16 @@ export class ReportController {
 
     @Get(ReportRoutes.ListReportsRoute)
     listReports: RouteHandler<typeof ReportRoutes.ListReportsRoute> = async (c) => {
-        const page = Number(c.req.query("page") || 1);
-        const limit = Number(c.req.query("limit") || 10);
+        const { page, limit, projectId, testSuiteId, status, type } = c.req.valid("query");
 
-        const { reports, total } = await this.reportService.listReports(page, limit);
-
-        return c.json(reports, 200, {
-            "X-Total-Count": total.toString(),
+        const { reports, total } = await this.reportService.listReports(page, limit, {
+            projectId: projectId as types.project.ProjectId | undefined,
+            testSuiteId: testSuiteId as types.test.TestSuiteId | undefined,
+            status,
+            type,
         });
+
+        return c.json({ items: reports, meta: buildMeta(total, page, limit) }, 200);
     };
 
     @Get(ReportRoutes.GetReportRoute)

@@ -61,6 +61,7 @@ export class PromptService {
             ...(llm.seed !== undefined ? { seed: llm.seed } : {}),
             maxRetries: llm.maxRetries,
             retryBaseMs: llm.retryBaseMs,
+            callTimeoutMs: llm.callTimeoutMs,
             maxContextTokens: this.configService.values.limits.maxContextTokens,
         };
     }

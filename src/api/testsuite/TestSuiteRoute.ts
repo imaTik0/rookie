@@ -6,9 +6,9 @@ import {
     TestSuiteSchema,
     UpdateTestSuiteSchema,
 } from "./TestSuiteSchema.ts";
-import { ReportSchema } from "../report/ReportSchema.ts";
+import { JobSchema } from "../job/JobSchema.ts";
 import { z } from "@hono/zod-openapi";
-import { ErrorSchema, PaginationQuerySchema } from "../CommonSchema.ts";
+import { ErrorSchema, paginated, PaginationQuerySchema } from "../CommonSchema.ts";
 
 const commonResponses = {
     200: {
@@ -30,6 +30,18 @@ const CreateTestSuiteRoute = createRoute({
     path: "/testsuites",
     tags: ["Test suites"],
     summary: "Create a new Test Suite",
+    description:
+        `Defines a reusable test against a project's documentation. A test suite is a \
+**specification only** — it does not run until you call one of the \`/execute\` endpoints.
+
+Pick a \`mode\`:
+- **\`CODE_GENERATION\`** — the agent writes and runs a program that fulfils \`userGoal\` using \
+only the documentation.
+- **\`TEST_SCENARIO\`** — the agent produces a multi-step scenario (length bounded by \
+\`minimalStoryLength\`..\`maximalStoryLength\`) from \`functionTemplate\`.
+
+\`initialContext\` is a JSON **string** made available to the generated code (e.g. base URL and \
+auth token). The suite must reference an existing \`projectId\` whose documentation is indexed.`,
     request: {
         body: {
             content: { "application/json": { schema: CreateTestSuiteSchema } },
@@ -45,25 +57,28 @@ const CreateTestSuiteRoute = createRoute({
     },
 });
 
+const TestSuiteListQuerySchema = PaginationQuerySchema.extend({
+    projectId: z.string().optional().openapi({
+        param: { name: "projectId", in: "query" },
+        description: "Filter test suites by the project they belong to.",
+    }),
+});
+
 const ListTestSuitesRoute = createRoute({
     method: "get",
     tags: ["Test suites"],
     path: "/testsuites",
-    summary: "List all Test Suites (paginated)",
+    summary: "List Test Suites (paginated, filterable)",
+    description:
+        `Returns a paginated list of test-suite definitions in the standard \`{ items, meta }\` \
+envelope. Filter to a single project with \`?projectId=…\`.`,
     request: {
-        query: PaginationQuerySchema,
+        query: TestSuiteListQuerySchema,
     },
     responses: {
         200: {
-            description: "A paginated list of Test Suites",
-            content: {
-                "application/json": {
-                    schema: z.object({
-                        testSuites: z.array(TestSuiteSchema),
-                        total: z.number().int().describe("Total number of test suites"),
-                    }),
-                },
-            },
+            description: "A paginated list of Test Suites.",
+            content: { "application/json": { schema: paginated(TestSuiteSchema) } },
         },
     },
 });
@@ -73,6 +88,7 @@ const GetTestSuiteRoute = createRoute({
     path: "/testsuites/{testSuiteId}",
     tags: ["Test suites"],
     summary: "Get a single Test Suite by ID",
+    description: "Returns one test-suite definition by ID. This is the spec, not its execution results — see the Reports API for run output.",
     request: { params: TestSuiteIdParam },
     responses: {
         200: commonResponses["200"],
@@ -85,6 +101,9 @@ const UpdateTestSuiteRoute = createRoute({
     path: "/testsuites/{testSuiteId}",
     tags: ["Test suites"],
     summary: "Update a Test Suite",
+    description:
+        `Partially updates a test-suite definition; omitted fields are unchanged. Affects future \
+executions only — reports from previous runs are not modified.`,
     request: {
         params: TestSuiteIdParam,
         body: {
@@ -104,6 +123,7 @@ const DeleteTestSuiteRoute = createRoute({
     path: "/testsuites/{testSuiteId}",
     tags: ["Test suites"],
     summary: "Delete a Test Suite",
+    description: "Deletes a test-suite definition. Reports already produced by its past executions are retained. Returns `204 No Content`.",
     request: { params: TestSuiteIdParam },
     responses: {
         204: { description: "Test Suite deleted successfully" }, // 204 has no body
@@ -115,12 +135,20 @@ const ExecuteTestSuiteRoute = createRoute({
     method: "post",
     path: "/testsuites/{testSuiteId}/execute",
     tags: ["Test suites"],
-    summary: "Execute a Test Suite",
+    summary: "Execute a Test Suite (async job)",
+    description:
+        `Submits the test suite for execution and returns immediately with a **job**. The work \
+runs in the background: the agent plans, writes code from the documentation, and executes it in \
+an isolated, hardened Docker sandbox (real HTTP calls, no mocks), classifying any failure.
+
+Poll \`GET /jobs/{jobId}\` for status; on \`SUCCEEDED\` the job's \`result.reportId\` points to the \
+full report. Cancel mid-run with \`DELETE /jobs/{jobId}\`. For live log streaming instead of \
+polling, use \`GET /testsuites/{id}/execute/stream\` (SSE).`,
     request: { params: TestSuiteIdParam },
     responses: {
         202: {
-            description: "Execution accepted. Report created.",
-            content: { "application/json": { schema: ReportSchema } },
+            description: "Execution accepted; returns the job to poll (`result.reportId` on success).",
+            content: { "application/json": { schema: JobSchema } },
         },
         404: commonResponses["404"],
     },
@@ -131,10 +159,16 @@ const StreamExecuteTestSuiteRoute = createRoute({
     path: "/testsuites/{testSuiteId}/execute/stream",
     tags: ["Test suites"],
     summary: "Execute a Test Suite and stream logs via SSE",
+    description:
+        `Same execution as \`POST .../execute\`, but streams live progress over \
+**Server-Sent Events** so a UI can follow the agent in real time. Default \`message\` events \
+carry human-readable progress logs (research queries, generated code, container STDOUT/STDERR); \
+a terminal \`done\` event carries the final report as JSON, or an \`error\` event carries a \
+message if the run fails. Consume with an \`EventSource\` client.`,
     request: { params: TestSuiteIdParam },
     responses: {
         200: {
-            description: "SSE Stream",
+            description: "An SSE stream of progress events ending in a `done` (report) or `error` event.",
         },
         404: commonResponses["404"],
     },

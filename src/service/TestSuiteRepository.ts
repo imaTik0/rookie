@@ -44,15 +44,19 @@ export class TestSuiteRepository extends BaseRepository<types.test.TestSuiteId, 
 
     async list(
         pagination: { page: number; limit: number },
+        filter: { projectId?: types.project.ProjectId } = {},
     ): Promise<{ testSuites: db.TestSuite[]; total: number }> {
         const { page, limit } = pagination;
         const skip = (page - 1) * limit;
         const collection = this.getCollection();
 
+        const query: Record<string, unknown> = {};
+        if (filter.projectId) query.projectId = filter.projectId;
+
         const [testSuites, total] = await Promise.all([
-            collection.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit)
+            collection.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit)
                 .toArray(),
-            collection.countDocuments(),
+            collection.countDocuments(query),
         ]);
 
         return { testSuites: testSuites as db.TestSuite[], total };

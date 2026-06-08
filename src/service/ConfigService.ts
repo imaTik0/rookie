@@ -51,6 +51,9 @@ export interface ConfigValues {
         /** Retries (with exponential backoff) on transient 429/5xx/network errors. */
         maxRetries: number;
         retryBaseMs: number;
+        /** Per-call timeout (ms) for a single LLM completion. Guards against hangs;
+         *  set generously for slow local models doing large generations. */
+        callTimeoutMs: number;
     };
     /** BM25 sparse-vector parameters (Qdrant applies IDF server-side). */
     sparse: {
@@ -175,6 +178,7 @@ export class ConfigService {
                 maxRepairAttempts: envNum("ROOKIE_LLM_MAX_REPAIR_ATTEMPTS", 1),
                 maxRetries: envNum("ROOKIE_LLM_MAX_RETRIES", 3),
                 retryBaseMs: envNum("ROOKIE_LLM_RETRY_BASE_MS", 500),
+                callTimeoutMs: envNum("ROOKIE_LLM_CALL_TIMEOUT_MS", 300_000),
             },
             sparse: {
                 k1: envNum("ROOKIE_BM25_K1", 1.5),

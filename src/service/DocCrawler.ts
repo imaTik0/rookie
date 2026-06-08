@@ -1,6 +1,7 @@
 import { Logger } from "../Logger.ts";
 import { ConfigService } from "./ConfigService.ts";
 import { htmlToMarkdown } from "./HtmlToMarkdown.ts";
+import { JobCancelledError } from "../types/job.ts";
 
 export interface CrawlOptions {
     maxPages: number;
@@ -42,6 +43,7 @@ export class DocCrawler {
         startUrl: string,
         onProgress?: (msg: string) => void,
         options: Partial<CrawlOptions> = {},
+        signal?: AbortSignal,
     ): Promise<CrawledPage[]> {
         const opts = { ...DEFAULT_OPTIONS, ...options };
         const startOrigin = new URL(startUrl).origin;
@@ -66,6 +68,7 @@ export class DocCrawler {
         onProgress?.(`Starting crawl from: ${startUrl} (max: ${opts.maxPages} pages)`);
 
         while (queue.length > 0 && results.length < opts.maxPages) {
+            if (signal?.aborted) throw new JobCancelledError();
             const batchSize = Math.min(
                 opts.concurrency,
                 opts.maxPages - results.length,

@@ -33,8 +33,12 @@ export class TestSuiteService {
 
     async listTestSuites(
         pagination: { page: number; limit: number },
+        filter: { projectId?: types.project.ProjectId } = {},
     ) {
-        const { testSuites: dbSuites, total } = await this.testSuiteRepository.list(pagination);
+        const { testSuites: dbSuites, total } = await this.testSuiteRepository.list(
+            pagination,
+            filter,
+        );
         return { testSuites: dbSuites.map((test) => this.mapDbToApi(test)), total };
     }
 

@@ -123,7 +123,7 @@ const EXPERIMENTS: Record<string, ExperimentConfig> = {
     docs: {
       mode:     "url-crawl",
       url:      "https://docs.gitea.com/api/{docsVersion}/",
-      maxPages: 80,
+      maxPages: 1,
     },
 
     planner: {
@@ -261,6 +261,31 @@ async function rookieCall<T>(method: string, path: string, body?: unknown): Prom
   });
   if (!res.ok) throw new Error(`Rookie ${method} ${path} → HTTP ${res.status}: ${await res.text()}`);
   return res.json() as Promise<T>;
+}
+
+interface JobView {
+  id: string;
+  status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  result?: Record<string, unknown>;
+  error?: string;
+  progress?: string;
+}
+
+/** Poll an async job to a terminal status, returning its result payload. */
+async function pollJob(jobId: string, label: string): Promise<Record<string, unknown>> {
+  let lastProgress = "";
+  while (true) {
+    const job = await rookieCall<JobView>("GET", `/jobs/${jobId}`);
+    if (job.progress && job.progress !== lastProgress) {
+      lastProgress = job.progress;
+      console.log(`${gray("│")}       ${dim(job.progress)}`);
+    }
+    if (job.status === "SUCCEEDED") return job.result ?? {};
+    if (job.status === "FAILED" || job.status === "CANCELLED") {
+      throw new Error(`${label} job ${job.status.toLowerCase()}: ${job.error ?? "(no detail)"}`);
+    }
+    await sleep(1500);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -431,13 +456,19 @@ async function ingestDocs(docsCfg: DocsConfig, image: string, vars: Record<strin
     return project;
 
   } else {
-    // url-crawl: delegate to Rookie's built-in HTML crawler
-    console.log(`${gray("│")}  ${yell("▸")} crawling: ${bold(url)}`);
-    const project = await rookieCall<{ id: string; files?: unknown[] }>("POST", "/projects/from-url", {
+    // url-crawl: delegate to Rookie's built-in HTML crawler, now an async job.
+    console.log(`${gray("│")}  ${yell("▸")} crawling (async job): ${bold(url)}`);
+    const job = await rookieCall<JobView>("POST", "/projects/from-url", {
       projectName: `${cfg.name} API – ${version}`,
       url,
       maxPages: docsCfg.maxPages,
     });
+    const result = await pollJob(job.id, "Crawl");
+    const projectId = String(result.projectId);
+    const project = await rookieCall<{ id: string; files?: unknown[] }>(
+      "GET",
+      `/projects/${projectId}`,
+    );
     console.log(`${gray("│")}  ${green("✓")} project created: ${bold(project.id)} (${project.files?.length ?? "?"} pages)`);
     return project;
   }
@@ -473,6 +504,103 @@ async function* ndJsonStream(url: string, body: unknown): AsyncGenerator<Record<
 }
 
 // ─────────────────────────────────────────────────────────────────
+//  AGENT ACTIVITY RENDERER
+//  Renders the structured agent events (token / tool_call / tool_result /
+//  assistant_end / phase / log) that arrive inside each GOAL_PROGRESS.
+//  On a TTY it shows a live, in-place "typing" line that collapses into a
+//  tidy one-line summary once each unit finishes. When piped, it prints only
+//  the collapsed summaries (no token spam).
+// ─────────────────────────────────────────────────────────────────
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const GUTTER = `${gray("│")}  `;
+
+/** Flatten to a single line and clamp to the terminal tail (keeps the newest text). */
+function oneLine(s: string, max = 76): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  return flat.length > max ? "…" + flat.slice(flat.length - max + 1) : flat;
+}
+
+/** Strip control sentinels the agent uses internally so they don't leak into summaries. */
+function cleanThought(s: string): string {
+  return s
+    .replace(/READY_FOR_GENERATION|VERIFICATION_COMPLETE|NEEDS_RESEARCH:/g, "")
+    .trim();
+}
+
+function createAgentRenderer() {
+  let streamBuf = "";
+  let spin = 0;
+  let liveActive = false;
+
+  const clearLive = () => {
+    if (liveActive && isTTY) writeStdout("\r\x1b[2K");
+    liveActive = false;
+  };
+  const commit = (line: string) => {
+    clearLive();
+    console.log(GUTTER + line);
+  };
+
+  const reset = () => {
+    clearLive();
+    streamBuf = "";
+  };
+
+  const feed = (raw: string) => {
+    let ev: Record<string, unknown>;
+    try { ev = JSON.parse(raw); } catch { ev = { type: "log", content: raw }; }
+
+    switch (ev.type) {
+      case "phase":
+        clearLive();
+        streamBuf = "";
+        console.log(GUTTER + dim(`◆ ${ev.content}`));
+        break;
+
+      case "token": {
+        streamBuf += String(ev.content ?? "");
+        if (isTTY) {
+          spin = (spin + 1) % SPINNER.length;
+          writeStdout(`\r\x1b[2K${GUTTER}${cyan(SPINNER[spin])} ${dim(oneLine(streamBuf))}`);
+          liveActive = true;
+        }
+        break;
+      }
+
+      case "assistant_end": {
+        const summary = oneLine(cleanThought(String(ev.content ?? streamBuf)), 80);
+        if (summary) commit(`${cyan("◇")} ${summary}`);
+        else clearLive();
+        streamBuf = "";
+        break;
+      }
+
+      case "tool_call": {
+        const args = ev.args && typeof ev.args === "object"
+          ? oneLine(Object.values(ev.args as Record<string, unknown>).map(String).join("  "), 60)
+          : "";
+        commit(`${yell("⚙")} ${bold(String(ev.name))}${args ? "  " + dim(args) : ""}`);
+        break;
+      }
+
+      case "tool_result":
+        commit(`  ${gray("↳")} ${dim(oneLine(String(ev.preview ?? ""), 80))}`);
+        break;
+
+      case "log": {
+        const txt = String(ev.content ?? "");
+        // Hide the high-frequency context-budget chatter unless --verbose.
+        if (!VERBOSE && /^Context size:|^Token budget|^Context after/.test(txt)) break;
+        commit(dim(oneLine(txt, 90)));
+        break;
+      }
+    }
+  };
+
+  return { feed, reset, clearLive };
+}
+
+// ─────────────────────────────────────────────────────────────────
 //  MASTER PLANNER
 // ─────────────────────────────────────────────────────────────────
 async function runMasterPlanner(projectId: string, plannerCfg: PlannerConfig, vars: Record<string, unknown>): Promise<MasterPlanRun> {
@@ -481,10 +609,8 @@ async function runMasterPlanner(projectId: string, plannerCfg: PlannerConfig, va
   let masterPlan: Record<string, unknown> | null = null;
   let goals: string[] = [];
   const breakdown: GoalResult[] = [];
-  // Rolling buffer of the last N progress log lines for the current goal.
-  // Flushed (printed) when the goal completes so the terminal stays readable.
-  const PROGRESS_TAIL = 5;
-  const progressBuf: string[] = [];
+
+  const agent = createAgentRenderer();
 
   for await (const event of ndJsonStream(`${ROOKIE_URL}/planner/run`, { projectId, maxGoals: plannerCfg.maxGoals, initialContext: context })) {
     switch (event.type) {
@@ -505,26 +631,18 @@ async function runMasterPlanner(projectId: string, plannerCfg: PlannerConfig, va
       }
 
       case "GOAL_START":
-        progressBuf.length = 0;
+        agent.reset();
         console.log(`${gray("│")}`);
         console.log(`${gray("│")}  ${yell("▶")} ${bold(`[${Number(event.index) + 1}/${event.total}]`)} ${event.goal}`);
         break;
 
       case "GOAL_PROGRESS":
-        progressBuf.push(String(event.log));
-        if (progressBuf.length > PROGRESS_TAIL) progressBuf.shift();
+        // event.log is itself a structured agent event (token/tool_call/…).
+        agent.feed(String(event.log));
         break;
 
       case "GOAL_COMPLETE": {
-        // Print the last N buffered progress lines before the status line
-        if (progressBuf.length > 0) {
-          const skipped = (event as Record<string,unknown>)._progressTotal
-            ? Number((event as Record<string,unknown>)._progressTotal) - PROGRESS_TAIL
-            : null;
-          if (skipped && skipped > 0)
-            console.log(`${gray("│")}       ${dim(`… (${skipped} earlier events omitted)`)}`);
-          progressBuf.forEach(l => console.log(`${gray("│")}       ${dim(l)}`));
-        }
+        agent.clearLive();
         const ok   = event.status === "SUCCESS";
         const icon = ok ? green("✓") : red("✗");
         const stat = ok ? green(String(event.status)) : red(String(event.status));

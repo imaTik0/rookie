@@ -15,6 +15,12 @@ const UploadFileRoute = createRoute({
     path: "/files/upload",
     tags: ["Files"],
     summary: "Upload a new file (max 10MB)",
+    description:
+        `Uploads a single documentation file (max 10 MB) and stores it; whitespace is \
+normalised on ingest. The file is created **standalone** — it is not searchable until linked \
+to a project (via \`POST /projects\` with \`fileIds\`, or \`POST /projects/{id}/files\`), at \
+which point it is chunked and indexed. Send the file in a \`multipart/form-data\` body under \
+the field name \`file\`.`,
     request: {
         body: {
             content: {
@@ -42,6 +48,10 @@ const UploadManyFilesRoute = createRoute({
     path: "/files/upload-many",
     tags: ["Files"],
     summary: "Upload multiple files (max 10MB total)",
+    description:
+        `Uploads several documentation files in one \`multipart/form-data\` request under the \
+repeated field name \`files\`. The same per-file rules as \`/files/upload\` apply (10 MB each, \
+whitespace normalised, created standalone). Returns the metadata of every created file in order.`,
     request: {
         body: {
             content: {
@@ -73,6 +83,9 @@ const GetFileMetadataRoute = createRoute({
     path: "/files/{id}/meta",
     tags: ["Files"],
     summary: "Get file metadata by ID",
+    description:
+        `Returns a file's metadata only — filename, MIME type, size in bytes, and timestamps. \
+To retrieve the raw bytes use \`GET /files/{id}/download\`.`,
     request: {
         params: FileParamsSchema,
     },
@@ -97,6 +110,10 @@ const DownloadFileRoute = createRoute({
     path: "/files/{id}/download",
     tags: ["Files"],
     summary: "Download a file by ID",
+    description:
+        `Streams the raw stored bytes of a file as an attachment (\`Content-Disposition: \
+attachment\`) with the original filename and MIME type. For documentation crawled from a URL \
+this is the extracted Markdown.`,
     request: {
         params: FileParamsSchema,
     },
@@ -125,7 +142,10 @@ const DeleteFileRoute = createRoute({
     path: "/files/{id}",
     tags: ["Files"],
     summary: "Delete a file",
-    description: "Deletes the file from storage and disassociates it from all projects.",
+    description:
+        `Permanently deletes the file from storage and removes it everywhere it is used: for \
+every project that references the file, its vectors are deleted from that project's Qdrant \
+collection, and the file is disassociated from all projects. This cannot be undone.`,
     request: {
         params: FileParamsSchema,
     },
@@ -146,6 +166,10 @@ const ListFilesRoute = createRoute({
     path: "/files",
     tags: ["Files"],
     summary: "List all file metadata (paginated)",
+    description:
+        `Returns a paginated list of all stored files' metadata (no contents), across every \
+project and including unlinked standalone files. Use \`page\` and \`limit\` to page through; the \
+\`meta\` block reports total counts.`,
     request: {
         query: PaginationQuerySchema,
     },

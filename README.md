@@ -89,6 +89,7 @@ Copy `.env` to set your values — the server loads it automatically (`deno task
 | `ROOKIE_LLM_MAX_REPAIR_ATTEMPTS`| Repair retries when JSON fails zod validation           | `1`           |
 | `ROOKIE_LLM_MAX_RETRIES`        | Backoff retries on transient 429/5xx/network errors     | `3`           |
 | `ROOKIE_LLM_RETRY_BASE_MS`      | Base backoff delay (exponential + jitter)               | `500`         |
+| `ROOKIE_LLM_CALL_TIMEOUT_MS`    | Per-call timeout for one LLM completion; raise for slow local models | `300000` |
 | `ROOKIE_MAX_CONTEXT_TOKENS`     | Token budget before loop compaction (per-message cap → distillation of old history → initial-context trim) | `12000` |
 | `ROOKIE_CLASSIFIER_VOTES`       | Self-consistency votes in the failure classifier        | `3`           |
 | `ROOKIE_BM25_K1` / `_B` / `_AVG_LEN` | BM25 sparse-vector parameters                    | `1.5/0.75/256`|

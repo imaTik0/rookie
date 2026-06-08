@@ -1,6 +1,8 @@
 import type { RouteHandler } from "@hono/zod-openapi";
 import { Controller, Delete, Get, Patch, Post } from "../Decorator.ts";
 import { ProjectService } from "../../service/ProjectService.ts";
+import { JobService } from "../../service/JobService.ts";
+import { mapJobToApi } from "../job/JobMapper.ts";
 import * as types from "../../types/index.ts";
 import { ProjectRoutes } from "./ProjectRoute.ts";
 
@@ -8,6 +10,7 @@ import { ProjectRoutes } from "./ProjectRoute.ts";
 export class ProjectController {
     constructor(
         private projectService: ProjectService,
+        private jobService: JobService,
     ) {}
 
     @Post(ProjectRoutes.CreateProjectRoute)
@@ -33,20 +36,10 @@ export class ProjectController {
         c,
     ) => {
         const { projectName, url, maxPages } = c.req.valid("json");
-        try {
-            const newProject = await this.projectService.createProjectFromUrl(
-                projectName,
-                url,
-                maxPages,
-            );
-            if (!newProject) {
-                return c.json({ code: 500, message: "Failed to create project" }, 500 as any);
-            }
-            return c.json(newProject, 201);
-        } catch (error) {
-            const err = error as { message?: string };
-            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
-        }
+        // Crawling can take minutes — run it as a background job and return
+        // immediately. The created project's ID arrives in the job's result.
+        const job = await this.jobService.enqueue("CRAWL_DOCS", { projectName, url, maxPages });
+        return c.json(mapJobToApi(job), 202);
     };
 
     @Get(ProjectRoutes.GetProjectRoute)

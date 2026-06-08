@@ -1,0 +1,211 @@
+{
+  "meta": {
+    "project": "Gitea",
+    "configKey": "gitea",
+    "oldImage": "gitea/gitea:1.22.6",
+    "newImage": "gitea/gitea:1.23.8",
+    "projectId": "6a2716376a19310d8ad7997b",
+    "timestamp": "2026-06-08T19:40:17.741Z",
+    "rookieUrl": "http://localhost:3000",
+    "outputFile": "/Users/pawel/repos/mgr/rookie/experiment-gitea-1780947617741.json"
+  },
+  "baseline": {
+    "masterPlanId": "6a2717df6a19310d8ad7998c",
+    "goals": [
+      "Automate the migration of a repository from an external service like GitHub or GitLab into Gitea",
+      "Manage user accounts and permissions administratively, including creating users, renaming them, and assigning public keys",
+      "Organize project workflows by managing issue dependencies, blocking/unblocking issues, and updating issue labels"
+    ],
+    "breakdown": [
+      {
+        "goal": "Automate the migration of a repository from an external service like GitHub or GitLab into Gitea",
+        "status": "SUCCESS",
+        "reportId": "6a2716cd6a19310d8ad79980"
+      },
+      {
+        "goal": "Manage user accounts and permissions administratively, including creating users, renaming them, and assigning public keys",
+        "status": "FAILED",
+        "reportId": "6a2717636a19310d8ad79985"
+      },
+      {
+        "goal": "Organize project workflows by managing issue dependencies, blocking/unblocking issues, and updating issue labels",
+        "status": "SUCCESS",
+        "reportId": "6a2717da6a19310d8ad7998b"
+      }
+    ],
+    "structuredSummary": {
+      "executiveSummary": "The documentation quality for the tested scenarios is generally high, with a 66.7% pass rate. The failures observed were not caused by documentation gaps, ambiguities, or incorrect instructions, but were instead triggered by a critical failure in the test execution environment's error handler. No actionable documentation fixes are required based on the current failure data.",
+      "overallPassRate": 0.6666666666666666,
+      "failureTaxonomy": {
+        "MISSING": 0,
+        "AMBIGUOUS": 0,
+        "INCORRECT": 0,
+        "CONFIG": 0,
+        "ENVIRONMENT": 3,
+        "UNKNOWN": 0
+      },
+      "topFailingFunctions": [
+        {
+          "functionName": "JSON.stringify(serializableError)",
+          "count": 3,
+          "goals": [
+            "Manage user accounts and permissions administratively, including creating users, renaming them, and assigning public keys"
+          ]
+        }
+      ],
+      "goalsBreakdown": [
+        {
+          "goal": "Automate the migration of a repository from an external service like GitHub or GitLab into Gitea",
+          "status": "SUCCESS",
+          "reportId": "6a2716cd6a19310d8ad79980",
+          "keyFindings": "Successfully migrated both public and private repositories using the `/repos/migrate` endpoint."
+        },
+        {
+          "goal": "Manage user accounts and permissions administratively, including creating users, renaming them, and assigning public keys",
+          "status": "FAILED",
+          "reportId": "6a2717636a19310d8ad79985",
+          "keyFindings": "Failed due to a runtime TypeError in the test harness (circular structure in JSON.stringify) when attempting to log errors; not a documentation failure."
+        },
+        {
+          "goal": "Organize project workflows by managing issue dependencies, blocking/unblocking issues, and updating issue labels",
+          "status": "SUCCESS",
+          "reportId": "6a2717da6a19310d8ad7998b",
+          "keyFindings": "Goal achieved successfully."
+        }
+      ],
+      "documentationGapDetails": [],
+      "recommendations": [
+        "The current failures are environment-related; ensure the test runner's error logging mechanism is updated to handle circular references (e.g., using util.inspect) to allow for valid documentation validation."
+      ]
+    },
+    "markdownSummary": null
+  },
+  "experiment": {
+    "masterPlanId": "6a271aa06a19310d8ad7999c",
+    "goals": [
+      "Migrate a repository from an external service like GitHub or GitLab into Gitea by specifying the clone address and owner",
+      "Manage repository topics by adding, deleting, or replacing the list of keywords associated with a project",
+      "Automate the pull request review process by creating review requests for specific users or teams and submitting a final review"
+    ],
+    "breakdown": [
+      {
+        "goal": "Migrate a repository from an external service like GitHub or GitLab into Gitea by specifying the clone address and owner",
+        "status": "FAILED",
+        "reportId": "6a2719476a19310d8ad79991"
+      },
+      {
+        "goal": "Manage repository topics by adding, deleting, or replacing the list of keywords associated with a project",
+        "status": "FAILED",
+        "reportId": "6a271a4f6a19310d8ad79996"
+      },
+      {
+        "goal": "Automate the pull request review process by creating review requests for specific users or teams and submitting a final review",
+        "status": "FAILED",
+        "reportId": "6a271a956a19310d8ad7999b"
+      }
+    ],
+    "structuredSummary": {
+      "executiveSummary": "The documentation quality is currently poor, with a 0% pass rate across the tested high-level goals. While some failures are attributed to environment issues (missing SDKs and circular JSON errors in the test runner), there are critical documentation gaps regarding repository migration prerequisites and missing endpoint specifications for repository topics. Top recommendations include adding network and authentication prerequisites for the migration API and fully documenting the 'Replace All Repository Topics' endpoint.",
+      "overallPassRate": 0,
+      "failureTaxonomy": {
+        "MISSING": 1,
+        "AMBIGUOUS": 0,
+        "INCORRECT": 1,
+        "CONFIG": 1,
+        "ENVIRONMENT": 6,
+        "UNKNOWN": 0
+      },
+      "topFailingFunctions": [
+        {
+          "functionName": "repoMigrate",
+          "count": 2,
+          "goals": [
+            "Migrate a repository from an external service like GitHub or GitLab into Gitea by specifying the clone address and owner"
+          ]
+        },
+        {
+          "functionName": "PUT /repos/{owner}/{repo}/topics",
+          "count": 1,
+          "goals": [
+            "Manage repository topics by adding, deleting, or replacing the list of keywords associated with a project"
+          ]
+        }
+      ],
+      "goalsBreakdown": [
+        {
+          "goal": "Migrate a repository from an external service like GitHub or GitLab into Gitea by specifying the clone address and owner",
+          "status": "FAILED",
+          "reportId": "6a2719476a19310d8ad79991",
+          "keyFindings": "Failed due to lack of documented prerequisites regarding network access and authentication for external migrations, leading to 500 errors when the Gitea instance could not reach GitHub."
+        },
+        {
+          "goal": "Manage repository topics by adding, deleting, or replacing the list of keywords associated with a project",
+          "status": "FAILED",
+          "reportId": "6a271a4f6a19310d8ad79996",
+          "keyFindings": "Failed due to a missing documentation section for the 'Replace All Repository Topics' endpoint and incorrect/incomplete method and body specifications for adding topics."
+        },
+        {
+          "goal": "Automate the pull request review process by creating review requests for specific users or teams and submitting a final review",
+          "status": "FAILED",
+          "reportId": "6a271a956a19310d8ad7999b",
+          "keyFindings": "Total failure due to environment issues; the `@gitea/sdk` package was missing from the execution environment."
+        }
+      ],
+      "documentationGapDetails": [
+        {
+          "fragment": "[docs.gitea.com_api_1.22_.md: Line 17685]: | clone_addrrequired | string |",
+          "file": "docs.gitea.com_api_1.22_.md",
+          "proposedFix": "| clone_addrrequired | string | The URL of the repository to migrate. Ensure the Gitea instance has network access to this URL. For private repositories on services like GitHub, you must also provide auth_token or auth_password. |",
+          "affectedGoals": [
+            "Migrate a repository from an external service like GitHub or GitLab into Gitea by specifying the clone address and owner"
+          ]
+        },
+        {
+          "fragment": "[docs.gitea.com_api_1.22_.md]: ##### Request Body schema: application/json",
+          "file": "docs.gitea.com_api_1.22_.md",
+          "proposedFix": "##### Add Topic to Repository\n\n**Method:** POST\n**Path:** `/repos/{owner}/{repo}/topics/{topic}`\n**Request Body:** None (or specify required JSON schema if applicable)\n**Response:** 204 No Content or 201 Created",
+          "affectedGoals": [
+            "Manage repository topics by adding, deleting, or replacing the list of keywords associated with a project"
+          ]
+        },
+        {
+          "fragment": "None",
+          "file": null,
+          "proposedFix": "### Replace All Repository Topics\n\n`PUT /repos/{owner}/{repo}/topics`\n\n**Request Body schema: application/json**\n\n| Field | Type | Description |\n| --- | --- | --- |\n| topics | Array of strings | The list of topics to replace the current ones with. |\n\n**Example Request:**\n`PUT /repos/gitea_admin/test-repo/topics`\n`[\"web\", \"api\", \"node\"]`",
+          "affectedGoals": [
+            "Manage repository topics by adding, deleting, or replacing the list of keywords associated with a project"
+          ]
+        }
+      ],
+      "recommendations": [
+        "Add a 'Prerequisites' section to the repoMigrate API documentation explaining network requirements and authentication needs for external services.",
+        "Create a comprehensive guide for the Repository Topics API, specifically documenting the PUT method for replacing all topics and the POST method for adding single topics.",
+        "Include a troubleshooting section for migration endpoints explaining that 500 errors from Gitea often mask 404/401 errors from the source provider."
+      ]
+    },
+    "markdownSummary": null
+  },
+  "drift": {
+    "regressions": [
+      {
+        "goal": "Automate the migration of a repository from an external service like GitHub or GitLab into Gitea",
+        "baseline": "SUCCESS",
+        "experiment": "FAILED",
+        "reportId": "6a2719476a19310d8ad79991"
+      },
+      {
+        "goal": "Organize project workflows by managing issue dependencies, blocking/unblocking issues, and updating issue labels",
+        "baseline": "SUCCESS",
+        "experiment": "FAILED",
+        "reportId": "6a271a956a19310d8ad7999b"
+      }
+    ],
+    "improvements": [],
+    "stable": [
+      {
+        "goal": "Manage user accounts and permissions administratively, including creating users, renaming them, and assigning public keys",
+        "status": "FAILED"
+      }
+    ]
+  }
+}

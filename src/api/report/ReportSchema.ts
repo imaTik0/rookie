@@ -1,4 +1,5 @@
 import { z } from "@hono/zod-openapi";
+import { paginated, PaginationQuerySchema } from "../CommonSchema.ts";
 
 export const ReportType = z.enum(["TEST_SCENARIO", "CODE_GENERATION", "MASTER_PLAN"])
     .describe("The type of the report.")
@@ -103,6 +104,27 @@ export const ListReportItemSchema = z.object({
 });
 
 export const ListReportSchema = z.array(ListReportItemSchema);
+
+export const ReportListQuerySchema = PaginationQuerySchema.extend({
+    projectId: z.string().optional().openapi({
+        param: { name: "projectId", in: "query" },
+        description: "Filter reports by the project they belong to.",
+    }),
+    testSuiteId: z.string().optional().openapi({
+        param: { name: "testSuiteId", in: "query" },
+        description: "Filter reports by the test suite that produced them.",
+    }),
+    status: ReportStatus.optional().openapi({
+        param: { name: "status", in: "query" },
+        description: "Filter by run status.",
+    }),
+    type: ReportType.optional().openapi({
+        param: { name: "type", in: "query" },
+        description: "Filter by report type.",
+    }),
+});
+
+export const PaginatedReportListSchema = paginated(ListReportItemSchema).openapi("PaginatedReports");
 
 export type ReportType = z.infer<typeof ReportType>;
 export type Report = z.infer<typeof ReportSchema>;
