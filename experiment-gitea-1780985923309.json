@@ -1,0 +1,446 @@
+{
+  "meta": {
+    "project": "Gitea",
+    "configKey": "gitea",
+    "oldImage": "gitea/gitea:1.22.6",
+    "newImage": "gitea/gitea:1.23.8",
+    "projectId": "6a27a6790a881e3f2d4946a4",
+    "timestamp": "2026-06-09T06:18:43.309Z",
+    "rookieUrl": "http://localhost:3000",
+    "outputFile": "/Users/pawel/repos/mgr/rookie/experiment-gitea-1780985923309.json"
+  },
+  "baseline": {
+    "masterPlanId": "6a27ac3b0a881e3f2d4946d0",
+    "goals": [
+      "Create a new repository on behalf of a specific user with a custom description and private status",
+      "Add an armored SSH public key to a user's account as an administrator",
+      "Delete a specific user's public key from the system",
+      "Manage user badges by adding, removing, or listing all badges for a specific user",
+      "Create a new team within an organization and manage its membership by adding or removing members",
+      "Search for specific teams within a Gitea organization",
+      "Set up a system-wide webhook with a specific event filter and content type",
+      "List and manage webhooks configured for a specific organization",
+      "Identify and adopt unadopted repositories in the system",
+      "Retrieve a list of notification threads for a user on a specific repository"
+    ],
+    "breakdown": [
+      {
+        "goal": "Create a new repository on behalf of a specific user with a custom description and private status",
+        "status": "FAILED",
+        "reportId": "6a27a7050a881e3f2d4946a9"
+      },
+      {
+        "goal": "Add an armored SSH public key to a user's account as an administrator",
+        "status": "SUCCESS",
+        "reportId": "6a27a7350a881e3f2d4946ad"
+      },
+      {
+        "goal": "Delete a specific user's public key from the system",
+        "status": "FAILED",
+        "reportId": "6a27a7f30a881e3f2d4946b1"
+      },
+      {
+        "goal": "Manage user badges by adding, removing, or listing all badges for a specific user",
+        "status": "SUCCESS",
+        "reportId": "6a27a9480a881e3f2d4946b7"
+      },
+      {
+        "goal": "Create a new team within an organization and manage its membership by adding or removing members",
+        "status": "FAILED",
+        "reportId": "6a27a9c00a881e3f2d4946bb"
+      },
+      {
+        "goal": "Search for specific teams within a Gitea organization",
+        "status": "FAILED",
+        "reportId": "6a27aa340a881e3f2d4946bf"
+      },
+      {
+        "goal": "Set up a system-wide webhook with a specific event filter and content type",
+        "status": "SUCCESS",
+        "reportId": "6a27aa930a881e3f2d4946c3"
+      },
+      {
+        "goal": "List and manage webhooks configured for a specific organization",
+        "status": "FAILED",
+        "reportId": "6a27ab260a881e3f2d4946c7"
+      },
+      {
+        "goal": "Identify and adopt unadopted repositories in the system",
+        "status": "FAILED",
+        "reportId": "6a27ab660a881e3f2d4946cb"
+      },
+      {
+        "goal": "Retrieve a list of notification threads for a user on a specific repository",
+        "status": "FAILED",
+        "reportId": "6a27ac240a881e3f2d4946cf"
+      }
+    ],
+    "structuredSummary": {
+      "executiveSummary": "The documentation quality is poor, primarily due to missing critical API specifications for administrative endpoints and a high volume of test failures caused by environment misconfigurations. While basic operations like badge management and system webhooks succeeded, advanced admin tasks failed because of missing request/response schemas. Top recommendations include documenting the `/admin/unadopted` and `/admin/users/{username}/repos` endpoints and improving the test harness error handling to avoid circular reference crashes.",
+      "overallPassRate": 0.3,
+      "failureTaxonomy": {
+        "MISSING": 2,
+        "AMBIGUOUS": 0,
+        "INCORRECT": 0,
+        "CONFIG": 0,
+        "ENVIRONMENT": 10,
+        "UNKNOWN": 0
+      },
+      "topFailingFunctions": [
+        {
+          "functionName": "JSON.stringify(serializableError)",
+          "count": 8,
+          "goals": [
+            "Create a new repository on behalf of a specific user with a custom description and private status",
+            "Delete a specific user's public key from the system",
+            "Create a new team within an organization and manage its membership by adding or removing members",
+            "Search for specific teams within a Gitea organization"
+          ]
+        },
+        {
+          "functionName": "axios.get",
+          "count": 4,
+          "goals": [
+            "List and manage webhooks configured for a specific organization",
+            "Retrieve a list of notification threads for a user on a specific repository"
+          ]
+        }
+      ],
+      "goalsBreakdown": [
+        {
+          "goal": "Create a new repository on behalf of a specific user with a custom description and private status",
+          "status": "FAILED",
+          "reportId": "6a27a7050a881e3f2d4946a9",
+          "keyFindings": "Failed due to a combination of missing request body schema for the admin repo endpoint and runtime crashes during error logging."
+        },
+        {
+          "goal": "Add an armored SSH public key to a user's account as an administrator",
+          "status": "SUCCESS",
+          "reportId": "6a27a7350a881e3f2d4946ad",
+          "keyFindings": "Successfully implemented using the Admin API."
+        },
+        {
+          "goal": "Delete a specific user's public key from the system",
+          "status": "FAILED",
+          "reportId": "6a27a7f30a881e3f2d4946b1",
+          "keyFindings": "Failed due to environment runtime errors (circular structure in JSON.stringify) when the API call failed."
+        },
+        {
+          "goal": "Manage user badges by adding, removing, or listing all badges for a specific user",
+          "status": "SUCCESS",
+          "reportId": "6a27a9480a881e3f2d4946b7",
+          "keyFindings": "Successfully implemented."
+        },
+        {
+          "goal": "Create a new team within an organization and manage its membership by adding or removing members",
+          "status": "FAILED",
+          "reportId": "6a27a9c00a881e3f2d4946bb",
+          "keyFindings": "Failed due to runtime environment crashes during error reporting."
+        },
+        {
+          "goal": "Search for specific teams within a Gitea organization",
+          "status": "FAILED",
+          "reportId": "6a27aa340a881e3f2d4946bf",
+          "keyFindings": "Failed due to runtime environment crashes during error reporting."
+        },
+        {
+          "goal": "Set up a system-wide webhook with a specific event filter and content type",
+          "status": "SUCCESS",
+          "reportId": "6a27aa930a881e3f2d4946c3",
+          "keyFindings": "Successfully implemented across multiple webhook types (Slack, Discord, Gitea)."
+        },
+        {
+          "goal": "List and manage webhooks configured for a specific organization",
+          "status": "FAILED",
+          "reportId": "6a27ab260a881e3f2d4946c7",
+          "keyFindings": "Failed because required environment variables (GITEA_API_URL, ORG_NAME) were undefined."
+        },
+        {
+          "goal": "Identify and adopt unadopted repositories in the system",
+          "status": "FAILED",
+          "reportId": "6a27ab660a881e3f2d4946cb",
+          "keyFindings": "Failed because the /admin/unadopted endpoint is completely undocumented, leading to an iterable error."
+        },
+        {
+          "goal": "Retrieve a list of notification threads for a user on a specific repository",
+          "status": "FAILED",
+          "reportId": "6a27ac240a881e3f2d4946cf",
+          "keyFindings": "Failed due to missing environment variables (GITEA_BASE_URL, REPO_OWNER) resulting in invalid URLs."
+        }
+      ],
+      "documentationGapDetails": [
+        {
+          "fragment": "None provided for the specific endpoint /admin/users/{username}/repos",
+          "file": null,
+          "proposedFix": "##### Create Repository (Admin)\n**Endpoint:** `POST /api/v1/admin/users/{username}/repos` \n\n**Request Body schema: application/json**\n| Field | Type | Description |\n| --- | --- | --- |\n| name | string (required) | The name of the repository |\n| description | string | A short description of the repository |\n| private | boolean | Whether the repository is private |\n| auto_init | boolean | Whether to initialize the repository with a commit |",
+          "affectedGoals": [
+            "Create a new repository on behalf of a specific user with a custom description and private status"
+          ]
+        },
+        {
+          "fragment": "None. No documentation for the /admin/unadopted endpoint was provided in the fragments.",
+          "file": null,
+          "proposedFix": "### GET /admin/unadopted\n\nLists all unadopted repositories.\n\n**Responses**\n- **200 OK**: Returns an array of unadopted repository objects.\n  - `owner` (string): The owner of the repository.\n  - `repo` (string): The name of the repository.",
+          "affectedGoals": [
+            "Identify and adopt unadopted repositories in the system"
+          ]
+        }
+      ],
+      "recommendations": [
+        "Add comprehensive request and response schemas for all Admin API endpoints, specifically /admin/unadopted and /admin/users/{username}/repos.",
+        "Include a 'Required Environment Variables' section in the implementation guide to prevent 'Invalid URL' errors caused by undefined context variables.",
+        "Update the test runner's error handling logic to use a circular-safe stringifier instead of JSON.stringify to allow for actual API error analysis."
+      ]
+    },
+    "markdownSummary": null
+  },
+  "experiment": {
+    "masterPlanId": "6a27b0410a881e3f2d4946fa",
+    "goals": [
+      "Retrieve the current version of the Gitea application",
+      "Get the global API settings for a Gitea instance",
+      "List all organizations available on the Gitea instance",
+      "Create a new team within a specific organization",
+      "Add a repository to an existing organization team",
+      "Remove a member from a team in an organization",
+      "Update or delete an organization's avatar",
+      "Fetch a list of all commits from a specific repository",
+      "Migrate a repository from another service like GitHub or GitLab into Gitea",
+      "Test a push webhook for a repository using a specific commit, branch, or tag"
+    ],
+    "breakdown": [
+      {
+        "goal": "Retrieve the current version of the Gitea application",
+        "status": "SUCCESS",
+        "reportId": "6a27ac8a0a881e3f2d4946d5"
+      },
+      {
+        "goal": "Get the global API settings for a Gitea instance",
+        "status": "FAILED",
+        "reportId": "6a27ad0a0a881e3f2d4946d9"
+      },
+      {
+        "goal": "List all organizations available on the Gitea instance",
+        "status": "FAILED",
+        "reportId": "6a27adbd0a881e3f2d4946dd"
+      },
+      {
+        "goal": "Create a new team within a specific organization",
+        "status": "FAILED",
+        "reportId": "6a27ae3a0a881e3f2d4946e1"
+      },
+      {
+        "goal": "Add a repository to an existing organization team",
+        "status": "FAILED",
+        "reportId": "6a27ae830a881e3f2d4946e5"
+      },
+      {
+        "goal": "Remove a member from a team in an organization",
+        "status": "FAILED",
+        "reportId": "6a27aeb90a881e3f2d4946e9"
+      },
+      {
+        "goal": "Update or delete an organization's avatar",
+        "status": "FAILED",
+        "reportId": "6a27af000a881e3f2d4946ed"
+      },
+      {
+        "goal": "Fetch a list of all commits from a specific repository",
+        "status": "FAILED",
+        "reportId": "6a27af610a881e3f2d4946f1"
+      },
+      {
+        "goal": "Migrate a repository from another service like GitHub or GitLab into Gitea",
+        "status": "FAILED",
+        "reportId": "6a27afdd0a881e3f2d4946f5"
+      },
+      {
+        "goal": "Test a push webhook for a repository using a specific commit, branch, or tag",
+        "status": "FAILED",
+        "reportId": "6a27b0310a881e3f2d4946f9"
+      }
+    ],
+    "structuredSummary": {
+      "executiveSummary": "The documentation quality is poor, with a high failure rate across most developer scenarios. Key issues include missing endpoint paths for critical operations, incorrect table formatting that obscures required fields, and a complete lack of response body specifications. I recommend a comprehensive audit to ensure every operation tag is mapped to a concrete URL and that response schemas are explicitly defined to prevent runtime parsing errors.",
+      "overallPassRate": 0.125,
+      "failureTaxonomy": {
+        "MISSING": 6,
+        "AMBIGUOUS": 1,
+        "INCORRECT": 2,
+        "CONFIG": 0,
+        "ENVIRONMENT": 7,
+        "UNKNOWN": 0
+      },
+      "topFailingFunctions": [
+        {
+          "functionName": "JSON.stringify(serializableError)",
+          "count": 8,
+          "goals": [
+            "Create a new team within a specific organization",
+            "Add a repository to an existing organization team",
+            "Update or delete an organization's avatar",
+            "Fetch a list of all commits from a specific repository"
+          ]
+        },
+        {
+          "functionName": "response.json()",
+          "count": 4,
+          "goals": [
+            "Get the global API settings for a Gitea instance",
+            "Migrate a repository from another service like GitHub or GitLab into Gitea"
+          ]
+        }
+      ],
+      "goalsBreakdown": [
+        {
+          "goal": "Retrieve the current version of the Gitea application",
+          "status": "SUCCESS",
+          "reportId": "6a27ac8a0a881e3f2d4946d5",
+          "keyFindings": "The public /api/v1/version endpoint is well-documented and functioned as expected."
+        },
+        {
+          "goal": "Get the global API settings for a Gitea instance",
+          "status": "FAILED",
+          "reportId": "6a27ad0a0a881e3f2d4946d9",
+          "keyFindings": "Failed because the /admin/config/api endpoint is completely missing from the documentation."
+        },
+        {
+          "goal": "List all organizations available on the Gitea instance",
+          "status": "FAILED",
+          "reportId": "6a27adbd0a881e3f2d4946dd",
+          "keyFindings": "The documentation provides an operation name (adminGetAllOrgs) but lacks the actual URL path, leading to a 404."
+        },
+        {
+          "goal": "Create a new team within a specific organization",
+          "status": "FAILED",
+          "reportId": "6a27ae3a0a881e3f2d4946e1",
+          "keyFindings": "Missing documentation for the team creation endpoint; subsequent errors were masked by environment circular reference crashes."
+        },
+        {
+          "goal": "Add a repository to an existing organization team",
+          "status": "FAILED",
+          "reportId": "6a27ae830a881e3f2d4946e5",
+          "keyFindings": "Execution failed due to environment logger crashes, but the underlying API request failed."
+        },
+        {
+          "goal": "Remove a member from a team in an organization",
+          "status": "FAILED",
+          "reportId": "6a27aeb90a881e3f2d4946e9",
+          "keyFindings": "Failed due to missing environment variables (GITEA_BASE_URL, etc.) in the test context."
+        },
+        {
+          "goal": "Update or delete an organization's avatar",
+          "status": "FAILED",
+          "reportId": "6a27af000a881e3f2d4946ed",
+          "keyFindings": "Missing documentation for the /orgs/{orgName}/avatar endpoint and its multipart/form-data requirement."
+        },
+        {
+          "goal": "Fetch a list of all commits from a specific repository",
+          "status": "FAILED",
+          "reportId": "6a27af610a881e3f2d4946f1",
+          "keyFindings": "Multiple steps failed due to environment logger crashes when handling Axios errors."
+        },
+        {
+          "goal": "Migrate a repository from another service like GitHub or GitLab into Gitea",
+          "status": "FAILED",
+          "reportId": "6a27afdd0a881e3f2d4946f5",
+          "keyFindings": "Documentation is ambiguous regarding response bodies and contains formatting errors (e.g., 'clone_addrrequired')."
+        },
+        {
+          "goal": "Test a push webhook for a repository using a specific commit, branch, or tag",
+          "status": "FAILED",
+          "reportId": "6a27b0310a881e3f2d4946f9",
+          "keyFindings": "The operation 'repoTestHook' is listed but the actual endpoint path is missing, resulting in a 404."
+        }
+      ],
+      "documentationGapDetails": [
+        {
+          "fragment": "[docs.gitea.com_api_1.22_.md: Line 488]: ## [](#tag/admin/operation/adminGetAllOrgs)List all organizations",
+          "file": "docs.gitea.com_api_1.22_.md",
+          "proposedFix": "## [](#tag/admin/operation/adminGetAllOrgs)List all organizations\n\n**Endpoint:** `GET /api/v1/admin/orgs`",
+          "affectedGoals": [
+            "List all organizations available on the Gitea instance"
+          ]
+        },
+        {
+          "fragment": "[docs.gitea.com_api_1.22_.md: Line 17685]: | clone_addrrequired | string |\n| --- | --- |\n| repo_namerequired | string |",
+          "file": "docs.gitea.com_api_1.22_.md",
+          "proposedFix": "| Field | Type | Description |\n| --- | --- | --- |\n| clone_addr (required) | string | The URL of the repository to migrate |\n| repo_name (required) | string | Name of the new repository |",
+          "affectedGoals": [
+            "Migrate a repository from another service like GitHub or GitLab into Gitea"
+          ]
+        },
+        {
+          "fragment": "[docs.gitea.com_api_1.22_.md: Line 27496]: ## [](#tag/repository/operation/repoTestHook)Test a push webhook",
+          "file": "docs.gitea.com_api_1.22_.md",
+          "proposedFix": "## Test a push webhook\n\n**POST** `/repos/{owner}/{repo}/webhooks/test/push` \n\n##### query Parameters\n| ref | string | The name of the commit/branch/tag to load into the payload |",
+          "affectedGoals": [
+            "Test a push webhook for a repository using a specific commit, branch, or tag"
+          ]
+        }
+      ],
+      "recommendations": [
+        "Ensure every API operation tag is accompanied by a full HTTP method and URL path to prevent 404 errors.",
+        "Fix the markdown table formatting in the repository migration section to separate field names from their 'required' status.",
+        "Define expected HTTP response codes and body schemas for all endpoints, especially for long-running tasks like migrations where bodies may be empty.",
+        "Add missing documentation for administrative endpoints such as `/admin/config/api` and organization management endpoints like `/orgs/{orgName}/avatar`."
+      ]
+    },
+    "markdownSummary": null
+  },
+  "drift": {
+    "regressions": [
+      {
+        "goal": "Add an armored SSH public key to a user's account as an administrator",
+        "baseline": "SUCCESS",
+        "experiment": "FAILED",
+        "reportId": "6a27ad0a0a881e3f2d4946d9"
+      },
+      {
+        "goal": "Manage user badges by adding, removing, or listing all badges for a specific user",
+        "baseline": "SUCCESS",
+        "experiment": "FAILED",
+        "reportId": "6a27ae3a0a881e3f2d4946e1"
+      },
+      {
+        "goal": "Set up a system-wide webhook with a specific event filter and content type",
+        "baseline": "SUCCESS",
+        "experiment": "FAILED",
+        "reportId": "6a27af000a881e3f2d4946ed"
+      }
+    ],
+    "improvements": [
+      {
+        "goal": "Create a new repository on behalf of a specific user with a custom description and private status",
+        "baseline": "FAILED",
+        "experiment": "SUCCESS"
+      }
+    ],
+    "stable": [
+      {
+        "goal": "Delete a specific user's public key from the system",
+        "status": "FAILED"
+      },
+      {
+        "goal": "Create a new team within an organization and manage its membership by adding or removing members",
+        "status": "FAILED"
+      },
+      {
+        "goal": "Search for specific teams within a Gitea organization",
+        "status": "FAILED"
+      },
+      {
+        "goal": "List and manage webhooks configured for a specific organization",
+        "status": "FAILED"
+      },
+      {
+        "goal": "Identify and adopt unadopted repositories in the system",
+        "status": "FAILED"
+      },
+      {
+        "goal": "Retrieve a list of notification threads for a user on a specific repository",
+        "status": "FAILED"
+      }
+    ]
+  }
+}

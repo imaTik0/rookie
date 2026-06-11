@@ -506,12 +506,12 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         });
 
         const testedHistory = relevantMessages
-            .map((m) =>
-                `ROLE: ${m.role}\n${
-                    m.content ||
-                    ((m as any).tool_calls ? JSON.stringify((m as any).tool_calls) : "")
-                }`
-            )
+            .map((m) => {
+                const parts = [`ROLE: ${m.role}`];
+                if (m.content) parts.push(m.content as string);
+                if ((m as any).tool_calls) parts.push(JSON.stringify((m as any).tool_calls));
+                return parts.join("\n");
+            })
             .join("\n\n---\n");
 
         const genUserPrompt =

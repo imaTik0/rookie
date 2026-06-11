@@ -296,6 +296,9 @@ You are a Principal Architect. Your goal is to analyze the complete technical do
 ### TASK
 Read the provided documentation and generate practical scenarios. Each scenario should represent a real-world task a developer might want to accomplish using the documented tools. Do not invent features that aren't mentioned in the documentation.
 
+### STRICT CONSTRAINT: AVOID EXTERNAL INTEGRATIONS
+You MUST NOT generate ANY goals that require external integrations, third-party services, external databases, or APIs that are not covered in the provided documentation. All goals MUST be 100% achievable using ONLY the provided library features and standard Node.js environment. Examples of forbidden goals: "Connect to a remote MySQL database" (unless the library IS a MySQL driver), "Send an email via SendGrid", "Upload to AWS S3".
+
 ### OUTPUT FORMAT
 You MUST respond with a valid JSON object containing a "goals" array, where each string is a user goal. Example:
 {

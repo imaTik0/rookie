@@ -132,8 +132,10 @@ function extractToolGroups(
                 group.results.push(typeof tm.content === "string" ? tm.content : "");
                 callIds.delete(tm.tool_call_id);
                 groupIdx.push(i);
+                i++;
+            } else {
+                break;
             }
-            i++;
         }
 
         groups.push(group);
@@ -343,7 +345,15 @@ async function streamCompletion(
             emitToken(onProgress, choice.delta.content);
         }
         for (const tcd of choice?.delta?.tool_calls ?? []) {
-            const i = tcd.index ?? 0;
+            let i = tcd.index;
+            if (i === undefined) {
+                if (tcd.id) {
+                    const existingIdx = toolAcc.findIndex(t => t.id === tcd.id);
+                    i = existingIdx >= 0 ? existingIdx : toolAcc.length;
+                } else {
+                    i = Math.max(0, toolAcc.length - 1);
+                }
+            }
             const acc = (toolAcc[i] ??= { id: "", name: "", args: "" });
             if (tcd.id) acc.id = tcd.id;
             if (tcd.function?.name) acc.name += tcd.function.name;
