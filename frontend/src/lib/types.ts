@@ -160,6 +160,8 @@ export interface Report {
     masterPlanGoals?: string[];
     masterPlanId?: string;
     masterPlanReports?: string[];
+    /** Set when this report was produced by /planner/rerun (ID of the source plan). */
+    rerunFromMasterPlanId?: string;
     structuredSummary?: StructuredMasterSummary;
     coverageReport?: CoverageItem[];
     frictionEvents?: FrictionEvent[];
@@ -176,6 +178,7 @@ export interface ListReportItem {
     createdAt: string;
     masterPlanId?: string;
     masterPlanGoals?: string[];
+    rerunFromMasterPlanId?: string;
     structuredSummary?: StructuredMasterSummary;
 }
 

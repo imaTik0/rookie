@@ -297,19 +297,19 @@ Each program MUST be a standalone JavaScript file that follows the execution con
 6. **Structure:** Export a default async function that accepts \`ctx\`.
 7. **LANGUAGE:** Write EXCLUSIVELY in JavaScript (Node.js). Code generated in ANY other language will be REJECTED.
 8. **HTTP CALLS — PREFER fetch OVER axios:**
-   Node.js 20 has `fetch` built-in. Always prefer `fetch` unless the library under test is axios itself or the docs show axios-only usage.
-   `fetch` resolves on 4xx/5xx (check `response.ok`) and never throws circular-reference errors.
+   Node.js 20 has \`fetch\` built-in. Always prefer \`fetch\` unless the library under test is axios itself or the docs show axios-only usage.
+   \`fetch\` resolves on 4xx/5xx (check \`response.ok\`) and never throws circular-reference errors.
    Correct pattern:
-   ```javascript
+   \`\`\`javascript
    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
-   if (!res.ok) { const body = await res.text(); throw new Error(`HTTP ${res.status}: ${body}`); }
+   if (!res.ok) { const body = await res.text(); throw new Error(\`HTTP \${res.status}: \${body}\`); }
    const data = await res.json();
-   ```
+   \`\`\`
    If you MUST use axios: catch only to re-throw a clean error — never swallow it:
-   ```javascript
+   \`\`\`javascript
    try { const { data } = await axios.post(url, payload); return { result: data, ctx }; }
-   catch (e) { throw new Error(`HTTP ${e.response?.status}: ${JSON.stringify(e.response?.data)}`); }
-   ```
+   catch (e) { throw new Error(\`HTTP \${e.response?.status}: \${JSON.stringify(e.response?.data)}\`); }
+   \`\`\`
 9. **NO TRY/CATCH for hiding errors:** Your code MUST be a happy path. Do NOT swallow exceptions. If a function does not work as documented, the program MUST crash. The only permitted try/catch is the axios pattern above, which re-throws a clean serialisable error rather than swallowing it.
 
 \`\`\`javascript

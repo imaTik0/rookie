@@ -159,6 +159,8 @@ export const ReportSchema = z.object({
     masterPlanGoals: z.array(z.string()).optional(),
     masterPlanId: z.string().optional(),
     masterPlanReports: z.array(z.string()).optional(),
+    rerunFromMasterPlanId: z.string().optional()
+        .describe("ID of the master plan this report was re-run from (present only for rerun reports)."),
     structuredSummary: z.any().optional(),
     coverageReport: z.array(CoverageItemSchema).optional()
         .describe("Research-phase documentation coverage breakdown."),
@@ -198,6 +200,7 @@ export const ListReportItemSchema = z.object({
     createdAt: CreatedAt,
     masterPlanId: z.string().optional(),
     masterPlanGoals: z.array(z.string()).optional(),
+    rerunFromMasterPlanId: z.string().optional(),
     structuredSummary: z.any().optional(),
 });
 

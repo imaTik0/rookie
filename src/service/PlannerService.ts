@@ -222,36 +222,230 @@ export class PlannerService {
     }
 
     /**
+     * Re-run an existing master plan's goals, optionally against a different project.
+     *
+     * Unlike `runMasterPlan`, this method:
+     *  - Skips goal generation — reuses `masterPlanGoals` from the original report.
+     *  - Accepts an optional `projectId` override so the same goals can be run
+     *    against a project that has updated / fixed documentation.
+     *  - Records `rerunFromMasterPlanId` on the saved report.
+     *  - Uses the ORIGINAL plan's gap details as the regression baseline so you can
+     *    immediately see which gaps were resolved by the doc fix.
+     */
+    public async rerunMasterPlan(
+        originalMasterPlanId: string,
+        overrides: { projectId?: types.project.ProjectId; initialContext?: string } = {},
+        onProgress?: (msg: string) => void,
+    ) {
+        // 1. Load original master plan
+        const original = await this.reportRepository.get(
+            originalMasterPlanId as types.report.ReportId,
+        );
+        if (!original || original.type !== "MASTER_PLAN") {
+            throw new Error(`Master plan ${originalMasterPlanId} not found`);
+        }
+        const goals: string[] = original.masterPlanGoals ?? [];
+        if (goals.length === 0) {
+            throw new Error("Original master plan has no saved goals to re-run");
+        }
+
+        const projectId = overrides.projectId ?? original.projectId;
+        const initialContext = overrides.initialContext ?? original.initialContext ?? "{}";
+
+        onProgress?.(JSON.stringify({ type: "INIT", projectId, rerun: true, originalMasterPlanId }));
+
+        // 2. Load project files for the (possibly different) project
+        const project = await this.projectRepository.get(projectId);
+        if (!project) throw new Error("Project not found");
+
+        const files = await Promise.all(
+            project.files.map((fileId) => this.fileService.downloadFile(fileId)),
+        );
+        const validFiles = files.filter((f): f is NonNullable<typeof f> => !!f);
+        if (validFiles.length === 0) throw new Error("No documentation files found for this project.");
+
+        // 3. Doc-examples smoke test (same as runMasterPlan)
+        const docExamples = extractDocExamples(validFiles);
+        const docExampleResults: { label: string; success: boolean; error?: unknown }[] = [];
+        for (const ex of docExamples.slice(0, 10)) {
+            const label = docExampleLabel(ex);
+            try {
+                const result = await this.executor.runDocExample(ex.code);
+                docExampleResults.push({ label, success: result.success, error: result.error });
+                onProgress?.(JSON.stringify({
+                    type: "log",
+                    content: `Doc example [${label}]: ${result.success ? "PASS" : "FAIL"}`,
+                }));
+            } catch {
+                docExampleResults.push({ label, success: false, error: "Executor error" });
+            }
+        }
+
+        onProgress?.(JSON.stringify({
+            type: "GOALS_GENERATED",
+            goals,
+            note: `Reusing ${goals.length} goals from master plan ${originalMasterPlanId}`,
+        }));
+
+        // 4. Execute goals (identical loop to runMasterPlan)
+        const kbLines: string[] = ["# Shared Knowledge Base (prior goal findings)\n"];
+        const reportIds: types.report.ReportId[] = [];
+        const executionReports: any[] = [];
+
+        for (let i = 0; i < goals.length; i++) {
+            const goal = goals[i];
+            onProgress?.(JSON.stringify({ type: "GOAL_START", goal, index: i, total: goals.length }));
+
+            let goalWithKb = goal;
+            if (kbLines.length > 1) {
+                const kbSummary = kbLines.slice(0, 30).join("\n");
+                goalWithKb = `${goal}\n\n## Prior findings (for context only)\n${kbSummary}`;
+            }
+
+            const testSuite = await this.testSuiteRepository.create({
+                projectId,
+                initialContext,
+                minimalStoryLength: 1,
+                maximalStoryLength: 3,
+                mode: "CODE_GENERATION",
+                userGoal: goalWithKb,
+            });
+
+            const report = await this.executor.executeTestSuite(
+                testSuite._id as types.test.TestSuiteId,
+                (msg) => { onProgress?.(JSON.stringify({ type: "GOAL_PROGRESS", goal, log: msg })); },
+            );
+
+            if (report) {
+                reportIds.push(report._id as types.report.ReportId);
+                const stepSummary = report.steps.map((s: any) => ({
+                    stepIndex: s.stepIndex,
+                    description: s.stepDescription,
+                    status: s.status,
+                    error: s.error?.substring(0, 400),
+                    failureAnalysis: s.failureAnalysis,
+                }));
+                executionReports.push({ goal, status: report.status, reportId: report._id, steps: stepSummary });
+
+                const failedSteps = stepSummary.filter((s: any) => s.status === "FAILED" && s.failureAnalysis);
+                if (failedSteps.length > 0) {
+                    kbLines.push(`\n## Goal: ${goal}`);
+                    for (const s of failedSteps.slice(0, 3)) {
+                        const fa = s.failureAnalysis;
+                        kbLines.push(`- **${fa.documentationGap}** in \`${fa.failedFunction}\`: ${fa.reasoning.slice(0, 200)}`);
+                        if (fa.suggestedDocsFix) kbLines.push(`  Fix: ${fa.suggestedDocsFix.slice(0, 150)}`);
+                    }
+                }
+                onProgress?.(JSON.stringify({ type: "GOAL_COMPLETE", goal, status: report.status, reportId: report._id }));
+            } else {
+                executionReports.push({ goal, status: "FAILED", reportId: null, steps: [] });
+                onProgress?.(JSON.stringify({ type: "GOAL_COMPLETE", goal, status: "FAILED", reportId: null }));
+            }
+
+            await this.testSuiteRepository.delete(testSuite._id as types.test.TestSuiteId);
+        }
+
+        // 5. Aggregate + regression vs. ORIGINAL plan's gaps (not the most recent for the project)
+        const findings = collectFindings(executionReports);
+        const clusters = clusterGaps(findings);
+        const originalGaps: types.planner.DocumentationGapDetail[] =
+            (original as any).structuredSummary?.documentationGapDetails ?? [];
+        const regressionMap = await this.computeRegressionStatus(projectId, clusters, originalGaps);
+
+        onProgress?.(JSON.stringify({ type: "log", content: "Generating final master summary..." }));
+        const { structured, markdown } = await this.promptService.promptForMasterSummary(
+            executionReports,
+            clusters,
+        );
+
+        const successGoals = executionReports.filter((r) => r.status === "SUCCESS").length;
+        structured.overallPassRate = goals.length === 0 ? 0 : successGoals / goals.length;
+        structured.failureTaxonomy = taxonomyOf(findings);
+        structured.topFailingFunctions = topFailingFunctionsOf(findings);
+        structured.documentationGapDetails = clusters.map((c) => ({
+            fragment: c.fragment,
+            proposedFix: c.proposedFix,
+            affectedGoals: c.affectedGoals,
+            file: c.file,
+            documentationGap: c.documentationGap,
+            lineStart: c.lineStart,
+            lineEnd: c.lineEnd,
+            verified: c.verified,
+            occurrences: c.occurrences,
+            meanConfidence: c.meanConfidence,
+            regressionStatus: regressionMap.get(c.key) ?? "NEW",
+        }));
+        const llmFindingsByGoal = new Map(
+            (structured.goalsBreakdown ?? []).map((g) => [g.goal, g.keyFindings]),
+        );
+        structured.goalsBreakdown = executionReports.map((r) => ({
+            goal: r.goal,
+            status: r.status,
+            reportId: r.reportId,
+            keyFindings: llmFindingsByGoal.get(r.goal) ?? "",
+        }));
+
+        onProgress?.(JSON.stringify({ type: "SUMMARY_GENERATED", summary: markdown, structured }));
+
+        // 6. Save as new MASTER_PLAN with back-reference to original
+        const masterPlan = await this.reportRepository.create({
+            projectId,
+            status: "SUCCESS",
+            type: "MASTER_PLAN",
+            initialContext,
+            executionPlan: {
+                docExampleResults: docExampleResults.length > 0 ? docExampleResults : undefined,
+                rerunFromMasterPlanId: originalMasterPlanId,
+            },
+            steps: [],
+            detailedResults: { finalOutput: markdown },
+            masterPlanGoals: goals,
+            masterPlanReports: reportIds,
+            structuredSummary: structured,
+        } as any);
+
+        await Promise.all(
+            reportIds.map((rid) =>
+                this.reportRepository.setMasterPlanId(rid, masterPlan._id as string)
+            ),
+        );
+
+        onProgress?.(JSON.stringify({ type: "log", content: "Master Plan re-run completed." }));
+        return masterPlan;
+    }
+
+    /**
      * #19 — Compare current gap clusters against the most recent prior run.
      * Returns a map of clusterKey → regressionStatus.
-     * Gaps in the prior run that are NOT in the current run are NOT tracked here;
-     * they are effectively "resolved" but we only surface what we found this run.
+     * Accepts an optional explicit `priorGaps` list (used in rerun flow to compare
+     * against the source master plan rather than the most recent project run).
      */
     private async computeRegressionStatus(
         projectId: types.project.ProjectId,
         currentClusters: GapCluster[],
+        explicitPriorGaps?: types.planner.DocumentationGapDetail[],
     ): Promise<Map<string, "NEW" | "PERSISTED">> {
         const result = new Map<string, "NEW" | "PERSISTED">();
         if (currentClusters.length === 0) return result;
 
         try {
-            // Fetch the 2 most recent master-plan reports to find a prior run.
-            const { reports: recent } = await this.reportRepository.listSlim(
-                { page: 1, limit: 5 },
-                { projectId, type: "MASTER_PLAN" },
-            );
-            // Exclude reports that have no ID yet (shouldn't happen) and take the first
-            // that is NOT the current run (which hasn't been saved yet).
-            const priorReport = recent[0];
-            if (!priorReport) return result;
+            let priorGaps: types.planner.DocumentationGapDetail[];
 
-            const priorGaps: types.planner.DocumentationGapDetail[] =
-                (priorReport as any).structuredSummary?.documentationGapDetails ?? [];
+            if (explicitPriorGaps) {
+                priorGaps = explicitPriorGaps;
+            } else {
+                // Fetch the most recent master-plan report for the project
+                const { reports: recent } = await this.reportRepository.listSlim(
+                    { page: 1, limit: 5 },
+                    { projectId, type: "MASTER_PLAN" },
+                );
+                const priorReport = recent[0];
+                if (!priorReport) return result;
+                priorGaps = (priorReport as any).structuredSummary?.documentationGapDetails ?? [];
+            }
 
             for (const cluster of currentClusters) {
-                const isPersisted = priorGaps.some((pg) =>
-                    this.gapsSimilar(cluster, pg)
-                );
+                const isPersisted = priorGaps.some((pg) => this.gapsSimilar(cluster, pg));
                 result.set(cluster.key, isPersisted ? "PERSISTED" : "NEW");
             }
         } catch {

@@ -145,6 +145,14 @@ export function ReportDetailPage() {
                         {report.masterPlanId && report.type !== "MASTER_PLAN" && (
                             <span className="font-mono">plan {report.masterPlanId}</span>
                         )}
+                        {report.rerunFromMasterPlanId && (
+                            <span
+                                className="rounded border border-dashed border-muted-foreground/50 px-1.5 py-0.5 text-xs text-muted-foreground"
+                                title={`Re-run of master plan ${report.rerunFromMasterPlanId}`}
+                            >
+                                ↻ rerun of {report.rerunFromMasterPlanId.slice(-8)}
+                            </span>
+                        )}
                     </div>
                 </div>
                 <div className="flex items-center gap-2">

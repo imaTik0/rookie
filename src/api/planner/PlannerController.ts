@@ -14,7 +14,7 @@ export class PlannerController {
     @Post(PlannerRoutes.RunMasterPlanRoute)
     runMasterPlan: RouteHandler<typeof PlannerRoutes.RunMasterPlanRoute> = async (c) => {
         const { projectId, maxGoals, initialContext } = c.req.valid("json");
-        
+
         return streamText(c, async (stream) => {
             try {
                 const result = await this.plannerService.runMasterPlan(
@@ -24,6 +24,30 @@ export class PlannerController {
                     async (msg) => {
                         await stream.writeln(msg);
                     }
+                );
+                await stream.writeln(JSON.stringify({ type: "COMPLETE", result }));
+            } catch (error) {
+                const err = error as { message?: string };
+                await stream.writeln(JSON.stringify({ type: "ERROR", message: err?.message || "Unknown error" }));
+            }
+        }) as any;
+    };
+
+    @Post(PlannerRoutes.RerunMasterPlanRoute)
+    rerunMasterPlan: RouteHandler<typeof PlannerRoutes.RerunMasterPlanRoute> = async (c) => {
+        const { masterPlanId, projectId, initialContext } = c.req.valid("json");
+
+        return streamText(c, async (stream) => {
+            try {
+                const result = await this.plannerService.rerunMasterPlan(
+                    masterPlanId,
+                    {
+                        projectId: projectId as types.project.ProjectId | undefined,
+                        initialContext,
+                    },
+                    async (msg) => {
+                        await stream.writeln(msg);
+                    },
                 );
                 await stream.writeln(JSON.stringify({ type: "COMPLETE", result }));
             } catch (error) {

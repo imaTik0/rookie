@@ -47,6 +47,8 @@ export interface ReportModel {
     coverageReport?: types.report.CoverageItem[];
     frictionEvents?: types.report.FrictionEvent[];
     gapFeedback?: types.report.GapFeedback[];
+    /** ID of the master plan this report was re-run from (rerun flow only). */
+    rerunFromMasterPlanId?: string;
 }
 
 export interface TestSuite {

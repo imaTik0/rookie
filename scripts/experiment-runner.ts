@@ -603,7 +603,13 @@ function createAgentRenderer() {
 // ─────────────────────────────────────────────────────────────────
 //  MASTER PLANNER
 // ─────────────────────────────────────────────────────────────────
-async function runMasterPlanner(projectId: string, plannerCfg: PlannerConfig, vars: Record<string, unknown>): Promise<MasterPlanRun> {
+async function runMasterPlanner(
+  projectId: string,
+  plannerCfg: PlannerConfig,
+  vars: Record<string, unknown>,
+  /** When set, calls /planner/rerun instead of /planner/run — reuses goals from this master plan. */
+  rerunFromMasterPlanId?: string,
+): Promise<MasterPlanRun> {
   const context = fill(plannerCfg.initialContext, vars) as string;
 
   let masterPlan: Record<string, unknown> | null = null;
@@ -612,7 +618,12 @@ async function runMasterPlanner(projectId: string, plannerCfg: PlannerConfig, va
 
   const agent = createAgentRenderer();
 
-  for await (const event of ndJsonStream(`${ROOKIE_URL}/planner/run`, { projectId, maxGoals: plannerCfg.maxGoals, initialContext: context })) {
+  const streamBody = rerunFromMasterPlanId
+    ? { masterPlanId: rerunFromMasterPlanId, projectId, initialContext: context }
+    : { projectId, maxGoals: plannerCfg.maxGoals, initialContext: context };
+  const streamPath = rerunFromMasterPlanId ? "/planner/rerun" : "/planner/run";
+
+  for await (const event of ndJsonStream(`${ROOKIE_URL}${streamPath}`, streamBody)) {
     switch (event.type) {
 
       case "INIT":
@@ -625,7 +636,10 @@ async function runMasterPlanner(projectId: string, plannerCfg: PlannerConfig, va
 
       case "GOALS_GENERATED": {
         goals = event.goals as string[];
-        console.log(`${gray("│")}  ${cyan("◆")} ${bold(`${goals.length} goals generated:`)}`);
+        const goalsLabel = event.note
+          ? `${goals.length} goals (reused from prior run):`
+          : `${goals.length} goals generated:`;
+        console.log(`${gray("│")}  ${cyan("◆")} ${bold(goalsLabel)}`);
         goals.forEach((g, i) => console.log(`${gray("│")}    ${gray(`${i + 1}.`)} ${g}`));
         break;
       }
@@ -915,12 +929,20 @@ async function main(): Promise<void> {
   await dockerStop(cfg.container.name);
 
   // ── Phase 3: experiment — OLD docs + NEW API ────────────────────
+  // Reuses the goals generated in Phase 2 via /planner/rerun so the two runs
+  // are directly comparable (same goals, same project, different API version).
+  const baselineMasterPlanId = (bPlan?._id as string | undefined) ?? null;
   section("Phase 3/3 — Experiment: OLD docs × NEW API");
+  if (baselineMasterPlanId) {
+    console.log(`${gray("│")}  ${dim(`reusing goals from master plan ${baselineMasterPlanId}`)}`);
+  } else {
+    console.log(`${gray("│")}  ${yell("⚠")} baseline master plan ID not found — generating fresh goals`);
+  }
   await dockerStart(cfg.newImage, cfg.container);
   await waitHealthy(cfg.health, vars);
   if (cfg.setup) Object.assign(vars, await cfg.setup(cfg.container.name));
   const { masterPlan: ePlan, goals: eGoals, breakdown: eBreakdown } =
-    await runMasterPlanner(project.id, cfg.planner, vars);
+    await runMasterPlanner(project.id, cfg.planner, vars, baselineMasterPlanId ?? undefined);
   await dockerStop(cfg.container.name);
 
   // ── Phase 4: diff + docs patch + save ───────────────────────────
