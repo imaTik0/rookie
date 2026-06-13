@@ -1,7 +1,7 @@
 // src/controller/ReportController.ts
 
 import type { RouteHandler } from "@hono/zod-openapi";
-import { Controller, Delete, Get } from "../Decorator.ts";
+import { Controller, Delete, Get, Post } from "../Decorator.ts";
 import { ReportRoutes } from "./ReportRoute.ts";
 import { ReportService } from "../../service/ReportService.ts";
 import { buildMeta } from "../CommonSchema.ts";
@@ -45,5 +45,36 @@ export class ReportController {
             return c.json({ message: "Report not found or could not be deleted" }, 404);
         }
         return c.body(null, 204);
+    };
+
+    @Get(ReportRoutes.GetDocsPatchRoute)
+    getDocsPatch: RouteHandler<typeof ReportRoutes.GetDocsPatchRoute> = async (c) => {
+        const { reportId } = c.req.valid("param");
+        const { format } = c.req.valid("query");
+        const patch = await this.reportService.generateDocsPatch(
+            reportId as types.report.ReportId,
+            format,
+        );
+        if (!patch) {
+            return c.json({ code: 404, message: "Report not found" }, 404);
+        }
+        return c.text(patch.content, 200, {
+            "X-Patched-Clusters": String(patch.patchedClusters),
+            "X-Unpatched-Clusters": String(patch.unpatchedClusters),
+        });
+    };
+
+    @Post(ReportRoutes.AddGapFeedbackRoute)
+    addGapFeedback: RouteHandler<typeof ReportRoutes.AddGapFeedbackRoute> = async (c) => {
+        const { reportId } = c.req.valid("param");
+        const body = c.req.valid("json");
+        const stored = await this.reportService.addGapFeedback(
+            reportId as types.report.ReportId,
+            body,
+        );
+        if (!stored) {
+            return c.json({ code: 404, message: "Report not found" }, 404);
+        }
+        return c.json(stored, 201);
     };
 }

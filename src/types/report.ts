@@ -1,7 +1,8 @@
 import * as types from "./index.ts";
 
 export type ReportId = string & { __reportId: never };
-export type ReportStatus = "SUCCESS" | "FAILED";
+export type StepStatus = "SUCCESS" | "FAILED";
+export type ReportStatus = "PENDING" | "RUNNING" | "SUCCESS" | "FAILED" | "PARTIAL_FAILURE";
 export type DetailedResults = { 
     finalOutput?: string; 
     executionPlan?: any;
@@ -19,6 +20,16 @@ export type DocumentationGap =
     | "ENVIRONMENT"
     | "UNKNOWN";
 
+/** Result of grounding the LLM-quoted fragment in the real documentation corpus. */
+export interface FragmentVerification {
+    verified: boolean;
+    file?: string;
+    lineStart?: number;
+    lineEnd?: number;
+    matchScore: number;
+    matchedText?: string;
+}
+
 export interface FailureAnalysis {
     errorMessage: string;
     failedFunction: string;
@@ -27,22 +38,70 @@ export interface FailureAnalysis {
     suggestedDocsFix: string;
     pinpointedFragment?: string;
     proposedFragment?: string;
+    /** Self-consistency agreement: winning-category votes / total votes (0..1). */
+    confidence?: number;
+    /** Number of classifier votes cast. */
+    votes?: number;
+    /** Where (and whether) the pinpointed fragment was found in the actual docs. */
+    fragmentVerification?: FragmentVerification;
+}
+
+/** Research-phase coverage: was each decomposed sub-task covered by the docs? */
+export interface CoverageItem {
+    subtask: string;
+    covered: boolean;
+    /** Search queries the agent needed to cover this sub-task. */
+    queriesUsed?: string[];
+    /** What information remained missing, when not covered. */
+    missingInfo?: string;
+}
+
+/**
+ * Friction signal captured during an otherwise possibly-successful run:
+ * each one is documentation feedback that a binary pass/fail hides.
+ */
+export interface FrictionEvent {
+    type: "SMOKE_TEST_FAILURE" | "RESEARCH_BOUNCE";
+    /** Error text for smoke-test failures (truncated). */
+    error?: string;
+    /** Search query for research bounces. */
+    query?: string;
+    /** Free-text note (e.g. the doc-gap analysis the agent wrote while debugging). */
+    note?: string;
+}
+
+/** Human verdict on a proposed documentation fix. */
+export interface GapFeedback {
+    stepIndex?: number;
+    verdict: "ACCEPTED" | "REJECTED" | "EDITED";
+    comment?: string;
+    editedFix?: string;
+    createdAt: string;
+}
+
+/** One HTTP request captured by the sandbox interceptor. */
+export interface HttpTrafficEntry {
+    method: string;
+    url: string;
+    requestBody?: string | null;
+    responseStatus?: number | null;
+    responseBody?: string | null;
+    durationMs?: number | null;
+    error?: string | null;
 }
 
 export interface StepResult {
     stepIndex: number;
     stepDescription: string;
     scriptContent: string;
-    status: ReportStatus;
+    status: StepStatus;
     logs: string;
     contextAfter?: unknown;
     error?: string;
     relatedKnowledge?: unknown[];
     failureAnalysis?: FailureAnalysis;
-    bashSetup?: string;
-    environment?: string;
-    dependencies?: string[];
-    command?: string;
+    /** HTTP requests made by the user code during execution (intercepted by sandbox). */
+    httpTrafficLog?: HttpTrafficEntry[];
 }
 
 export interface Report {
@@ -51,22 +110,29 @@ export interface Report {
     projectId: types.project.ProjectId;
     status: ReportStatus;
     type: "CODE_GENERATION" | "TEST_SCENARIO" | "MASTER_PLAN";
+    summary?: string;
     initialContext: string;
     executionPlan: unknown;
     steps: StepResult[];
     detailedResults?: DetailedResults;
-    conversationHistory?: any[];
-    createdAt: Date;
+    createdAt: string;
     durationMs?: number;
     masterPlanId?: string;
     masterPlanGoals?: string[];
     masterPlanReports?: ReportId[];
     structuredSummary?: types.planner.StructuredMasterSummary;
+    /** Research-phase documentation coverage breakdown. */
+    coverageReport?: CoverageItem[];
+    /** Friction signals (smoke-test failures, research bounces) captured mid-run. */
+    frictionEvents?: FrictionEvent[];
+    /** Human accept/reject verdicts on proposed documentation fixes. */
+    gapFeedback?: GapFeedback[];
 }
 
 export interface ListReport {
     id: ReportId;
     testSuiteId?: types.test.TestSuiteId;
+    projectId?: types.project.ProjectId;
     status: ReportStatus;
     type?: "CODE_GENERATION" | "TEST_SCENARIO" | "MASTER_PLAN";
     createdAt: string;

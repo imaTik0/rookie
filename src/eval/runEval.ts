@@ -2,8 +2,13 @@
  * End-to-end evaluation runner.
  *
  * Drives a RUNNING Rookie instance over its HTTP API for each labelled fixture,
- * then scores documentation-gap DETECTION and CLASSIFICATION against the ground
- * truth in fixtures.ts.
+ * then scores against the ground truth in fixtures.ts:
+ *   1. documentation-gap DETECTION (precision / recall / F1),
+ *   2. gap CLASSIFICATION (per-label PRF, macro-F1, Cohen's kappa),
+ *   3. fragment LOCALIZATION (verified-quote rate, correct-file accuracy),
+ *   4. classifier CONFIDENCE (self-consistency agreement on true vs spurious flags),
+ *   5. docs-PATCH coverage (how many detected defects yield an applyable hunk),
+ *   6. goal pass rates (strict and step-level; PARTIAL_FAILURE-aware).
  *
  * Prerequisites: a running Rookie server (`deno task start`) plus its
  * dependencies (MongoDB, Qdrant, Docker) and a configured LLM/embeddings backend
@@ -14,7 +19,7 @@
  *
  * This is an INTEGRATION evaluation: results depend on the model. Run it a few
  * times / with several models to compare. The pure metric maths is unit-tested
- * separately in metrics.test.ts.
+ * separately in metrics.test.ts (and src/feedback/feedback.test.ts).
  */
 import { EvalFixture, FIXTURES } from "./fixtures.ts";
 import {
@@ -22,7 +27,10 @@ import {
     confusionMatrix,
     detectionMetrics,
     GapLabel,
+    LocalizationRecord,
+    localizationMetrics,
     macroF1,
+    mean,
     perLabelMetrics,
 } from "./metrics.ts";
 
@@ -35,11 +43,24 @@ interface StepLike {
         failedFunction?: string;
         reasoning?: string;
         pinpointedFragment?: string;
+        confidence?: number;
+        votes?: number;
+        fragmentVerification?: {
+            verified: boolean;
+            file?: string;
+            lineStart?: number;
+            lineEnd?: number;
+            matchScore: number;
+        };
     };
 }
 interface ReportLike {
+    id?: string;
+    _id?: string;
     status: string;
     steps: StepLike[];
+    coverageReport?: { subtask: string; covered: boolean }[];
+    frictionEvents?: { type: string }[];
 }
 
 async function uploadFiles(fixture: EvalFixture): Promise<string[]> {
@@ -93,10 +114,22 @@ async function runMasterPlan(projectId: string, maxGoals: number): Promise<strin
     return [...reportIds];
 }
 
-async function getReport(reportId: string): Promise<ReportLike | null> {
+async function getReport(reportId: string): Promise<(ReportLike & { id: string }) | null> {
     const res = await fetch(`${BASE}/reports/${reportId}`);
     if (!res.ok) return null;
-    return await res.json();
+    const json = await res.json();
+    return { ...json, id: json.id ?? json._id ?? reportId };
+}
+
+/** Fetch the raw unified docs patch for a report ("" when none / unavailable). */
+async function getDocsPatch(reportId: string): Promise<string> {
+    try {
+        const res = await fetch(`${BASE}/reports/${reportId}/docs-patch?format=diff`);
+        if (!res.ok) return "";
+        return await res.text();
+    } catch {
+        return "";
+    }
 }
 
 function failureText(s: StepLike): string {
@@ -109,11 +142,21 @@ function failureText(s: StepLike): string {
 async function main() {
     const goldLabels: GapLabel[] = [];
     const predLabels: GapLabel[] = [];
+    const localization: LocalizationRecord[] = [];
+    const confidenceTrue: number[] = []; // confidence on flags matching an injected defect
+    const confidenceSpurious: number[] = []; // confidence on flags matching nothing
     let detected = 0;
     let totalGold = 0;
     let totalFlagged = 0;
+    let patchableDefects = 0;
     let goalsPassed = 0;
+    let goalsPartial = 0;
     let goalsTotal = 0;
+    let stepsPassed = 0;
+    let stepsTotal = 0;
+    let coverageReports = 0;
+    let uncoveredSubtasks = 0;
+    let frictionTotal = 0;
 
     for (const fixture of FIXTURES) {
         console.log(`\n=== Fixture: ${fixture.name} ===`);
@@ -122,38 +165,76 @@ async function main() {
             const projectId = await createProject(fixture.name, fileIds);
             const reportIds = await runMasterPlan(projectId, fixture.goals.length);
             const reports = (await Promise.all(reportIds.map(getReport))).filter(
-                (r): r is ReportLike => !!r,
+                (r): r is ReportLike & { id: string } => !!r,
             );
 
             const allFailures = reports.flatMap((r) =>
                 r.steps.filter((s) => s.status === "FAILED" && s.failureAnalysis)
+                    .map((s) => ({ step: s, reportId: r.id }))
             );
             // Documentation-gap flags exclude ENVIRONMENT (tooling, not docs).
             const docFailures = allFailures.filter(
-                (s) => s.failureAnalysis!.documentationGap !== "ENVIRONMENT",
+                (f) => f.step.failureAnalysis!.documentationGap !== "ENVIRONMENT",
             );
             totalFlagged += docFailures.length;
 
             goalsTotal += reports.length;
             goalsPassed += reports.filter((r) => r.status === "SUCCESS").length;
+            goalsPartial += reports.filter((r) => r.status === "PARTIAL_FAILURE").length;
+            for (const r of reports) {
+                stepsTotal += r.steps.length;
+                stepsPassed += r.steps.filter((s) => s.status === "SUCCESS").length;
+                if (r.coverageReport?.length) {
+                    coverageReports++;
+                    uncoveredSubtasks += r.coverageReport.filter((c) => !c.covered).length;
+                }
+                frictionTotal += r.frictionEvents?.length ?? 0;
+            }
 
+            const matchedFlags = new Set<StepLike>();
             for (const defect of fixture.expectedDefects) {
                 totalGold++;
                 const kw = defect.matchKeywords.map((k) => k.toLowerCase());
-                const match = docFailures.find((s) => {
-                    const t = failureText(s);
+                const match = docFailures.find((f) => {
+                    const t = failureText(f.step);
                     return kw.some((k) => t.includes(k));
                 });
                 if (match) {
                     detected++;
+                    matchedFlags.add(match.step);
+                    const fa = match.step.failureAnalysis!;
                     goldLabels.push(defect.expectedGap);
-                    predLabels.push(match.failureAnalysis!.documentationGap);
+                    predLabels.push(fa.documentationGap);
+                    localization.push({
+                        expectedFile: defect.file,
+                        predictedFile: fa.fragmentVerification?.file,
+                        verified: fa.fragmentVerification?.verified === true,
+                    });
+                    if (typeof fa.confidence === "number") confidenceTrue.push(fa.confidence);
+
+                    // Patch coverage: does the report's docs patch touch the defect file?
+                    const patch = await getDocsPatch(match.reportId);
+                    const patched = patch.includes(`a/${defect.file}`);
+                    if (patched) patchableDefects++;
+
                     console.log(
                         `  [DETECTED] ${defect.id}: expected=${defect.expectedGap} ` +
-                            `predicted=${match.failureAnalysis!.documentationGap}`,
+                            `predicted=${fa.documentationGap} ` +
+                            `conf=${fa.confidence ?? "n/a"} ` +
+                            `fragment=${
+                                fa.fragmentVerification?.verified
+                                    ? `verified@${fa.fragmentVerification.file}:${fa.fragmentVerification.lineStart}`
+                                    : "unverified"
+                            } patch=${patched ? "yes" : "no"}`,
                     );
                 } else {
                     console.log(`  [MISSED]   ${defect.id} (expected ${defect.expectedGap})`);
+                }
+            }
+            for (const f of docFailures) {
+                if (!matchedFlags.has(f.step)) {
+                    const conf = f.step.failureAnalysis?.confidence;
+                    if (typeof conf === "number") confidenceSpurious.push(conf);
                 }
             }
         } catch (err) {
@@ -176,12 +257,42 @@ async function main() {
         console.log(`Classifier macro-F1 (matched defects): ${macroF1(per).toFixed(3)}`);
         console.log(`Classifier Cohen's kappa: ${cohenKappa(goldLabels, predLabels).toFixed(3)}`);
         console.table(per);
+
+        const loc = localizationMetrics(localization);
+        console.log(
+            `Fragment localization: verified=${loc.verifiedRate.toFixed(3)} ` +
+                `file-accuracy=${loc.fileAccuracy.toFixed(3)} ` +
+                `(of verified: ${loc.fileAccuracyOfVerified.toFixed(3)}, n=${loc.support})`,
+        );
+        console.log(
+            `Docs-patch coverage: ${patchableDefects}/${detected} detected defects yield an applyable hunk`,
+        );
     } else {
-        console.log("No defects detected → classification metrics unavailable.");
+        console.log("No defects detected → classification/localization metrics unavailable.");
     }
+
     console.log(
-        `Goal pass rate: ${goalsTotal === 0 ? 0 : (goalsPassed / goalsTotal).toFixed(3)} ` +
-            `(${goalsPassed}/${goalsTotal})`,
+        `Classifier confidence: true-positive flags=${mean(confidenceTrue).toFixed(3)} ` +
+            `(n=${confidenceTrue.length}), spurious flags=${mean(confidenceSpurious).toFixed(3)} ` +
+            `(n=${confidenceSpurious.length})` +
+            (confidenceTrue.length && confidenceSpurious.length
+                ? ` — separation ${(mean(confidenceTrue) - mean(confidenceSpurious)).toFixed(3)}`
+                : ""),
+    );
+
+    console.log(
+        `Goal pass rate (strict): ${
+            goalsTotal === 0 ? "0" : (goalsPassed / goalsTotal).toFixed(3)
+        } (${goalsPassed}/${goalsTotal}, +${goalsPartial} partial)`,
+    );
+    console.log(
+        `Step pass rate: ${stepsTotal === 0 ? "0" : (stepsPassed / stepsTotal).toFixed(3)} ` +
+            `(${stepsPassed}/${stepsTotal})`,
+    );
+    console.log(
+        `Coverage reports: ${coverageReports}/${goalsTotal} runs, ` +
+            `${uncoveredSubtasks} uncovered subtask(s) flagged; ` +
+            `friction events: ${frictionTotal}`,
     );
     console.log("========================================");
 }

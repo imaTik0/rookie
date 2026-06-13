@@ -33,6 +33,7 @@ export interface ReportModel {
     projectId: types.project.ProjectId;
     status: types.report.ReportStatus;
     type: "CODE_GENERATION" | "TEST_SCENARIO" | "MASTER_PLAN";
+    summary?: string;
     initialContext: string;
     executionPlan: unknown;
     steps: types.report.StepResult[];
@@ -43,6 +44,9 @@ export interface ReportModel {
     masterPlanGoals?: string[];
     masterPlanReports?: types.report.ReportId[];
     structuredSummary?: types.planner.StructuredMasterSummary;
+    coverageReport?: types.report.CoverageItem[];
+    frictionEvents?: types.report.FrictionEvent[];
+    gapFeedback?: types.report.GapFeedback[];
 }
 
 export interface TestSuite {

@@ -26,7 +26,7 @@
     "tasks": {
         "start": "deno run --allow-all --env-file src/init.ts",
         "watch": "deno run --watch --env-file --allow-all src/init.ts | pino-pretty -c -t 'SYS:HH:MM:ss.L'",
-        "test": "deno test src/eval/metrics.test.ts",
+        "test": "deno test src/eval/metrics.test.ts src/feedback/feedback.test.ts",
         "eval": "deno run --allow-net --allow-env src/eval/runEval.ts",
         "dev": "deno run --allow-all scripts/run-both.ts dev",
         "prod": "deno run --allow-all scripts/run-both.ts start"

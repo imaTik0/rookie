@@ -13,6 +13,10 @@ import {
     HEAD_FILE_TOOL,
     TAIL_FILE_TOOL,
     GREP_FILE_TOOL,
+    GREP_CORPUS_TOOL,
+    OUTLINE_FILE_TOOL,
+    READ_SECTION_TOOL,
+    GET_ENDPOINT_TOOL,
 } from "./prompt/constants.ts";
 import { emitLog, emitToken, ProgressCallback } from "./prompt/helpers.ts";
 import {
@@ -208,9 +212,20 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         files: { metadata: any; buffer: Uint8Array }[],
         onProgress?: ProgressCallback,
         smokeTestCallback?: SmokeTestCallback,
-    ): Promise<{ response: CodeGenerationResponse; history: any[] }> {
+    ): Promise<{
+        response: CodeGenerationResponse;
+        history: any[];
+        /** Documentation context the generator actually worked from. */
+        contextFound: string;
+        /** Research-phase per-subtask coverage breakdown (undefined on extraction failure). */
+        coverageReport?: types.report.CoverageItem[];
+        /** Friction signals captured mid-run (smoke-test failures, research bounces). */
+        frictionEvents: types.report.FrictionEvent[];
+    }> {
         this.logger.log(`Starting Agentic RAG for goal: "${userGoal}"`);
         emitLog(onProgress, `Starting Agentic RAG for goal: "${userGoal}"`);
+
+        const frictionEvents: types.report.FrictionEvent[] = [];
 
         let { initialDocsContent, contextFound, messages: researchMessages } = await this.runResearchPhase(
             vectorCollectionName,
@@ -218,6 +233,10 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             files,
             onProgress,
         );
+
+        // The research agent's explicit COVERED / NEEDS RESEARCH gap analysis is
+        // documentation feedback in its own right — extract and persist it.
+        const coverageReport = await this.extractCoverageReport(researchMessages);
 
         let verificationMessages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[] = [];
         let isVerified = false;
@@ -232,21 +251,35 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                 userGoal,
                 onProgress,
                 smokeTestCallback,
+                frictionEvents,
             );
 
             const lastMessage = verificationMessages[verificationMessages.length - 1];
             const content = lastMessage.content;
-            
+
             if (typeof content === "string" && content.includes("NEEDS_RESEARCH:")) {
                 const queryMatch = content.match(/NEEDS_RESEARCH:\s*(.*)/);
                 if (queryMatch && queryMatch[1]) {
                     const query = queryMatch[1].trim();
                     this.logger.log(`Verification agent requested more research: "${query}"`);
                     emitLog(onProgress, `Verification agent requested more research: "${query}"`);
-                    
+
+                    // #21 — Extract the agent's gap analysis prose from the bounce.
+                    // The agent typically writes a diagnostic paragraph before NEEDS_RESEARCH:
+                    // e.g. "The documentation is missing the auth header format..."
+                    // Capture this as the friction note so it isn't buried in raw traces.
+                    const analysisNote = this.extractGapAnalysisFromBounce(content);
+
+                    frictionEvents.push({
+                        type: "RESEARCH_BOUNCE",
+                        query,
+                        note: analysisNote ||
+                            "Verification could not proceed with the researched documentation and had to search again.",
+                    });
+
                     const additionalDocs = await this.performRAGSearch(
-                        vectorCollectionName, 
-                        query, 
+                        vectorCollectionName,
+                        query,
                         this.configService.values.limits.defaultSearchLimit
                     );
                     const formattedAdditionalDocs = JSON.stringify(additionalDocs.map(r => ({
@@ -262,7 +295,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                     continue;
                 }
             }
-            
+
             isVerified = true;
         }
 
@@ -272,7 +305,52 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         return {
             response,
             history: this.cleanHistoryForReport(fullHistory),
+            contextFound,
+            coverageReport,
+            frictionEvents,
         };
+    }
+
+    /**
+     * Extract the research agent's per-subtask coverage state (COVERED /
+     * NEEDS RESEARCH) from the research transcript into structured data.
+     * Returns undefined when extraction fails — never blocks the pipeline.
+     */
+    private async extractCoverageReport(
+        researchMessages: OpenAI.Chat.ChatCompletionMessageParam[],
+    ): Promise<types.report.CoverageItem[] | undefined> {
+        try {
+            const transcript = researchMessages
+                .filter((m) => m.role === "assistant" && typeof m.content === "string" && m.content)
+                .map((m) => m.content as string)
+                .join("\n\n")
+                .substring(0, 20_000);
+            if (transcript.trim().length === 0) return undefined;
+
+            const searchQueries: string[] = [];
+            for (const m of researchMessages) {
+                const toolCalls = (m as { tool_calls?: { function?: { name?: string; arguments?: string } }[] })
+                    .tool_calls;
+                for (const tc of toolCalls ?? []) {
+                    if (tc.function?.name === "search_knowledge_base" && tc.function.arguments) {
+                        try {
+                            const args = JSON.parse(tc.function.arguments);
+                            if (typeof args.query === "string") searchQueries.push(args.query);
+                        } catch { /* malformed args — skip */ }
+                    }
+                }
+            }
+
+            const parsed = await this.structured(
+                templates.COVERAGE_EXTRACTION_SYSTEM_PROMPT,
+                templates.createCoverageExtractionUserPrompt(transcript, searchQueries),
+                schemas.CoverageReportSchema,
+            );
+            return parsed.items.length > 0 ? parsed.items : undefined;
+        } catch (error) {
+            this.logger.error(error, "Coverage report extraction failed (non-fatal)");
+            return undefined;
+        }
     }
 
     private cleanHistoryForReport(messages: OpenAI.Chat.ChatCompletionMessageParam[]): any[] {
@@ -328,7 +406,11 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             messages,
             // VFS tools are advertised in the research prompt — register them here
             // so the agent can read full files instead of only truncated search chunks.
-            tools: [SEARCH_TOOL, LIST_FILES_TOOL, READ_FILE_TOOL, HEAD_FILE_TOOL, TAIL_FILE_TOOL, GREP_FILE_TOOL],
+            tools: [
+                SEARCH_TOOL,
+                LIST_FILES_TOOL, READ_FILE_TOOL, HEAD_FILE_TOOL, TAIL_FILE_TOOL,
+                GREP_FILE_TOOL, GREP_CORPUS_TOOL, OUTLINE_FILE_TOOL, READ_SECTION_TOOL, GET_ENDPOINT_TOOL,
+            ],
             toolHandlers: {
                 search_knowledge_base: async (_id, rawArgs) => {
                     const args = rawArgs as SearchToolArgs;
@@ -385,6 +467,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         userGoal: string,
         onProgress: ProgressCallback,
         smokeTestCallback?: SmokeTestCallback,
+        frictionEvents?: types.report.FrictionEvent[],
     ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
         // Smartly prune documentation before verification to stay within token budget
         const query = userGoal.substring(0, 2000);
@@ -459,6 +542,15 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
 
                     const status = testResult.startsWith("SUCCESS") ? "Passed" : "Failed";
                     emitLog(onProgress, `Smoke Test ${status}:\n${testResult}`);
+
+                    // A failed smoke test the agent later works around is friction
+                    // the final pass/fail status would otherwise hide — record it.
+                    if (status === "Failed" && frictionEvents) {
+                        frictionEvents.push({
+                            type: "SMOKE_TEST_FAILURE",
+                            error: testResult.substring(0, 600),
+                        });
+                    }
 
                     return testResult;
                 },
@@ -677,7 +769,25 @@ Generate ONLY the search query string, no explanation.`;
         scriptContent: string,
         relatedDocs: string,
         stepDescription: string,
+        options: {
+            /**
+             * Scores a candidate's pinpointed fragment against the real docs corpus
+             * (0..1). Used to break ties between same-category candidates in favour
+             * of verifiable (non-hallucinated) quotes.
+             */
+            fragmentScorer?: (fragment: string | undefined) => number;
+        } = {},
+        httpTrafficLog?: types.report.HttpTrafficEntry[],
     ): Promise<types.report.FailureAnalysis> {
+        // Format captured HTTP traffic as a concise classifier input section.
+        const httpSection = httpTrafficLog && httpTrafficLog.length > 0
+            ? `\n\n### HTTP TRAFFIC DURING EXECUTION\n` +
+              httpTrafficLog.slice(0, 20).map((e) =>
+                  `${e.method} ${e.url} → ${e.responseStatus ?? e.error ?? "no response"}` +
+                  (e.responseBody ? `\n  Response: ${e.responseBody.slice(0, 300)}` : "")
+              ).join("\n")
+            : "";
+
         const system =
             `You are a Documentation Quality Analyst. A code example that was written based on library documentation has CRASHED. Your job is to classify WHY it failed by comparing the error to the documentation.`;
         const user =
@@ -687,8 +797,10 @@ ${errorMessage}
 ### THE CODE THAT CRASHED
 ${scriptContent}
 
-### DOCUMENTATION FRAGMENTS FOUND FOR THIS ERROR
-${relatedDocs || "No related documentation was found."}
+### DOCUMENTATION CONTEXT
+(Fragments retrieved for this error, plus — when available — the documentation the code
+generator actually used. Quote pinpointed fragments VERBATIM from this context, never from memory.)
+${relatedDocs || "No related documentation was found."}${httpSection}
 
 ### WHAT THE CODE WAS TRYING TO DO
 ${stepDescription}
@@ -705,8 +817,17 @@ Determine:
    - UNKNOWN (cannot determine)
 3. Your reasoning
 4. A concrete suggestion for how the documentation should be fixed
-5. PINPOINTED FRAGMENT: Quote the EXACT fragment from the provided documentation that is wrong or missing. Include the filename at the start (e.g. "[api.md]: the problematic line...").
-6. PROPOSED FRAGMENT: A corrected/improved version of that documentation fragment.
+5. PINPOINTED FRAGMENT: Quote the RELEVANT SECTION from the documentation — NOT just a heading or anchor line.
+   The fragment MUST include ALL of the following that are present in the docs:
+     a) The endpoint/function heading and its description (1-3 sentences)
+     b) All parameters or request body fields (name, type, required/optional, meaning)
+     c) The return value / response schema description
+     d) At least one code example if the docs provide one
+   Format: "[filename]: <multi-line verbatim quote>"
+   Minimum length: the fragment should be at least 5 meaningful lines unless the docs genuinely have less.
+   WRONG ✗: "[api.md]: ## Create a repository"
+   RIGHT ✓: "[api.md]: ## Create a repository\\nCreate a new repository for the specified user.\\n\\n**Parameters**\\n- 'owner' (string, required): ...\\n- 'name' (string, required): ..."
+6. PROPOSED FRAGMENT: A corrected/improved version of that documentation section (same multi-line format).
 
 Respond with a JSON object:
 {
@@ -715,8 +836,8 @@ Respond with a JSON object:
     "documentationGap": "MISSING | AMBIGUOUS | INCORRECT | CONFIG | ENVIRONMENT | UNKNOWN",
     "reasoning": "why you classified it this way",
     "suggestedDocsFix": "concrete suggestion for documentation improvement",
-    "pinpointedFragment": "exact quote from the docs",
-    "proposedFragment": "how the documentation should look like"
+    "pinpointedFragment": "exact multi-line quote from the docs (minimum 5 lines)",
+    "proposedFragment": "corrected multi-line version of the documentation section"
 }`;
 
         const votes = this.configService.values.classifier.votes;
@@ -737,13 +858,28 @@ Respond with a JSON object:
                 documentationGap: "UNKNOWN",
                 reasoning: "Classification failed due to LLM error",
                 suggestedDocsFix: "Manual review required",
+                confidence: 0,
+                votes: 0,
             };
         }
 
-        // Self-consistency: majority vote on the category, then return a
-        // representative full analysis that agrees with the winning category.
+        // Self-consistency: majority vote on the category; among candidates that
+        // agree with the winner, prefer the one whose pinpointed fragment best
+        // verifies against the actual documentation corpus.
         const winningGap = majorityVote(candidates.map((c) => c.documentationGap));
-        return candidates.find((c) => c.documentationGap === winningGap) ?? candidates[0];
+        const winners = candidates.filter((c) => c.documentationGap === winningGap);
+        const scorer = options.fragmentScorer;
+        const representative = scorer
+            ? [...winners].sort(
+                (a, b) => scorer(b.pinpointedFragment) - scorer(a.pinpointedFragment),
+            )[0]
+            : winners[0];
+
+        return {
+            ...(representative ?? candidates[0]),
+            confidence: Math.round((winners.length / candidates.length) * 1000) / 1000,
+            votes: candidates.length,
+        };
     }
 
     private async rankAndFilterDocs(
@@ -815,6 +951,7 @@ Respond with a JSON object:
         files: { metadata: any; buffer: Uint8Array }[],
         maxGoals: number = 5,
         onProgress?: ProgressCallback,
+        endpointInventory?: string,
     ): Promise<string[]> {
         this.logger.log(`Generating user goals using agentic loop...`);
         emitLog(onProgress, `Generating user goals using agentic loop...`);
@@ -824,11 +961,17 @@ Respond with a JSON object:
         const plan = await this.promptForExecutionPlan(vectorCollectionName, goal, onProgress);
         const planStepsStr = plan.steps.map(s => `- ${s.stepExplanation} (Action: ${s.action})`).join("\n");
 
+        // Coverage hint: when we have a known endpoint inventory, steer the research
+        // agent toward thorough coverage rather than gravitating to popular endpoints.
+        const inventoryHint = endpointInventory
+            ? `\n\n## ENDPOINT INVENTORY\nThe API exposes the following endpoints/operations. Generate goals that exercise as many of these as possible and avoid duplicating coverage from goal to goal:\n${endpointInventory}`
+            : "";
+
         // 2. Research / Exploration
         const systemPrompt = `You are a Research Agent finding user goals.
 Your goal is to gather enough context to suggest ${maxGoals} distinct user goals.
 Follow this plan:
-${planStepsStr}
+${planStepsStr}${inventoryHint}
 
 When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
 
@@ -853,7 +996,11 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
         const finalMessages = await runAgenticLoop(this.openai, this.logger, onProgress, {
             modelName: this.configService.values.openAI.modelName,
             messages,
-            tools: [SEARCH_TOOL, LIST_FILES_TOOL, READ_FILE_TOOL, HEAD_FILE_TOOL, TAIL_FILE_TOOL, GREP_FILE_TOOL],
+            tools: [
+                SEARCH_TOOL,
+                LIST_FILES_TOOL, READ_FILE_TOOL, HEAD_FILE_TOOL, TAIL_FILE_TOOL,
+                GREP_FILE_TOOL, GREP_CORPUS_TOOL, OUTLINE_FILE_TOOL, READ_SECTION_TOOL, GET_ENDPOINT_TOOL,
+            ],
             toolHandlers,
             readySignal: "READY_FOR_GENERATION",
             maxIterations: this.configService.values.limits.maxResearchIterations,
@@ -889,13 +1036,20 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
         }
     }
 
-    public async promptForMasterSummary(reportsData: any, _onProgress?: ProgressCallback): Promise<{ structured: types.planner.StructuredMasterSummary; markdown: string }> {
+    public async promptForMasterSummary(
+        reportsData: any,
+        gapClusters?: unknown[],
+        _onProgress?: ProgressCallback,
+    ): Promise<{ structured: types.planner.StructuredMasterSummary; markdown: string }> {
         this.logger.log(`Generating master summary report...`);
 
         try {
             const structured = await this.structured(
                 templates.PLANNER_SUMMARY_SYSTEM_PROMPT,
-                templates.createPlannerSummaryUserPrompt(JSON.stringify(reportsData, null, 2)),
+                templates.createPlannerSummaryUserPrompt(
+                    JSON.stringify(reportsData, null, 2),
+                    gapClusters ? JSON.stringify(gapClusters, null, 2) : undefined,
+                ),
                 schemas.MasterSummarySchema,
             ) as unknown as types.planner.StructuredMasterSummary;
 
@@ -921,6 +1075,9 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
     }
 
     private createVfsToolHandlers(files: { metadata: any; buffer: Uint8Array }[], onProgress?: ProgressCallback) {
+        // Pre-build a parsed OpenAPI index for get_endpoint lookups.
+        const openApiIndex = this.buildOpenApiIndex(files);
+
         return {
             list_files: async () => {
                 emitLog(onProgress, "Agent listing VFS files.");
@@ -940,8 +1097,9 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                     return content.slice(0, cap) +
                         `\n\n…[truncated: showing first ${cap} of ${content.length} chars, ` +
                         `${totalLines} lines total]…\n` +
-                        `This file is large. Use grep_file(pattern) to find specific ` +
-                        `endpoints/parameters, or head_file/tail_file(lines) for ranges, ` +
+                        `This file is large. Use outline_file() to see its structure, ` +
+                        `read_section(heading) to read a specific section, ` +
+                        `grep_corpus(pattern) for cross-file search, ` +
                         `or search_knowledge_base(query) for semantic lookup.`;
                 }
                 return content;
@@ -982,8 +1140,172 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                     }
                 }
                 return result || `No matches found for ${args.pattern} in ${args.filename}`;
-            }
+            },
+
+            // ── New VFS tools ─────────────────────────────────────────────────
+
+            grep_corpus: async (_id: string, args: any) => {
+                const pattern = args.pattern as string;
+                const contextLines = Math.min(Number(args.context_lines) || 2, 10);
+                emitLog(onProgress, `Agent grepping corpus for: ${pattern}`);
+                let regex: RegExp;
+                try {
+                    regex = new RegExp(pattern, "i");
+                } catch {
+                    return `Invalid regex pattern: ${pattern}`;
+                }
+                const results: string[] = [];
+                for (const f of files) {
+                    const content = new TextDecoder().decode(f.buffer);
+                    const lines = content.split("\n");
+                    for (let i = 0; i < lines.length; i++) {
+                        if (regex.test(lines[i])) {
+                            const from = Math.max(0, i - contextLines);
+                            const to   = Math.min(lines.length - 1, i + contextLines);
+                            results.push(`[${f.metadata.filename}:${i + 1}]`);
+                            for (let j = from; j <= to; j++) {
+                                results.push(`${j === i ? ">" : " "} ${j + 1}: ${lines[j]}`);
+                            }
+                            results.push("");
+                            if (results.length > 500) { results.push("…[truncated — too many matches]"); break; }
+                        }
+                    }
+                    if (results.length > 500) break;
+                }
+                return results.join("\n") || `No matches for pattern: ${pattern}`;
+            },
+
+            outline_file: async (_id: string, args: any) => {
+                emitLog(onProgress, `Agent outlining file: ${args.filename}`);
+                const file = files.find(f => f.metadata.filename === args.filename);
+                if (!file) return `File not found: ${args.filename}`;
+                const content = new TextDecoder().decode(file.buffer);
+
+                // OpenAPI JSON: list paths + methods
+                if (args.filename.endsWith(".json") || args.filename.endsWith(".yaml") || args.filename.endsWith(".yml")) {
+                    if (openApiIndex.has(args.filename)) {
+                        const endpoints = openApiIndex.get(args.filename)!;
+                        return `OpenAPI spec — ${endpoints.length} endpoints:\n` +
+                            endpoints.map(e => `  ${e.method.toUpperCase()} ${e.path}${e.summary ? ` — ${e.summary}` : ""}`).join("\n");
+                    }
+                }
+
+                // Markdown: headings with line numbers
+                const lines = content.split("\n");
+                const headings: string[] = [];
+                for (let i = 0; i < lines.length; i++) {
+                    const m = lines[i].match(/^(#{1,6})\s+(.*)/);
+                    if (m) headings.push(`L${i + 1} ${"  ".repeat(m[1].length - 1)}${m[1]} ${m[2]}`);
+                }
+                return headings.length > 0
+                    ? headings.join("\n")
+                    : `No headings found in ${args.filename}. File has ${lines.length} lines.`;
+            },
+
+            read_section: async (_id: string, args: any) => {
+                const heading = String(args.heading || "").toLowerCase();
+                emitLog(onProgress, `Agent reading section "${args.heading}" from ${args.filename}`);
+                const file = files.find(f => f.metadata.filename === args.filename);
+                if (!file) return `File not found: ${args.filename}`;
+                const content = new TextDecoder().decode(file.buffer);
+                const lines = content.split("\n");
+
+                // Find the first heading that matches (case-insensitive partial match).
+                let startIdx = -1;
+                let headingLevel = 0;
+                for (let i = 0; i < lines.length; i++) {
+                    const m = lines[i].match(/^(#{1,6})\s+(.*)/);
+                    if (m && m[2].toLowerCase().includes(heading)) {
+                        startIdx = i;
+                        headingLevel = m[1].length;
+                        break;
+                    }
+                }
+                if (startIdx === -1) return `No heading matching "${args.heading}" found in ${args.filename}.`;
+
+                // Collect lines until the next heading of same or higher level.
+                const section: string[] = [lines[startIdx]];
+                for (let i = startIdx + 1; i < lines.length; i++) {
+                    const m = lines[i].match(/^(#{1,6})\s+/);
+                    if (m && m[1].length <= headingLevel) break;
+                    section.push(lines[i]);
+                }
+                const result = section.join("\n");
+                const cap = this.configService.values.limits.maxFileReadChars;
+                return result.length > cap
+                    ? result.slice(0, cap) + `\n…[section truncated at ${cap} chars]`
+                    : result;
+            },
+
+            get_endpoint: async (_id: string, args: any) => {
+                const targetPath   = String(args.path || "").toLowerCase();
+                const targetMethod = args.method ? String(args.method).toUpperCase() : null;
+                emitLog(onProgress, `Agent looking up endpoint: ${targetMethod || "*"} ${args.path}`);
+
+                const hits: string[] = [];
+                for (const [filename, endpoints] of openApiIndex) {
+                    for (const ep of endpoints) {
+                        if (!ep.path.toLowerCase().includes(targetPath)) continue;
+                        if (targetMethod && ep.method.toUpperCase() !== targetMethod) continue;
+                        hits.push(
+                            `**${ep.method.toUpperCase()} ${ep.path}** (${filename})` +
+                            (ep.summary ? `\n${ep.summary}` : "") +
+                            "\n```json\n" + JSON.stringify(ep.definition, null, 2).slice(0, 2000) + "\n```",
+                        );
+                    }
+                }
+                return hits.length > 0
+                    ? hits.join("\n\n---\n\n")
+                    : `No endpoint matching "${args.method ?? "*"} ${args.path}" found in OpenAPI specs.`;
+            },
         };
+    }
+
+    /** Build a path→endpoints index from all OpenAPI JSON files in the project. */
+    private buildOpenApiIndex(
+        files: { metadata: any; buffer: Uint8Array }[],
+    ): Map<string, Array<{ method: string; path: string; summary?: string; definition: unknown }>> {
+        const index = new Map<string, Array<{ method: string; path: string; summary?: string; definition: unknown }>>();
+        for (const file of files) {
+            const fn: string = file.metadata.filename;
+            if (!fn.endsWith(".json") && !fn.endsWith(".yaml") && !fn.endsWith(".yml")) continue;
+            try {
+                const content = new TextDecoder().decode(file.buffer);
+                if (!content.includes('"paths"') && !content.includes("paths:")) continue;
+                const obj = JSON.parse(content) as Record<string, unknown>;
+                if (typeof obj !== "object" || !obj.paths) continue;
+                const endpoints: Array<{ method: string; path: string; summary?: string; definition: unknown }> = [];
+                for (const [apiPath, methods] of Object.entries(obj.paths as Record<string, Record<string, unknown>>)) {
+                    for (const [method, def] of Object.entries(methods)) {
+                        if (["parameters", "summary", "description"].includes(method)) continue;
+                        const d = def as Record<string, unknown>;
+                        endpoints.push({ method, path: apiPath, summary: d?.summary as string | undefined, definition: def });
+                    }
+                }
+                if (endpoints.length > 0) index.set(fn, endpoints);
+            } catch { /* not valid JSON/OpenAPI */ }
+        }
+        return index;
+    }
+
+    /**
+     * #21 — Extract structured gap-analysis prose from a NEEDS_RESEARCH bounce.
+     *
+     * When the verification agent writes text like "The documentation doesn't describe
+     * the auth header format …\nNEEDS_RESEARCH: auth header", the content before the
+     * NEEDS_RESEARCH: line is its self-reported diagnostic. Extracting it gives the
+     * friction event a human-readable note that carries the agent's gap insight even
+     * when the run ultimately succeeds.
+     */
+    private extractGapAnalysisFromBounce(content: string): string | undefined {
+        const idx = content.indexOf("NEEDS_RESEARCH:");
+        if (idx <= 0) return undefined;
+        const before = content.slice(0, idx).trim();
+        if (before.length < 20) return undefined;
+        // Take the last 3 paragraphs of the pre-bounce text — that's where the
+        // diagnostic is most likely to sit.
+        const paragraphs = before.split(/\n{2,}/).filter((p) => p.trim().length > 0);
+        return paragraphs.slice(-3).join("\n\n").slice(0, 800);
     }
 
     private async createTraceTracker(phase: string, goal?: string, testSuiteId?: string) {

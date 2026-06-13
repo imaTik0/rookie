@@ -142,6 +142,52 @@ export function cohenKappa(
     return pe === 1 ? 1 : (po - pe) / (1 - pe);
 }
 
+/** Arithmetic mean; 0 for an empty list. */
+export function mean(xs: number[]): number {
+    if (xs.length === 0) return 0;
+    return xs.reduce((s, x) => s + x, 0) / xs.length;
+}
+
+export interface LocalizationRecord {
+    /** File the injected defect lives in (ground truth). */
+    expectedFile: string;
+    /** File the verified fragment points at (undefined when unverified). */
+    predictedFile?: string;
+    /** Whether the system verified the fragment against the corpus at all. */
+    verified: boolean;
+}
+
+export interface LocalizationStats {
+    /** Share of detected defects whose pinpointed fragment verified against the corpus. */
+    verifiedRate: number;
+    /** Share of detected defects localized to the correct file (of all detected). */
+    fileAccuracy: number;
+    /** Share of VERIFIED fragments that point at the correct file. */
+    fileAccuracyOfVerified: number;
+    support: number;
+}
+
+/**
+ * Fragment-localization quality over the defects the system detected:
+ * did the pinpointed fragment verify, and does it point at the right file?
+ */
+export function localizationMetrics(records: LocalizationRecord[]): LocalizationStats {
+    const support = records.length;
+    if (support === 0) {
+        return { verifiedRate: 0, fileAccuracy: 0, fileAccuracyOfVerified: 0, support: 0 };
+    }
+    const verified = records.filter((r) => r.verified);
+    const correct = records.filter(
+        (r) => r.verified && r.predictedFile !== undefined && r.predictedFile === r.expectedFile,
+    );
+    return {
+        verifiedRate: verified.length / support,
+        fileAccuracy: correct.length / support,
+        fileAccuracyOfVerified: verified.length === 0 ? 0 : correct.length / verified.length,
+        support,
+    };
+}
+
 /** Plurality/majority vote over a list of labels. Ties resolved by first-seen order. */
 export function majorityVote(labels: GapLabel[]): GapLabel {
     if (labels.length === 0) return "UNKNOWN";

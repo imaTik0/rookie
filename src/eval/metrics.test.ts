@@ -9,8 +9,10 @@ import {
     confusionMatrix,
     detectionMetrics,
     GapLabel,
+    localizationMetrics,
     macroF1,
     majorityVote,
+    mean,
     perLabelMetrics,
 } from "./metrics.ts";
 
@@ -65,4 +67,33 @@ Deno.test("macroF1 ignores unsupported labels", () => {
 Deno.test("majorityVote picks the plurality label", () => {
     assertEquals(majorityVote(["MISSING", "MISSING", "CONFIG"]), "MISSING");
     assertEquals(majorityVote([]), "UNKNOWN");
+});
+
+Deno.test("mean handles empty and non-empty lists", () => {
+    assertEquals(mean([]), 0);
+    assertAlmostEquals(mean([0.5, 1, 0]), 0.5, 1e-9);
+});
+
+Deno.test("localizationMetrics scores verification and file accuracy", () => {
+    const stats = localizationMetrics([
+        // verified & correct file
+        { expectedFile: "a.md", predictedFile: "a.md", verified: true },
+        // verified but wrong file
+        { expectedFile: "a.md", predictedFile: "b.md", verified: true },
+        // unverified
+        { expectedFile: "c.md", predictedFile: undefined, verified: false },
+        // unverified with a stale predicted file must not count as correct
+        { expectedFile: "d.md", predictedFile: "d.md", verified: false },
+    ]);
+    assertAlmostEquals(stats.verifiedRate, 0.5, 1e-9);
+    assertAlmostEquals(stats.fileAccuracy, 0.25, 1e-9);
+    assertAlmostEquals(stats.fileAccuracyOfVerified, 0.5, 1e-9);
+    assertEquals(stats.support, 4);
+});
+
+Deno.test("localizationMetrics handles empty input", () => {
+    const stats = localizationMetrics([]);
+    assertEquals(stats.support, 0);
+    assertEquals(stats.verifiedRate, 0);
+    assertEquals(stats.fileAccuracy, 0);
 });

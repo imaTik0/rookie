@@ -643,11 +643,11 @@ async function runMasterPlanner(projectId: string, plannerCfg: PlannerConfig, va
 
       case "GOAL_COMPLETE": {
         agent.clearLive();
-        const ok   = event.status === "SUCCESS";
-        const icon = ok ? green("✓") : red("✗");
-        const stat = ok ? green(String(event.status)) : red(String(event.status));
+        const status = String(event.status);
+        const icon = status === "SUCCESS" ? green("✓") : status === "PARTIAL_FAILURE" ? yell("◐") : red("✗");
+        const stat = status === "SUCCESS" ? green(status) : status === "PARTIAL_FAILURE" ? yell(status) : red(status);
         console.log(`${gray("│")}       ${icon} ${stat}  ${event.reportId ? gray(String(event.reportId)) : ""}`);
-        breakdown.push({ goal: String(event.goal), status: String(event.status), reportId: event.reportId as string | null ?? null });
+        breakdown.push({ goal: String(event.goal), status, reportId: event.reportId as string | null ?? null });
         break;
       }
 
@@ -674,7 +674,13 @@ async function runMasterPlanner(projectId: string, plannerCfg: PlannerConfig, va
 
 // ─────────────────────────────────────────────────────────────────
 //  DRIFT ANALYSIS
+//  Status-aware: SUCCESS (2) > PARTIAL_FAILURE (1) > FAILED (0).
+//  A drop in rank is a regression (e.g. SUCCESS → PARTIAL_FAILURE),
+//  a rise is an improvement — partial failures are signal, not noise.
 // ─────────────────────────────────────────────────────────────────
+const STATUS_RANK: Record<string, number> = { SUCCESS: 2, PARTIAL_FAILURE: 1, FAILED: 0 };
+const rankOf = (s: string) => STATUS_RANK[s] ?? 0;
+
 function analyzeDrift(baselineBreakdown: GoalResult[], experimentBreakdown: GoalResult[]) {
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
 
@@ -687,9 +693,9 @@ function analyzeDrift(baselineBreakdown: GoalResult[], experimentBreakdown: Goal
       ?? experimentBreakdown[baselineBreakdown.indexOf(b)];
     if (!match) continue;
 
-    if (b.status === "SUCCESS" && match.status !== "SUCCESS") {
+    if (rankOf(match.status) < rankOf(b.status)) {
       regressions.push({ goal: b.goal, baseline: b.status, experiment: match.status, reportId: match.reportId });
-    } else if (b.status !== "SUCCESS" && match.status === "SUCCESS") {
+    } else if (rankOf(match.status) > rankOf(b.status)) {
       improvements.push({ goal: b.goal, baseline: b.status, experiment: match.status });
     } else {
       stable.push({ goal: b.goal, status: b.status });
@@ -700,19 +706,61 @@ function analyzeDrift(baselineBreakdown: GoalResult[], experimentBreakdown: Goal
 }
 
 // ─────────────────────────────────────────────────────────────────
+//  DOCS PATCH  (fetch the aggregated documentation fix proposal)
+// ─────────────────────────────────────────────────────────────────
+async function fetchDocsPatch(
+  masterPlanId: string | null,
+  outBase: string,
+): Promise<{ patchFile: string | null; markdownFile: string | null; patchedClusters: number; unpatchedClusters: number }> {
+  const empty = { patchFile: null, markdownFile: null, patchedClusters: 0, unpatchedClusters: 0 };
+  if (!masterPlanId) return empty;
+  try {
+    const [diffRes, mdRes] = await Promise.all([
+      fetch(`${ROOKIE_URL}/reports/${masterPlanId}/docs-patch?format=diff`),
+      fetch(`${ROOKIE_URL}/reports/${masterPlanId}/docs-patch?format=markdown`),
+    ]);
+    if (!diffRes.ok || !mdRes.ok) return empty;
+
+    const patched = Number(diffRes.headers.get("X-Patched-Clusters") ?? "0");
+    const unpatched = Number(diffRes.headers.get("X-Unpatched-Clusters") ?? "0");
+    const diff = await diffRes.text();
+    const md = await mdRes.text();
+
+    let patchFile: string | null = null;
+    let markdownFile: string | null = null;
+    if (diff.trim()) {
+      patchFile = `${outBase}-docs.patch`;
+      Deno.writeTextFileSync(patchFile, diff);
+    }
+    if (md.trim()) {
+      markdownFile = `${outBase}-docs-proposal.md`;
+      Deno.writeTextFileSync(markdownFile, md);
+    }
+    return { patchFile, markdownFile, patchedClusters: patched, unpatchedClusters: unpatched };
+  } catch {
+    return empty;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 //  FINAL REPORT PRINT
 // ─────────────────────────────────────────────────────────────────
 function printFinalSummary(report: Record<string, unknown>): void {
-  const { meta, baseline, experiment, drift } = report as {
+  const { meta, baseline, experiment, drift, docsPatch } = report as {
     meta:       { project: string; oldImage: string; newImage: string; projectId: string; outputFile: string };
     baseline:   { breakdown: GoalResult[]; structuredSummary: Record<string, unknown> | null };
     experiment: { breakdown: GoalResult[]; structuredSummary: Record<string, unknown> | null };
     drift:      { regressions: Array<{ goal: string; experiment: string }>; improvements: Array<{ goal: string }> };
+    docsPatch?: { patchFile: string | null; markdownFile: string | null; patchedClusters: number; unpatchedClusters: number };
   };
 
   const W    = 66;
-  const passB = baseline.breakdown.filter(r => r.status === "SUCCESS").length;
-  const passE = experiment.breakdown.filter(r => r.status === "SUCCESS").length;
+  const passOf = (b: GoalResult[]) => b.filter(r => r.status === "SUCCESS").length;
+  const partialOf = (b: GoalResult[]) => b.filter(r => r.status === "PARTIAL_FAILURE").length;
+  const passB = passOf(baseline.breakdown);
+  const passE = passOf(experiment.breakdown);
+  const partB = partialOf(baseline.breakdown);
+  const partE = partialOf(experiment.breakdown);
   const n     = Math.max(baseline.breakdown.length, experiment.breakdown.length);
 
   banner(`EXPERIMENT RESULTS — ${meta.project}`, W);
@@ -721,8 +769,8 @@ function printFinalSummary(report: Record<string, unknown>): void {
   console.log(`  ${bold("Project: ")} ${meta.projectId}`);
   console.log(`  ${bold("Saved:   ")} ${meta.outputFile}`);
   console.log(`\n${bold("─".repeat(W))}`);
-  console.log(`  Baseline   (old docs + old API):  ${bold(green(`${passB}/${n}`))} passed`);
-  console.log(`  Experiment (old docs + new API):  ${bold(passE >= passB ? green(`${passE}/${n}`) : red(`${passE}/${n}`))} passed`);
+  console.log(`  Baseline   (old docs + old API):  ${bold(green(`${passB}/${n}`))} passed${partB ? yell(`  (+${partB} partial)`) : ""}`);
+  console.log(`  Experiment (old docs + new API):  ${bold(passE >= passB ? green(`${passE}/${n}`) : red(`${passE}/${n}`))} passed${partE ? yell(`  (+${partE} partial)`) : ""}`);
   console.log(bold("─".repeat(W)));
 
   if (drift.regressions.length === 0) {
@@ -749,13 +797,38 @@ function printFinalSummary(report: Record<string, unknown>): void {
     }
   }
 
-  const gaps = (experiment.structuredSummary?.documentationGapDetails ?? []) as Array<{ fragment: string; proposedFix?: string }>;
+  const gaps = (experiment.structuredSummary?.documentationGapDetails ?? []) as Array<{
+    fragment: string;
+    proposedFix?: string;
+    file?: string;
+    lineStart?: number;
+    verified?: boolean;
+    occurrences?: number;
+    meanConfidence?: number;
+    documentationGap?: string;
+  }>;
   if (gaps.length > 0) {
-    console.log(`\n  ${bold("Top documentation gaps:")}`);
+    console.log(`\n  ${bold("Top documentation gaps (clustered):")}`);
     gaps.slice(0, 4).forEach((g, i) => {
-      console.log(`    ${gray(`${i + 1}.`)} ${g.fragment}`);
-      if (g.proposedFix) console.log(`       ${dim("Fix: " + g.proposedFix)}`);
+      const loc = g.verified && g.file
+        ? green(`✓ ${g.file}${g.lineStart ? `:${g.lineStart}` : ""}`)
+        : yell("unverified");
+      const meta = [
+        g.documentationGap,
+        g.occurrences ? `×${g.occurrences}` : null,
+        g.meanConfidence !== undefined ? `conf ${g.meanConfidence}` : null,
+      ].filter(Boolean).join(" ");
+      console.log(`    ${gray(`${i + 1}.`)} [${loc}] ${dim(meta)}`);
+      console.log(`       ${oneLine(g.fragment, 90)}`);
+      if (g.proposedFix) console.log(`       ${dim("Fix: " + oneLine(g.proposedFix, 84))}`);
     });
+  }
+
+  if (docsPatch && (docsPatch.patchFile || docsPatch.markdownFile)) {
+    console.log(`\n  ${bold("Documentation fix proposal:")}`);
+    console.log(`    ${docsPatch.patchedClusters} patchable cluster(s), ${docsPatch.unpatchedClusters} suggestion(s) without verified location`);
+    if (docsPatch.patchFile)    console.log(`    ${green("✓")} unified diff:   ${cyan(docsPatch.patchFile)}  ${dim("(git apply-able)")}`);
+    if (docsPatch.markdownFile) console.log(`    ${green("✓")} PR-style note:  ${cyan(docsPatch.markdownFile)}`);
   }
 
   console.log(`\n${bold("═".repeat(W))}\n`);
@@ -850,10 +923,19 @@ async function main(): Promise<void> {
     await runMasterPlanner(project.id, cfg.planner, vars);
   await dockerStop(cfg.container.name);
 
-  // ── Phase 4: diff + save ────────────────────────────────────────
+  // ── Phase 4: diff + docs patch + save ───────────────────────────
   const drift = analyzeDrift(bBreakdown, eBreakdown);
 
-  const outFile = `${Deno.cwd()}/experiment-${configName}-${Date.now()}.json`;
+  const stamp   = Date.now();
+  const outBase = `${Deno.cwd()}/experiment-${configName}-${stamp}`;
+  const outFile = `${outBase}.json`;
+
+  // Pull the aggregated, verified documentation fix proposal for the
+  // experiment run (old docs × new API — where the drift shows up).
+  const docsPatch = await fetchDocsPatch(
+    (ePlan?._id as string | undefined) ?? null,
+    outBase,
+  );
   const report = {
     meta: {
       project:    cfg.name,
@@ -880,6 +962,7 @@ async function main(): Promise<void> {
       markdownSummary:   ((ePlan as Record<string,unknown> | null)?.detailedResults as Record<string,unknown> | undefined)?.finalOutput ?? null,
     },
     drift,
+    docsPatch,
   };
 
   Deno.writeTextFileSync(outFile, JSON.stringify(report, null, 2));

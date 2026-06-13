@@ -43,6 +43,12 @@ interface DocumentationGap {
   proposedFix?: string;
   affectedGoals?: string[];
   file?: string;
+  documentationGap?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  verified?: boolean;
+  occurrences?: number;
+  meanConfidence?: number;
 }
 
 interface TopFailingFunction {
@@ -87,6 +93,12 @@ interface Report {
   baseline:   PhaseData;
   experiment: PhaseData;
   drift:      DriftData;
+  docsPatch?: {
+    patchFile: string | null;
+    markdownFile: string | null;
+    patchedClusters: number;
+    unpatchedClusters: number;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -156,12 +168,14 @@ function colorStatus(status: string | undefined): string {
   return yellow(status);
 }
 
+const STATUS_RANK: Record<string, number> = { SUCCESS: 2, PARTIAL_FAILURE: 1, FAILED: 0 };
+const rankOf = (s: string) => STATUS_RANK[s] ?? 0;
+
 function driftArrow(bStatus: string, eStatus: string): string {
-  const ok = (s: string) => s === "SUCCESS";
-  if ( ok(bStatus) && !ok(eStatus)) return red("↓ REGRESSED");
-  if (!ok(bStatus) &&  ok(eStatus)) return green("↑ IMPROVED");
-  if ( ok(bStatus) &&  ok(eStatus)) return green("= STABLE");
-  return gray("= STILL FAILING");
+  if (rankOf(eStatus) < rankOf(bStatus)) return red("↓ REGRESSED");
+  if (rankOf(eStatus) > rankOf(bStatus)) return green("↑ IMPROVED");
+  if (bStatus === "SUCCESS")             return green("= STABLE");
+  return gray("= UNCHANGED");
 }
 
 function buildBar(pct: number, width: number): string {
@@ -283,16 +297,41 @@ function printDocGaps(r: Report): void {
     return;
   }
 
-  section(`Documentation Gaps  (${gaps.length} found)`);
+  section(`Documentation Gaps  (${gaps.length} clustered)`);
   gaps.forEach((gap, i) => {
+    const badges = [
+      gap.documentationGap ? yellow(gap.documentationGap) : null,
+      gap.occurrences ? gray(`×${gap.occurrences}`) : null,
+      gap.meanConfidence !== undefined ? gray(`conf ${gap.meanConfidence}`) : null,
+      gap.verified === true
+        ? green("✓ verified")
+        : gap.verified === false
+        ? red("✗ unverified")
+        : null,
+    ].filter(Boolean).join("  ");
     console.log(`\n  ${cyan(bold(`${i + 1}.`))} ${bold(gap.fragment ?? "(no fragment)")}`);
-    if (gap.file)        console.log(`     ${gray("File:")} ${dim(gap.file)}`);
+    if (badges) console.log(`     ${badges}`);
+    if (gap.file) {
+      const loc = gap.lineStart
+        ? `${gap.file}:${gap.lineStart}${gap.lineEnd && gap.lineEnd !== gap.lineStart ? `–${gap.lineEnd}` : ""}`
+        : gap.file;
+      console.log(`     ${gray("Location:")} ${dim(loc)}`);
+    }
     if (gap.proposedFix) console.log(`     ${yellow("Proposed fix:")} ${gap.proposedFix}`);
     if (gap.affectedGoals?.length) {
       console.log(`     ${gray("Affected goals:")}`);
       gap.affectedGoals.forEach(g => console.log(`       ${gray("·")} ${dim(g)}`));
     }
   });
+}
+
+function printDocsPatch(r: Report): void {
+  const p = r.docsPatch;
+  if (!p || (!p.patchFile && !p.markdownFile)) return;
+  section("Documentation Fix Proposal");
+  console.log(`  ${p.patchedClusters} patchable cluster(s), ${p.unpatchedClusters} suggestion(s) without verified location`);
+  if (p.patchFile)    console.log(`  ${green("✓")} unified diff:  ${cyan(p.patchFile)}  ${dim("(git apply-able)")}`);
+  if (p.markdownFile) console.log(`  ${green("✓")} PR-style note: ${cyan(p.markdownFile)}`);
 }
 
 function printTopFailingFunctions(r: Report): void {
@@ -390,6 +429,7 @@ function main(): void {
     printTopFailingFunctions(report);
     printExecutiveSummaries(report);
   }
+  printDocsPatch(report);
   printRecommendations(report);
 
   console.log(`\n${vline()}\n`);

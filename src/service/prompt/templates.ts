@@ -201,12 +201,45 @@ You MUST produce working code examples that directly fulfill the user's stated g
    - Fix the code and re-test.
    - Do NOT give up easily. Iterate until it works or you've exhausted all approaches from the documentation.
 
+### HTTP CALLS — PREFER fetch OVER axios
+Node.js 20 has \`fetch\` built-in. **Always prefer \`fetch\` over \`axios\` unless the documentation explicitly uses axios.**
+
+Why: \`fetch\` never throws on HTTP errors (4xx/5xx return a Response object with \`.ok === false\`),
+so you always get the response body for diagnosis. Axios throws complex error objects that can hide
+the actual server error message.
+
+**Correct fetch pattern:**
+\`\`\`javascript
+const res = await fetch(url, { method: 'POST', headers: { ... }, body: JSON.stringify(payload) });
+if (!res.ok) {
+    const body = await res.text();
+    throw new Error(\`HTTP \${res.status} \${res.statusText}: \${body}\`);
+}
+const data = await res.json();
+\`\`\`
+
+**If you MUST use axios** (the library under test IS axios, or docs show axios-only features):
+Do NOT throw the raw axios error — it contains circular references. Extract the useful parts first:
+\`\`\`javascript
+import axios from 'axios';
+try {
+    const { data } = await axios.get(url, { headers });
+    return { result: data, ctx };
+} catch (e) {
+    // Extract meaningful info before re-throwing — the raw axios error is not serialisable
+    const status = e.response?.status;
+    const body   = e.response?.data;
+    throw new Error(\`HTTP \${status}: \${JSON.stringify(body)}\`);
+}
+\`\`\`
+This pattern is the ONLY acceptable use of try/catch — it is not swallowing the error, it is re-throwing a clean serialisable version.
+
 ### RULES
 - You MUST NOT mock or simulate the library. Use real imports and real calls.
 - You MUST use ES module syntax (import/export) in JavaScript. The environment has "type": "module" set. DO NOT use any language other than JavaScript.
 - Every example must be a standalone JavaScript program that can run independently.
 - **CRITICAL: NO HALLUCINATIONS.** Do not invent functions. If documentation is missing something, search for it or let it fail.
-- **CRITICAL: NO TRY/CATCH.** Your programs MUST be happy paths. Do NOT wrap code in try/catch blocks. The crash IS the signal that something is wrong.
+- **NO try/catch for hiding errors.** Do not swallow exceptions. The crash IS the signal that something is wrong. The ONLY exception is the axios pattern above where you re-throw a clean error.
 
 ### COMPLETION
 Once you have 3-5 working, tested examples that collectively achieve the user's full goal, reply with EXACTLY: "VERIFICATION_COMPLETE"
@@ -263,7 +296,21 @@ Each program MUST be a standalone JavaScript file that follows the execution con
 5. **Return Signature:** Return an object: \`{ result: <api_response>, ctx: <updated_context> }\`.
 6. **Structure:** Export a default async function that accepts \`ctx\`.
 7. **LANGUAGE:** Write EXCLUSIVELY in JavaScript (Node.js). Code generated in ANY other language will be REJECTED.
-8. **NO TRY/CATCH:** Your code MUST be a happy path. Do NOT wrap anything in try/catch. If a function does not work as documented, the program MUST crash with an unhandled exception. The crash is the signal that the documentation was wrong or incomplete. Swallowing errors defeats the entire purpose of this tool.
+8. **HTTP CALLS — PREFER fetch OVER axios:**
+   Node.js 20 has `fetch` built-in. Always prefer `fetch` unless the library under test is axios itself or the docs show axios-only usage.
+   `fetch` resolves on 4xx/5xx (check `response.ok`) and never throws circular-reference errors.
+   Correct pattern:
+   ```javascript
+   const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+   if (!res.ok) { const body = await res.text(); throw new Error(`HTTP ${res.status}: ${body}`); }
+   const data = await res.json();
+   ```
+   If you MUST use axios: catch only to re-throw a clean error — never swallow it:
+   ```javascript
+   try { const { data } = await axios.post(url, payload); return { result: data, ctx }; }
+   catch (e) { throw new Error(`HTTP ${e.response?.status}: ${JSON.stringify(e.response?.data)}`); }
+   ```
+9. **NO TRY/CATCH for hiding errors:** Your code MUST be a happy path. Do NOT swallow exceptions. If a function does not work as documented, the program MUST crash. The only permitted try/catch is the axios pattern above, which re-throws a clean serialisable error rather than swallowing it.
 
 \`\`\`javascript
 export default async (ctx) => {
@@ -286,6 +333,47 @@ Structure:
     "finalMarkdownSummary": "Overall summary of all examples in Markdown"
 }
 `;
+
+// ─── Coverage Extraction (post-research) ─────────────────────────────────────
+
+export const COVERAGE_EXTRACTION_SYSTEM_PROMPT = `
+### ROLE
+You are a Documentation Coverage Auditor. A research agent just decomposed a user goal into
+sub-tasks and searched a documentation knowledge base to cover each one. You receive the agent's
+research transcript (its written gap analysis and the queries it ran).
+
+### TASK
+Extract the final coverage state of every sub-task the agent identified.
+
+### RULES
+- "covered: false" ONLY when the transcript shows the agent could not find the needed
+  documentation (it flagged a gap, kept searching without success, or gave up).
+- "queriesUsed": the search queries the agent ran that relate to this sub-task (may be empty).
+- "missingInfo": for uncovered sub-tasks, one sentence describing exactly what was missing.
+- Do not invent sub-tasks that are not in the transcript.
+
+### OUTPUT
+Respond with a single JSON object:
+{
+  "items": [
+    { "subtask": "How to initialize the client", "covered": true, "queriesUsed": ["client init"] },
+    { "subtask": "How to refresh auth tokens", "covered": false, "queriesUsed": ["token refresh", "auth renew"], "missingInfo": "No documentation about token refresh exists." }
+  ]
+}
+`;
+
+export function createCoverageExtractionUserPrompt(
+    researchTranscript: string,
+    searchQueries: string[],
+): string {
+    return `### RESEARCH TRANSCRIPT (agent's own analysis)
+${researchTranscript}
+
+### SEARCH QUERIES THE AGENT RAN (in order)
+${searchQueries.length ? searchQueries.map((q, i) => `${i + 1}. ${q}`).join("\n") : "(none)"}
+
+Extract the coverage report as JSON.`;
+}
 
 // ─── Master Planner Prompts ──────────────────────────────────────────────────
 
@@ -371,19 +459,32 @@ Structure:
 - topFailingFunctions should be sorted by count descending, max 10 entries
 - recommendations should be specific to the documentation, not generic advice
 - overallPassRate = (number of SUCCESS goals) / (total goals), as a float 0-1
+
+### IMPORTANT: PRE-COMPUTED FACTS
+Alongside the raw reports you receive PRE-AGGREGATED GAP CLUSTERS that were computed
+programmatically (duplicate gaps across goals are already merged; counts, affected goals and
+verified file/line locations are facts — do not re-derive or contradict them). Base
+documentationGapDetails, failureTaxonomy and topFailingFunctions on these clusters. Focus your
+own judgement on executiveSummary, keyFindings per goal and recommendations.
 `;
 
-export function createPlannerSummaryUserPrompt(reportsData: string): string {
+export function createPlannerSummaryUserPrompt(
+    reportsData: string,
+    gapClustersJson?: string,
+): string {
     return `### EXECUTION REPORTS
 The following JSON contains detailed reports for all user goals that were executed. Each report includes:
 - goal: the user goal string
-- status: SUCCESS or FAILED
+- status: SUCCESS, PARTIAL_FAILURE or FAILED
 - reportId: the ID of the partial report
-- steps: each step with stepDescription, status, error, failureAnalysis (which contains documentationGap, failedFunction, reasoning, pinpointedFragment, proposedFragment, suggestedDocsFix)
+- steps: each step with stepDescription, status, error, failureAnalysis (which contains documentationGap, failedFunction, reasoning, pinpointedFragment, proposedFragment, suggestedDocsFix, confidence, fragmentVerification)
 
 ${reportsData}
 
-Analyze the reports above and produce the comprehensive structured JSON quality report. Be specific — quote actual function names and documentation fragments from the data.
+### PRE-AGGREGATED GAP CLUSTERS (computed facts — trust counts and locations)
+${gapClustersJson ?? "[]"}
+
+Analyze the data above and produce the comprehensive structured JSON quality report. Be specific — quote actual function names and documentation fragments from the data.
 `;
 }
 
@@ -396,11 +497,14 @@ You are an expert Execution Planner. Your job is to analyze a user's goal and fo
 ### CAPABILITIES
 The agent you are planning for has access to the following tools:
 - search_knowledge_base (Semantic search over documentation)
-- list_files (Virtual Filesystem)
-- read_file (Virtual Filesystem)
-- grep_file (Virtual Filesystem)
-- head_file (Virtual Filesystem)
-- tail_file (Virtual Filesystem)
+- list_files (Virtual Filesystem — list all project files)
+- read_file (Virtual Filesystem — read a specific file)
+- grep_file (Virtual Filesystem — regex search within a single file)
+- head_file / tail_file (Virtual Filesystem — first/last N lines of a file)
+- grep_corpus (Virtual Filesystem — regex search across ALL files at once, with context lines)
+- outline_file (Virtual Filesystem — structural skeleton: headings+lines for markdown, endpoint list for OpenAPI specs)
+- read_section (Virtual Filesystem — read a specific heading section without loading the whole file)
+- get_endpoint (Virtual Filesystem — look up a specific OpenAPI endpoint by method+path from the pre-built index)
 
 ### OUTPUT FORMAT
 You MUST output a valid JSON object containing a 'steps' array. Each step should have:

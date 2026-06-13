@@ -18,6 +18,9 @@ const SUPPORTED_TEXT_MIMES = [
     "text/html",
     "text/xml",
     "application/xml",
+    "application/yaml",
+    "text/yaml",
+    "text/x-yaml",
 ];
 
 export class FileHelpers {
@@ -46,6 +49,16 @@ export class FileHelpers {
         // content (e.g. `Array<string>`, generics, `<email>` placeholders).
         if (this._isHtmlLike(dbFile.mimetype)) {
             content = striptags(content);
+        }
+
+        // OpenAPI/Swagger JSON specs get endpoint-level chunking so each path+method
+        // is its own retrievable chunk instead of being split mid-definition.
+        if (
+            (dbFile.mimetype.startsWith("application/json") || dbFile.filename.endsWith(".json")) &&
+            this._isOpenApiJson(content)
+        ) {
+            const openApiChunks = this._chunkOpenApiJson(content, dbFile.filename, opts, dbFile._id);
+            if (openApiChunks.length > 0) return openApiChunks;
         }
 
         return this._chunkText(content, dbFile.filename, opts, dbFile._id);
@@ -206,6 +219,89 @@ export class FileHelpers {
             ...chunk,
             metadata: { ...chunk.metadata, totalChunks },
         }));
+    }
+
+    /** Detect an OpenAPI / Swagger JSON spec by the presence of `paths` + version key. */
+    private _isOpenApiJson(content: string): boolean {
+        // Quick pre-check before full parse.
+        if (!content.includes('"paths"') && !content.includes('"swagger"') && !content.includes('"openapi"')) {
+            return false;
+        }
+        try {
+            const obj = JSON.parse(content);
+            return (
+                typeof obj === "object" && obj !== null &&
+                typeof obj.paths === "object" &&
+                (typeof obj.openapi === "string" || typeof obj.swagger === "string")
+            );
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Chunk an OpenAPI JSON spec at the endpoint level.
+     * Each `paths[path][method]` entry becomes its own chunk so the vector search
+     * can retrieve individual endpoint definitions instead of a large combined blob.
+     */
+    private _chunkOpenApiJson(
+        content: string,
+        fileName: string,
+        _options: ChunkingOptions,
+        fileId?: string,
+    ): types.file.FileShard[] {
+        try {
+            const spec = JSON.parse(content) as Record<string, unknown>;
+            const paths = spec.paths as Record<string, Record<string, unknown>> | undefined;
+            if (!paths) return [];
+
+            const info = spec.info as Record<string, unknown> | undefined;
+            const apiTitle = (info?.title as string) || fileName;
+            const baseDescription = info?.description
+                ? `\n${String(info.description).slice(0, 300)}`
+                : "";
+
+            const chunks: types.file.FileShard[] = [];
+            let chunkId = 1;
+
+            for (const [apiPath, methods] of Object.entries(paths)) {
+                for (const [method, definition] of Object.entries(methods)) {
+                    if (["parameters", "summary", "description"].includes(method)) continue;
+                    const def = definition as Record<string, unknown>;
+                    const summary = (def?.summary as string) || "";
+                    const description = (def?.description as string) || "";
+                    const operationId = (def?.operationId as string) || "";
+
+                    const chunkContent = [
+                        `# ${method.toUpperCase()} ${apiPath}${summary ? ` — ${summary}` : ""}`,
+                        `**API:** ${apiTitle}${baseDescription}`,
+                        `**Operation:** ${operationId || `${method.toUpperCase()} ${apiPath}`}`,
+                        description ? `\n${description}` : "",
+                        "\n```json",
+                        JSON.stringify({ [method]: definition }, null, 2).slice(0, 3000),
+                        "```",
+                    ].filter(Boolean).join("\n");
+
+                    chunks.push({
+                        content: chunkContent,
+                        metadata: {
+                            fileId,
+                            fileName,
+                            chunkId: chunkId++,
+                            chunkSize: chunkContent.length,
+                            startPosition: 0,
+                            lineNumber: 0,
+                            section: `${method.toUpperCase()} ${apiPath}`,
+                        },
+                    });
+                }
+            }
+
+            const totalChunks = chunks.length;
+            return chunks.map((c) => ({ ...c, metadata: { ...c.metadata, totalChunks } }));
+        } catch {
+            return [];
+        }
     }
 
     /** Return the trailing lines whose combined length is ~maxChars (for overlap). */

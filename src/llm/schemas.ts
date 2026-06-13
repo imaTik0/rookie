@@ -56,6 +56,16 @@ export const FailureAnalysisSchema = z.object({
     proposedFragment: z.string().optional(),
 });
 
+/** Research-phase coverage extraction: which decomposed sub-tasks the docs covered. */
+export const CoverageReportSchema = z.object({
+    items: z.array(z.object({
+        subtask: z.string(),
+        covered: z.boolean().optional().default(true),
+        queriesUsed: z.array(z.string()).optional().default([]),
+        missingInfo: z.string().optional(),
+    })).default([]),
+});
+
 // Master summary is rich; validate the scalar core, accept nested lists loosely
 // (they are only rendered, never branched on).
 export const MasterSummarySchema = z.object({
@@ -68,6 +78,7 @@ export const MasterSummarySchema = z.object({
     recommendations: z.array(z.string()).optional().default([]),
 });
 
+export type CoverageReport = z.infer<typeof CoverageReportSchema>;
 export type RouterPlan = z.infer<typeof RouterPlanSchema>;
 export type Scenario = z.infer<typeof ScenarioSchema>;
 export type CodeGeneration = z.infer<typeof CodeGenerationSchema>;

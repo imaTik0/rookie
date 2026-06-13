@@ -8,6 +8,49 @@ export const ReportType = z.enum(["TEST_SCENARIO", "CODE_GENERATION", "MASTER_PL
 const StepStatus = z.enum(["SUCCESS", "FAILED"])
     .openapi({ example: "SUCCESS" });
 
+const FragmentVerificationSchema = z.object({
+    verified: z.boolean()
+        .describe("True when the pinpointed fragment was located in the actual docs corpus."),
+    file: z.string().optional().describe("Best-matching documentation file."),
+    lineStart: z.number().int().optional().describe("1-based first line of the match."),
+    lineEnd: z.number().int().optional().describe("1-based last line of the match."),
+    matchScore: z.number().describe("Similarity score 0..1 (1 = exact quote)."),
+    matchedText: z.string().optional().describe("The actual text found in the file."),
+}).openapi("FragmentVerification");
+
+const FailureAnalysisSchema = z.object({
+    errorMessage: z.string().describe("The key error line."),
+    failedFunction: z.string().describe("The function/method that crashed."),
+    documentationGap: z.enum([
+        "MISSING",
+        "AMBIGUOUS",
+        "INCORRECT",
+        "CONFIG",
+        "ENVIRONMENT",
+        "UNKNOWN",
+    ]).describe("Semantic classification of the documentation gap."),
+    reasoning: z.string().describe("Why the classifier chose this category."),
+    suggestedDocsFix: z.string().describe("Concrete suggestion for the documentation."),
+    pinpointedFragment: z.string().optional()
+        .describe("The doc fragment the classifier blames (LLM quote)."),
+    proposedFragment: z.string().optional()
+        .describe("Corrected/improved version of that fragment."),
+    confidence: z.number().optional()
+        .describe("Self-consistency agreement: winning votes / total votes (0..1)."),
+    votes: z.number().int().optional().describe("Number of classifier votes cast."),
+    fragmentVerification: FragmentVerificationSchema.optional(),
+}).openapi("FailureAnalysis");
+
+const HttpTrafficEntrySchema = z.object({
+    method: z.string(),
+    url: z.string(),
+    requestBody: z.string().nullish(),
+    responseStatus: z.number().nullish(),
+    responseBody: z.string().nullish(),
+    durationMs: z.number().nullish(),
+    error: z.string().nullish(),
+}).openapi("HttpTrafficEntry");
+
 const StepResultSchema = z.object({
     stepIndex: z.number().int()
         .describe("Order of the step in the sequence.")
@@ -29,7 +72,39 @@ const StepResultSchema = z.object({
         .openapi({ type: "object" }),
     relatedKnowledge: z.array(z.any()).optional()
         .describe("Relevant documents from VectorDB if step failed."),
+    failureAnalysis: FailureAnalysisSchema.optional()
+        .describe("Documentation-gap analysis for failed steps."),
+    httpTrafficLog: z.array(HttpTrafficEntrySchema).optional()
+        .describe("HTTP requests made by the user code during sandbox execution."),
 });
+
+const CoverageItemSchema = z.object({
+    subtask: z.string().describe("Sub-task the research agent decomposed the goal into."),
+    covered: z.boolean().describe("Whether the documentation covered this sub-task."),
+    queriesUsed: z.array(z.string()).optional()
+        .describe("Search queries the agent needed for this sub-task."),
+    missingInfo: z.string().optional()
+        .describe("What information was missing, when not covered."),
+}).openapi("CoverageItem");
+
+const FrictionEventSchema = z.object({
+    type: z.enum(["SMOKE_TEST_FAILURE", "RESEARCH_BOUNCE"])
+        .describe("Kind of friction captured mid-run."),
+    error: z.string().optional().describe("Error text for smoke-test failures (truncated)."),
+    query: z.string().optional().describe("Search query for research bounces."),
+    note: z.string().optional().describe("Free-text context."),
+}).openapi("FrictionEvent");
+
+const GapFeedbackSchema = z.object({
+    stepIndex: z.number().int().optional()
+        .describe("Step whose proposed fix this verdict refers to."),
+    verdict: z.enum(["ACCEPTED", "REJECTED", "EDITED"])
+        .describe("Human verdict on the proposed documentation fix."),
+    comment: z.string().optional(),
+    editedFix: z.string().optional()
+        .describe("Human-corrected fix text when verdict is EDITED."),
+    createdAt: z.string().datetime(),
+}).openapi("GapFeedback");
 
 const DetailedResultsSchema = z.object({
     executionPlan: z.any().optional()
@@ -85,8 +160,30 @@ export const ReportSchema = z.object({
     masterPlanId: z.string().optional(),
     masterPlanReports: z.array(z.string()).optional(),
     structuredSummary: z.any().optional(),
+    coverageReport: z.array(CoverageItemSchema).optional()
+        .describe("Research-phase documentation coverage breakdown."),
+    frictionEvents: z.array(FrictionEventSchema).optional()
+        .describe("Friction signals captured mid-run (hidden by binary pass/fail)."),
+    gapFeedback: z.array(GapFeedbackSchema).optional()
+        .describe("Human verdicts on proposed documentation fixes."),
     createdAt: CreatedAt,
 }).openapi("Report");
+
+export const CreateGapFeedbackSchema = z.object({
+    stepIndex: z.number().int().optional().openapi({ example: 2 }),
+    verdict: z.enum(["ACCEPTED", "REJECTED", "EDITED"]).openapi({ example: "ACCEPTED" }),
+    comment: z.string().max(2000).optional(),
+    editedFix: z.string().max(10000).optional(),
+}).openapi("CreateGapFeedback");
+
+export const GapFeedbackResponseSchema = GapFeedbackSchema;
+
+export const DocsPatchQuerySchema = z.object({
+    format: z.enum(["markdown", "diff"]).default("markdown").openapi({
+        param: { name: "format", in: "query" },
+        description: "markdown = PR-style proposal with diff blocks; diff = raw unified diff.",
+    }),
+});
 
 export const ReportIdParam = z.object({
     reportId: ReportId.describe("The unique ID of the Report for URL path."),
@@ -95,6 +192,7 @@ export const ReportIdParam = z.object({
 export const ListReportItemSchema = z.object({
     id: ReportId,
     testSuiteId: TestSuiteId,
+    projectId: ProjectId,
     status: ReportStatus,
     type: ReportType.optional(),
     createdAt: CreatedAt,

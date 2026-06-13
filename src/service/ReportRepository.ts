@@ -36,6 +36,8 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
             masterPlanGoals: data.masterPlanGoals,
             masterPlanReports: data.masterPlanReports,
             structuredSummary: data.structuredSummary,
+            coverageReport: data.coverageReport,
+            frictionEvents: data.frictionEvents,
             createdAt: new Date(),
             durationMs: data.durationMs || 0,
         };
@@ -81,6 +83,18 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
             reports: reports as unknown as Partial<db.ReportModel>[],
             total,
         };
+    }
+
+    /** Append a human verdict on a proposed documentation fix. */
+    async addGapFeedback(
+        reportId: types.report.ReportId,
+        feedback: types.report.GapFeedback,
+    ): Promise<boolean> {
+        const result = await this.getCollection().updateOne(
+            { _id: reportId },
+            { $push: { gapFeedback: feedback } as never },
+        );
+        return result.matchedCount === 1;
     }
 
     async setMasterPlanId(

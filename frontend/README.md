@@ -1,72 +1,42 @@
-# React + TypeScript + Vite
+# Rookie Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Dark dev-tool console for the Rookie backend (React + Vite + Tailwind v4 + shadcn-style components), living as a Deno workspace member of the monorepo.
 
-Currently, two official plugins are available:
+## Run
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+From the repo root (starts backend + frontend together):
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-    globalIgnores(["dist"]),
-    {
-        files: ["**/*.{ts,tsx}"],
-        extends: [
-            // Other configs...
-
-            // Remove tseslint.configs.recommended and replace with this
-            tseslint.configs.recommendedTypeChecked,
-            // Alternatively, use this for stricter rules
-            tseslint.configs.strictTypeChecked,
-            // Optionally, add this for stylistic rules
-            tseslint.configs.stylisticTypeChecked,
-            // Other configs...
-        ],
-        languageOptions: {
-            parserOptions: {
-                project: ["./tsconfig.node.json", "./tsconfig.app.json"],
-                tsconfigRootDir: import.meta.dirname,
-            },
-            // other options...
-        },
-    },
-]);
+```sh
+deno task dev      # backend watch + vite dev server
+deno task prod     # backend start + vite preview
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Or just the frontend:
 
-```js
-// eslint.config.js
-import reactX from "eslint-plugin-react-x";
-import reactDom from "eslint-plugin-react-dom";
+```sh
+cd frontend
+deno install       # first time, installs npm deps into node_modules
+deno task dev      # http://localhost:5173
+```
 
-export default defineConfig([
-    globalIgnores(["dist"]),
-    {
-        files: ["**/*.{ts,tsx}"],
-        extends: [
-            // Other configs...
-            // Enable lint rules for React
-            reactX.configs["recommended-typescript"],
-            // Enable lint rules for React DOM
-            reactDom.configs.recommended,
-        ],
-        languageOptions: {
-            parserOptions: {
-                project: ["./tsconfig.node.json", "./tsconfig.app.json"],
-                tsconfigRootDir: import.meta.dirname,
-            },
-            // other options...
-        },
-    },
-]);
+The dev server proxies `/api/*` to the backend (`http://localhost:3000` by default; override with `ROOKIE_API_URL`). For a non-proxied deployment set `VITE_API_URL` at build time.
+
+## Pages
+
+- **Reports** — paginated, filterable list (project / suite / status / type) and a rich viewer: step timeline with generated code, container logs, failure analysis (gap classification, suggested docs fixes, fragment diffs), and a dedicated master-plan view (pass-rate ring, failure taxonomy, goal breakdown, documentation gaps, recommendations).
+- **Projects** — CRUD, create-from-URL (background crawl job), file attach/detach with vector reindexing.
+- **Test Suites** — create/edit both modes, execute as background job.
+- **Jobs** — live-polling list with progress, cancel, links to resulting reports/projects.
+- **Files** — upload (single/multi), download, delete.
+- **Master Planner** — runs `/planner/run` and renders the NDJSON stream live: goal checklist, event feed, link to the final report.
+
+## Structure
+
+```
+src/
+  lib/          api client, types mirrored from backend zod schemas, formatters
+  components/
+    ui/         shadcn-style primitives (button, card, dialog, tabs, ...)
+    shared/     status badges, code blocks, pagination, collapsible, markdown
+  pages/        one file per route
 ```
