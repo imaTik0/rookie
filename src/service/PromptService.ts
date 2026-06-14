@@ -3,6 +3,7 @@ import { Logger } from "../Logger.ts";
 import { EmbeddingService } from "./EmbeddingService.ts";
 import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
 import * as types from "../types/index.ts";
+import type { DocFile } from "../types/file.ts";
 import { ConfigService } from "./ConfigService.ts";
 import { TraceRepository } from "../db/mongo/TraceRepository.ts";
 import {
@@ -91,7 +92,7 @@ export class PromptService {
 
     public async promptForApiUsageScenario(
         vectorCollectionName: string,
-        files: { metadata: any; buffer: Uint8Array }[],
+        files: DocFile[],
         startingContext: string,
         options: PromptOptions = {},
         onProgress?: ProgressCallback,
@@ -209,7 +210,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
     public async promptForCodeGenerationWithAgenticRAG(
         vectorCollectionName: string,
         userGoal: string,
-        files: { metadata: any; buffer: Uint8Array }[],
+        files: DocFile[],
         onProgress?: ProgressCallback,
         smokeTestCallback?: SmokeTestCallback,
     ): Promise<{
@@ -353,36 +354,40 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         }
     }
 
-    private cleanHistoryForReport(messages: OpenAI.Chat.ChatCompletionMessageParam[]): any[] {
+    private cleanHistoryForReport(
+        messages: OpenAI.Chat.ChatCompletionMessageParam[],
+    ): OpenAI.Chat.ChatCompletionMessageParam[] {
         return messages.map((m) => {
-            const cleanMessage = { ...m };
-            if (cleanMessage.role === "assistant" && typeof cleanMessage.content === "string") {
-                // Remove code blocks from assistant content to save space, as they are parsed separately
-                cleanMessage.content = cleanMessage.content.replace(/```[\s\S]*?```/g, "[Generated Code Block]");
-            }
-            if ((cleanMessage as any).tool_calls) {
-                // Also clean tool calls if they contain large code strings
-                (cleanMessage as any).tool_calls = (cleanMessage as any).tool_calls.map((tc: any) => {
-                    if (tc.function?.name === "smoke_test_code" && tc.function?.arguments) {
-                        try {
-                            const args = JSON.parse(tc.function.arguments);
-                            if (args.code) args.code = "[Code Snippet Truncated]";
-                            return { ...tc, function: { ...tc.function, arguments: JSON.stringify(args) } };
-                        } catch {
-                            return tc;
+            // Spread into a mutable copy; use the assistant message sub-type to access tool_calls.
+            if (m.role === "assistant") {
+                const clean: OpenAI.Chat.ChatCompletionAssistantMessageParam = { ...m };
+                if (typeof clean.content === "string") {
+                    clean.content = clean.content.replace(/```[\s\S]*?```/g, "[Generated Code Block]");
+                }
+                if (Array.isArray(clean.tool_calls)) {
+                    clean.tool_calls = clean.tool_calls.map((tc) => {
+                        if (tc.function?.name === "smoke_test_code" && tc.function?.arguments) {
+                            try {
+                                const args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+                                if (args.code) args.code = "[Code Snippet Truncated]";
+                                return { ...tc, function: { ...tc.function, arguments: JSON.stringify(args) } };
+                            } catch {
+                                return tc;
+                            }
                         }
-                    }
-                    return tc;
-                });
+                        return tc;
+                    });
+                }
+                return clean;
             }
-            return cleanMessage;
+            return m;
         });
     }
 
     private async runResearchPhase(
         vectorCollectionName: string,
         userGoal: string,
-        files: { metadata: any; buffer: Uint8Array }[],
+        files: DocFile[],
         onProgress: ProgressCallback,
     ): Promise<{ initialDocsContent: string; contextFound: string; messages: OpenAI.Chat.ChatCompletionMessageParam[] }> {
         const initialSearchResults = await this.performRAGSearch(
@@ -601,7 +606,9 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             .map((m) => {
                 const parts = [`ROLE: ${m.role}`];
                 if (m.content) parts.push(m.content as string);
-                if ((m as any).tool_calls) parts.push(JSON.stringify((m as any).tool_calls));
+                if (m.role === "assistant" && m.tool_calls) {
+                    parts.push(JSON.stringify(m.tool_calls));
+                }
                 return parts.join("\n");
             })
             .join("\n\n---\n");
@@ -609,13 +616,21 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         const genUserPrompt =
             `### TESTED EXAMPLES HISTORY:\n${testedHistory}\n\n### TASK\nExtract the working examples from the history above and format them precisely into the requested JSON structure.`;
 
+        // Respect structuredOutputMode: only set json_object response_format when
+        // the mode actually supports it. "text" and "json_schema" modes must not
+        // include this field — it would cause an API error on those servers.
+        const structuredMode = this.configService.values.llm.structuredOutputMode;
+        const responseFormat = structuredMode === "json_object"
+            ? { response_format: { type: "json_object" } }
+            : {};
+
         const genResponse: any = await this.openai.chat.completions.create({
             model: this.configService.values.openAI.modelName,
             messages: [
                 { role: "system", content: templates.GENERATION_SYSTEM_PROMPT },
                 { role: "user", content: genUserPrompt },
             ],
-            response_format: { type: "json_object" },
+            ...responseFormat,
             stream: true,
             ...this.llmParams(),
         } as any);
@@ -697,7 +712,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         limit: number = this.configService.values.limits.defaultSearchLimit,
     ): Promise<types.vector.SearchResult<types.file.FileShard>[]> {
         try {
-            this.logger.log(query);
+            this.logger.log(`RAG search — collection: "${collectionName}" query: "${query.slice(0, 120)}"`);
             const collection = await this.vectorCollectionFactory.createCollection<
                 types.file.FileShard
             >(collectionName);
@@ -733,21 +748,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         error: string,
         context: string,
     ): Promise<string> {
-        const prompt =
-            `You are a Search Specialist. Given a technical error and the context of what the code was trying to do, generate a single, highly effective search query to find relevant documentation in a knowledge base.
-
-Focus on:
-- Core library names
-- Specific method or tool names (e.g. npm, playwright, hono)
-- The technical root cause
-
-### ERROR:
-${error}
-
-### CONTEXT:
-${context}
-
-Generate ONLY the search query string, no explanation.`;
+        const prompt = templates.createRefineSearchQueryPrompt(error, context);
 
         try {
             const response = await this.openai.chat.completions.create({
@@ -841,15 +842,16 @@ Respond with a JSON object:
 }`;
 
         const votes = this.configService.values.classifier.votes;
-        const candidates: types.report.FailureAnalysis[] = [];
-        for (let i = 0; i < votes; i++) {
-            try {
-                const result = await this.structured(system, user, schemas.FailureAnalysisSchema);
-                candidates.push(result as unknown as types.report.FailureAnalysis);
-            } catch (error) {
-                this.logger.error(error, `Failed to classify failure (vote ${i + 1})`);
-            }
-        }
+        // Fire all votes concurrently — they are fully independent LLM calls.
+        const settled = await Promise.allSettled(
+            Array.from({ length: votes }, (_, i) =>
+                this.structured(system, user, schemas.FailureAnalysisSchema)
+                    .catch((err) => { this.logger.error(err, `Failed to classify failure (vote ${i + 1})`); return null; })
+            ),
+        );
+        const candidates: types.report.FailureAnalysis[] = settled
+            .map((r) => (r.status === "fulfilled" ? r.value : null))
+            .filter((v): v is types.report.FailureAnalysis => v !== null);
 
         if (candidates.length === 0) {
             return {
@@ -920,9 +922,12 @@ Respond with a JSON object:
 
             scoredChunks.sort((a, b) => b.score - a.score);
 
+            // Greedy best-first packing: iterate by descending score, include each
+            // chunk that still fits. Stop once the budget is fully consumed — later
+            // chunks are lower-relevance and skipping them would wrongly admit them.
             let result = "";
             for (const sc of scoredChunks) {
-                if ((result.length + sc.content.length) > maxChars) continue;
+                if ((result.length + sc.content.length) > maxChars) break;
                 result += (result ? "\n\n" : "") + sc.content;
             }
 
@@ -948,7 +953,7 @@ Respond with a JSON object:
 
     public async promptForUserGoals(
         vectorCollectionName: string,
-        files: { metadata: any; buffer: Uint8Array }[],
+        files: DocFile[],
         maxGoals: number = 5,
         onProgress?: ProgressCallback,
         endpointInventory?: string,
@@ -1074,7 +1079,7 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
         }
     }
 
-    private createVfsToolHandlers(files: { metadata: any; buffer: Uint8Array }[], onProgress?: ProgressCallback) {
+    private createVfsToolHandlers(files: DocFile[], onProgress?: ProgressCallback) {
         // Pre-build a parsed OpenAPI index for get_endpoint lookups.
         const openApiIndex = this.buildOpenApiIndex(files);
 
@@ -1261,10 +1266,19 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
         };
     }
 
+    // Memoize by array reference: the same `files` array is passed to every
+    // createVfsToolHandlers call within a single request, so parsing happens once.
+    private readonly openApiIndexCache = new WeakMap<
+        object[],
+        Map<string, Array<{ method: string; path: string; summary?: string; definition: unknown }>>
+    >();
+
     /** Build a path→endpoints index from all OpenAPI JSON files in the project. */
     private buildOpenApiIndex(
-        files: { metadata: any; buffer: Uint8Array }[],
+        files: DocFile[],
     ): Map<string, Array<{ method: string; path: string; summary?: string; definition: unknown }>> {
+        const cached = this.openApiIndexCache.get(files);
+        if (cached) return cached;
         const index = new Map<string, Array<{ method: string; path: string; summary?: string; definition: unknown }>>();
         for (const file of files) {
             const fn: string = file.metadata.filename;
@@ -1285,6 +1299,7 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                 if (endpoints.length > 0) index.set(fn, endpoints);
             } catch { /* not valid JSON/OpenAPI */ }
         }
+        this.openApiIndexCache.set(files, index);
         return index;
     }
 

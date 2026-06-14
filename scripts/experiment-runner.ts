@@ -127,7 +127,7 @@ const EXPERIMENTS: Record<string, ExperimentConfig> = {
     },
 
     planner: {
-      maxGoals: 1,
+      maxGoals: 10,
       // Code runs inside Docker → host.docker.internal reaches the mapped port
       // (macOS / Windows). On Linux use the Docker bridge gateway IP instead.
       // {apiToken} is substituted after setup() runs and creates the admin token.

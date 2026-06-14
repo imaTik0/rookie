@@ -1,6 +1,7 @@
 import { Logger } from "../../Logger.ts";
 import { MongoDbConnection } from "./MongoDbManager.ts";
 import { Migration001Scheme } from "./migrations/Migration001Scheme.ts";
+import { Migration002Indices } from "./migrations/Migration002Indices.ts";
 
 interface Migration {
     migrationName: string;
@@ -10,6 +11,7 @@ interface Migration {
 
 const migrations: Migration[] = [
     Migration001Scheme,
+    Migration002Indices,
 ];
 
 export class MigrationManager {

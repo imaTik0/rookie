@@ -48,6 +48,7 @@ function sameCluster(a: GapFinding, b: GapFinding): boolean {
     const fb = b.analysis;
 
     // Same verified file + overlapping line range → same gap.
+    // Use > 0 (not >= 0): adjacent ranges share only an endpoint and are distinct gaps.
     const va = fa.fragmentVerification;
     const vb = fb.fragmentVerification;
     if (va?.verified && vb?.verified && va.file === vb.file) {
@@ -56,7 +57,7 @@ function sameCluster(a: GapFinding, b: GapFinding): boolean {
             vb.lineStart !== undefined && vb.lineEnd !== undefined
         ) {
             const overlap = Math.min(va.lineEnd, vb.lineEnd) - Math.max(va.lineStart, vb.lineStart);
-            if (overlap >= 0) return true;
+            if (overlap > 0) return true;
         }
     }
 

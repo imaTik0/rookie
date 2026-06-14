@@ -537,3 +537,22 @@ ${userGoal}
 Analyze the goal and the available initial context. Generate a structured execution plan.
 `;
 }
+
+// ─── Search query refinement ──────────────────────────────────────────────────
+
+export function createRefineSearchQueryPrompt(error: string, context: string): string {
+    return `You are a Search Specialist. Given a technical error and the context of what the code was trying to do, generate a single, highly effective search query to find relevant documentation in a knowledge base.
+
+Focus on:
+- Core library names
+- Specific method or tool names (e.g. npm, playwright, hono)
+- The technical root cause
+
+### ERROR:
+${error}
+
+### CONTEXT:
+${context}
+
+Generate ONLY the search query string, no explanation.`;
+}

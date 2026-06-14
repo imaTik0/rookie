@@ -89,6 +89,16 @@ export interface ConfigValues {
         /** Number of independent classifications; majority vote. 1 = legacy behaviour. */
         votes: number;
     };
+    /** Master-plan concurrency. */
+    planner: {
+        /**
+         * How many goals to run concurrently inside runMasterPlan / rerunMasterPlan.
+         * 1 = fully sequential (default, safest for rate-limited LLM endpoints).
+         * 2–4 = good balance for most hosted APIs.
+         * Set equal to maxGoals for maximum throughput at the cost of KB cross-pollination.
+         */
+        parallelGoals: number;
+    };
     /** Untrusted-code sandbox controls. */
     sandbox: {
         /** Apply container hardening flags (non-root, cap-drop, read-only, etc.). */
@@ -101,6 +111,8 @@ export interface ConfigValues {
         networkName: string;
         /** Auto `npm install` of bare imports detected in generated code. */
         autoInstallDeps: boolean;
+        /** Per-step Docker execution timeout in milliseconds (default 60 000). */
+        stepTimeoutMs: number;
     };
 }
 
@@ -203,6 +215,9 @@ export class ConfigService {
             classifier: {
                 votes: Math.max(1, envNum("ROOKIE_CLASSIFIER_VOTES", 3)),
             },
+            planner: {
+                parallelGoals: Math.max(1, envNum("ROOKIE_PARALLEL_GOALS", 1)),
+            },
             sandbox: {
                 hardening: envBool("ROOKIE_SANDBOX_HARDENING", true),
                 user: Deno.env.get("ROOKIE_SANDBOX_USER") ?? "1000:1000",
@@ -210,6 +225,7 @@ export class ConfigService {
                 networkMode: Deno.env.get("ROOKIE_SANDBOX_NETWORK_MODE") || "network",
                 networkName: Deno.env.get("ROOKIE_SANDBOX_NETWORK_NAME") || "rookie-network",
                 autoInstallDeps: envBool("ROOKIE_SANDBOX_AUTO_INSTALL_DEPS", true),
+                stepTimeoutMs: envNum("ROOKIE_SANDBOX_STEP_TIMEOUT_MS", 60_000),
             },
         };
     }

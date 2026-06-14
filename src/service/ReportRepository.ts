@@ -38,6 +38,7 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
             structuredSummary: data.structuredSummary,
             coverageReport: data.coverageReport,
             frictionEvents: data.frictionEvents,
+            rerunFromMasterPlanId: data.rerunFromMasterPlanId,
             createdAt: new Date(),
             durationMs: data.durationMs || 0,
         };

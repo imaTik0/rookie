@@ -452,24 +452,33 @@ export async function runAgenticLoop(
         }
 
         if (am.tool_calls && am.tool_calls.length > 0) {
-            for (const toolCall of am.tool_calls) {
-                const handler = toolHandlers[toolCall.function.name];
-                const parsedArgs = safeParse(toolCall.function.arguments) as Record<string, unknown>;
-                emitToolCall(onProgress, toolCall.function.name, parsedArgs);
-                let result: string;
-                if (handler) {
-                    try {
-                        const args = JSON.parse(toolCall.function.arguments || "{}") as Record<string, unknown>;
-                        result = await handler(toolCall.id, args);
-                    } catch (err) {
-                        result = `TOOL_ERROR: ${(err as Error)?.message ?? String(err)}`;
-                        logger.error(err, `${phaseLabel} tool '${toolCall.function.name}' failed`);
+            // Execute all tool calls in the same turn concurrently — they are
+            // independent (the model already decided what to call before seeing
+            // any results). Order of tool_result messages must match tool_calls,
+            // so we keep the original index to reinsert in the right position.
+            const toolResults = await Promise.all(
+                am.tool_calls.map(async (toolCall) => {
+                    const handler = toolHandlers[toolCall.function.name];
+                    const parsedArgs = safeParse(toolCall.function.arguments) as Record<string, unknown>;
+                    emitToolCall(onProgress, toolCall.function.name, parsedArgs);
+                    let result: string;
+                    if (handler) {
+                        try {
+                            const args = JSON.parse(toolCall.function.arguments || "{}") as Record<string, unknown>;
+                            result = await handler(toolCall.id, args);
+                        } catch (err) {
+                            result = `TOOL_ERROR: ${(err as Error)?.message ?? String(err)}`;
+                            logger.error(err, `${phaseLabel} tool '${toolCall.function.name}' failed`);
+                        }
+                    } else {
+                        result = `TOOL_ERROR: Unknown tool "${toolCall.function.name}"`;
+                        logger.error(null, `${phaseLabel} unregistered tool '${toolCall.function.name}'`);
                     }
-                } else {
-                    result = `TOOL_ERROR: Unknown tool "${toolCall.function.name}"`;
-                    logger.error(null, `${phaseLabel} unregistered tool '${toolCall.function.name}'`);
-                }
+                    return { toolCall, result };
+                }),
+            );
 
+            for (const { toolCall, result } of toolResults) {
                 emitToolResult(onProgress, toolCall.function.name, result);
                 messages.push({ role: "tool", tool_call_id: toolCall.id, content: result });
 

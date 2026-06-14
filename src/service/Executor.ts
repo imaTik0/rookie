@@ -1,6 +1,7 @@
 import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
 import { Logger } from "../Logger.ts";
 import * as types from "../types/index.ts";
+import type { DocFile } from "../types/file.ts";
 import { EmbeddingService } from "./EmbeddingService.ts";
 import { FileService } from "./FileService.ts";
 import { ProjectRepository } from "./ProjectRepository.ts";
@@ -42,7 +43,7 @@ export class Executor {
         // networkMode: "none" → offline; "network"/named → attach to that docker network.
         const offline = sb.networkMode === "none";
         this.dockerExecutor = new DockerExecutor({
-            timeoutMs: 60000,
+            timeoutMs: sb.stepTimeoutMs,
             memoryLimit: "2048m",
             networkAccess: !offline,
             networkName: offline
@@ -102,7 +103,7 @@ export class Executor {
 
     private async executeCodeGeneration(
         testSuite: types.test.TestSuite,
-        files: { metadata: any, buffer: Uint8Array }[],
+        files: DocFile[],
         startTime: number,
         onProgress?: (msg: string) => void,
         signal?: AbortSignal,
@@ -142,26 +143,28 @@ export class Executor {
         );
 
         const corpus = corpusFromFiles(files);
-        const stepsResults: types.report.StepResult[] = [];
+        const ctx = this.parseInitialContext(testSuite.initialContext);
 
-        let i = 0;
-        for (const example of codeGenResponse.examples) {
-            throwIfAborted(signal);
-            i++;
-            this.logger.log(`Executing generated example ${i}: ${example.title}`);
-            onProgress?.(
-                JSON.stringify({
-                    type: "log",
-                    content: `Running Docker container for Example ${i}: ${example.title}...`,
-                }),
-            );
-            const execResult = await this.runStepInDocker(
-                example.fullProgram,
-                this.parseInitialContext(testSuite.initialContext)
-            );
+        // Run all generated examples through Docker concurrently — they are
+        // independent programs that do not share state.
+        throwIfAborted(signal);
+        onProgress?.(JSON.stringify({
+            type: "log",
+            content: `Running ${codeGenResponse.examples.length} Docker containers in parallel…`,
+        }));
 
+        const execResults = await Promise.all(
+            codeGenResponse.examples.map((example, idx) => {
+                this.logger.log(`Executing generated example ${idx + 1}: ${example.title}`);
+                return this.runStepInDocker(example.fullProgram, ctx);
+            }),
+        );
+
+        // Build step reports (preserving original order).
+        const stepsResults: types.report.StepResult[] = execResults.map((execResult, idx) => {
+            const example = codeGenResponse.examples[idx];
             const stepReport: types.report.StepResult = {
-                stepIndex: i,
+                stepIndex: idx + 1,
                 stepDescription: `${example.title}: ${example.explanation}`,
                 scriptContent: example.fullProgram,
                 status: execResult.success ? "SUCCESS" : "FAILED",
@@ -169,25 +172,34 @@ export class Executor {
                 contextAfter: execResult.result?.ctx || null,
                 httpTrafficLog: execResult.httpTrafficLog,
             };
-
             if (!execResult.success) {
                 stepReport.error = typeof execResult.error === "object"
                     ? JSON.stringify(execResult.error)
                     : String(execResult.error);
-
-                await this.analyzeStepFailure(
-                    testSuite.projectId,
-                    stepReport,
-                    example.fullProgram,
-                    `${example.title}: ${example.explanation}`,
-                    example.explanation || example.title,
-                    corpus,
-                    usedDocsContext,
-                    onProgress,
-                );
             }
-            stepsResults.push(stepReport);
-        }
+            return stepReport;
+        });
+
+        // Analyse failures concurrently — each is an independent LLM call.
+        throwIfAborted(signal);
+        await Promise.all(
+            stepsResults
+                .filter((s) => s.status === "FAILED")
+                .map((stepReport) => {
+                    const idx = stepReport.stepIndex - 1;
+                    const example = codeGenResponse.examples[idx];
+                    return this.analyzeStepFailure(
+                        testSuite.projectId,
+                        stepReport,
+                        example.fullProgram,
+                        `${example.title}: ${example.explanation}`,
+                        example.explanation || example.title,
+                        corpus,
+                        usedDocsContext,
+                        onProgress,
+                    );
+                }),
+        );
 
         const reportData: Omit<types.report.Report, "id" | "createdAt"> = {
             testSuiteId: testSuite._id,
@@ -224,7 +236,7 @@ export class Executor {
 
     private async executeTestScenario(
         testSuite: types.test.TestSuite,
-        files: { metadata: any, buffer: Uint8Array }[],
+        files: DocFile[],
         startTime: number,
         onProgress?: (msg: string) => void,
         signal?: AbortSignal,
@@ -682,7 +694,7 @@ if (__origFetch) {
             const execResult = await this.dockerExecutor.execute(
                 "node",
                 script,
-                { timeoutMs: 60000, packages },
+                { timeoutMs: this.configService.values.sandbox.stepTimeoutMs, packages },
             );
             const fullLogs = `STDOUT:\n${execResult.stdout}\n\nSTDERR:\n${execResult.stderr}`;
             const httpTrafficLog = this.parseHttpLog(execResult.stdout);

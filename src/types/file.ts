@@ -1,5 +1,11 @@
 export type FileId = string & { __fileId: never };
 
+/** A project documentation file as loaded from storage (buffer + basic metadata). */
+export interface DocFile {
+    metadata: { filename: string; mimetype?: string };
+    buffer: Uint8Array;
+}
+
 export interface FileShard extends Record<string, unknown> {
     content: string;
     metadata: {

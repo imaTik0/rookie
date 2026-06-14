@@ -127,6 +127,8 @@ export interface Report {
     frictionEvents?: FrictionEvent[];
     /** Human accept/reject verdicts on proposed documentation fixes. */
     gapFeedback?: GapFeedback[];
+    /** ID of the master plan this report was re-run from (rerun flow only). */
+    rerunFromMasterPlanId?: string;
 }
 
 export interface ListReport {
