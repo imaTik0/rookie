@@ -13,7 +13,9 @@ export class TraceRepository {
         this.collection = this.mongoDbConnection.getCollection("traces");
     }
 
-    async create(trace: Omit<types.trace.Trace, "createdAt" | "updatedAt">): Promise<types.trace.Trace> {
+    async create(
+        trace: Omit<types.trace.Trace, "createdAt" | "updatedAt">,
+    ): Promise<types.trace.Trace> {
         const now = Date.now();
         const newTrace: types.trace.Trace = {
             ...trace,
@@ -30,7 +32,7 @@ export class TraceRepository {
             {
                 $push: { events: event } as any,
                 $set: { updatedAt: Date.now() },
-            }
+            },
         );
     }
 

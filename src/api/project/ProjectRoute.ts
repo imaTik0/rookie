@@ -17,8 +17,7 @@ const CreateProjectRoute = createRoute({
     path: "/projects",
     tags: ["Projects"],
     summary: "Create a new project",
-    description:
-        `Creates a project — the top-level container that groups documentation files and \
+    description: `Creates a project — the top-level container that groups documentation files and \
 owns a dedicated vector collection used for retrieval.
 
 If \`fileIds\` are supplied, each referenced file is **chunked** (structure-aware: \
@@ -96,8 +95,7 @@ const UpdateProjectRoute = createRoute({
     path: "/projects/{id}",
     tags: ["Projects"],
     summary: "Update a project's details",
-    description:
-        `Partially updates a project. Any omitted field is left unchanged.
+    description: `Partially updates a project. Any omitted field is left unchanged.
 
 - **\`projectName\`** — renames the project.
 - **\`fileIds\`** — **replaces** the project's file set and reconciles the vector index \
@@ -135,8 +133,7 @@ const DeleteProjectRoute = createRoute({
     path: "/projects/{id}",
     tags: ["Projects"],
     summary: "Delete a project",
-    description:
-        `Permanently deletes a project and **drops its entire Qdrant vector collection** \
+    description: `Permanently deletes a project and **drops its entire Qdrant vector collection** \
 (all indexed chunks for the project). The underlying uploaded files are **not** deleted from \
 file storage — they remain available to other projects and can be removed separately via the \
 Files API. This operation cannot be undone.`,
@@ -177,11 +174,13 @@ remain indexed.`,
     },
     responses: {
         200: {
-            description: "Files associated and newly added ones indexed; returns the updated project.",
+            description:
+                "Files associated and newly added ones indexed; returns the updated project.",
             content: { "application/json": { schema: ProjectSchema } },
         },
         400: {
-            description: "Invalid file IDs, or indexing failed for one or more files (details in message).",
+            description:
+                "Invalid file IDs, or indexing failed for one or more files (details in message).",
             content: { "application/json": { schema: ErrorSchema } },
         },
         404: {
@@ -210,7 +209,8 @@ that are not associated with the project are ignored.`,
     },
     responses: {
         200: {
-            description: "Files disassociated and their vectors removed; returns the updated project.",
+            description:
+                "Files disassociated and their vectors removed; returns the updated project.",
             content: { "application/json": { schema: ProjectSchema } },
         },
         400: {

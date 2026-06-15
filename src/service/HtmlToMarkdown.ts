@@ -68,7 +68,9 @@ const turndown = new TurndownService({
 turndown.use([strikethrough, taskListItems]);
 
 interface TurndownNode {
-    querySelectorAll(selector: string): ArrayLike<{ children: ArrayLike<{ textContent?: string }> }>;
+    querySelectorAll(
+        selector: string,
+    ): ArrayLike<{ children: ArrayLike<{ textContent?: string }> }>;
 }
 
 turndown.addRule("anyTable", {

@@ -169,24 +169,44 @@ export class ConfigService {
                 modelName: Deno.env.get("ROOKIE_OPENAI_MODEL_NAME") || "gpt-4o-mini",
             },
             limits: {
-                maxResearchIterations: Number.parseInt(Deno.env.get("ROOKIE_MAX_RESEARCH_ITERATIONS") || "5", 10),
-                maxVerificationIterations: Number.parseInt(Deno.env.get("ROOKIE_MAX_VERIFICATION_ITERATIONS") || "5", 10),
-                defaultSearchLimit: Number.parseInt(Deno.env.get("ROOKIE_DEFAULT_SEARCH_LIMIT") || "10", 10),
-                relatedDocsLimit: Number.parseInt(Deno.env.get("ROOKIE_RELATED_DOCS_LIMIT") || "25", 10),
-                maxResultChars: Number.parseInt(Deno.env.get("ROOKIE_MAX_RESULT_CHARS") || "3000", 10),
-                maxContextChars: Number.parseInt(Deno.env.get("ROOKIE_MAX_CONTEXT_CHARS") || "50000", 10),
-                maxScenarioDocsChars: Number.parseInt(Deno.env.get("ROOKIE_MAX_SCENARIO_DOCS_CHARS") || "100000", 10),
+                maxResearchIterations: Number.parseInt(
+                    Deno.env.get("ROOKIE_MAX_RESEARCH_ITERATIONS") || "5",
+                    10,
+                ),
+                maxVerificationIterations: Number.parseInt(
+                    Deno.env.get("ROOKIE_MAX_VERIFICATION_ITERATIONS") || "5",
+                    10,
+                ),
+                defaultSearchLimit: Number.parseInt(
+                    Deno.env.get("ROOKIE_DEFAULT_SEARCH_LIMIT") || "10",
+                    10,
+                ),
+                relatedDocsLimit: Number.parseInt(
+                    Deno.env.get("ROOKIE_RELATED_DOCS_LIMIT") || "25",
+                    10,
+                ),
+                maxResultChars: Number.parseInt(
+                    Deno.env.get("ROOKIE_MAX_RESULT_CHARS") || "3000",
+                    10,
+                ),
+                maxContextChars: Number.parseInt(
+                    Deno.env.get("ROOKIE_MAX_CONTEXT_CHARS") || "50000",
+                    10,
+                ),
+                maxScenarioDocsChars: Number.parseInt(
+                    Deno.env.get("ROOKIE_MAX_SCENARIO_DOCS_CHARS") || "100000",
+                    10,
+                ),
                 maxContextTokens: envNum("ROOKIE_MAX_CONTEXT_TOKENS", 12000),
                 maxFileReadChars: envNum("ROOKIE_MAX_FILE_READ_CHARS", 16000),
             },
             llm: {
                 temperature: envNum("ROOKIE_LLM_TEMPERATURE", 0.2),
                 seed: Deno.env.get("ROOKIE_LLM_SEED") ? envNum("ROOKIE_LLM_SEED", 0) : undefined,
-                structuredOutputMode:
-                    (Deno.env.get("ROOKIE_STRUCTURED_OUTPUT_MODE") as
-                        | "json_schema"
-                        | "json_object"
-                        | "text") || "json_object",
+                structuredOutputMode: (Deno.env.get("ROOKIE_STRUCTURED_OUTPUT_MODE") as
+                    | "json_schema"
+                    | "json_object"
+                    | "text") || "json_object",
                 maxRepairAttempts: envNum("ROOKIE_LLM_MAX_REPAIR_ATTEMPTS", 1),
                 maxRetries: envNum("ROOKIE_LLM_MAX_RETRIES", 3),
                 retryBaseMs: envNum("ROOKIE_LLM_RETRY_BASE_MS", 500),
@@ -229,8 +249,6 @@ export class ConfigService {
             },
         };
     }
-
-
 
     get values(): ConfigValues {
         return this.config;

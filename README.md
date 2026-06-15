@@ -59,81 +59,84 @@ Copy `.env` to set your values — the server loads it automatically (`deno task
 
 #### Core infrastructure
 
-| Variable                       | Description               | Default                     |
-| ------------------------------ | ------------------------- | --------------------------- |
-| `ROOKIE_HOST`                  | Server host               | `localhost`                 |
-| `ROOKIE_PORT`                  | Server port               | `3000`                      |
-| `ROOKIE_MONGO_DB_URL`          | MongoDB connection string | `mongodb://localhost:27017` |
-| `ROOKIE_MONGO_DB_NAME`         | MongoDB database name     | `rookie_db`                 |
-| `ROOKIE_QDRANT_HOST`           | Qdrant host               | `127.0.0.1`                 |
-| `ROOKIE_QDRANT_PORT`           | Qdrant port               | `6333`                      |
+| Variable               | Description               | Default                     |
+| ---------------------- | ------------------------- | --------------------------- |
+| `ROOKIE_HOST`          | Server host               | `localhost`                 |
+| `ROOKIE_PORT`          | Server port               | `3000`                      |
+| `ROOKIE_MONGO_DB_URL`  | MongoDB connection string | `mongodb://localhost:27017` |
+| `ROOKIE_MONGO_DB_NAME` | MongoDB database name     | `rookie_db`                 |
+| `ROOKIE_QDRANT_HOST`   | Qdrant host               | `127.0.0.1`                 |
+| `ROOKIE_QDRANT_PORT`   | Qdrant port               | `6333`                      |
 
 #### LLM and embeddings
 
-| Variable                       | Description               | Default                     |
-| ------------------------------ | ------------------------- | --------------------------- |
-| `ROOKIE_OPENAI_KEY`            | LLM API key (`ROOKIE_OPEAN_AI_KEY` still accepted) | (Required) |
-| `ROOKIE_OPENAI_BASE_URL`       | LLM endpoint (OpenAI-compatible; set for Ollama/vLLM) | OpenAI |
-| `ROOKIE_OPENAI_MODEL_NAME`     | Chat model                | `gpt-4o-mini`               |
-| `ROOKIE_EMBEDDING_MODEL`       | Embeddings model name     | `nomic-embed-text`          |
-| `ROOKIE_EMBEDDING_VECTOR_SIZE` | Vector dimensions for the model | `768`                 |
-| `ROOKIE_EMBEDDING_BASE_URL`    | Embeddings endpoint (OpenAI-compatible) | OpenAI     |
+| Variable                       | Description                                           | Default            |
+| ------------------------------ | ----------------------------------------------------- | ------------------ |
+| `ROOKIE_OPENAI_KEY`            | LLM API key (`ROOKIE_OPEAN_AI_KEY` still accepted)    | (Required)         |
+| `ROOKIE_OPENAI_BASE_URL`       | LLM endpoint (OpenAI-compatible; set for Ollama/vLLM) | OpenAI             |
+| `ROOKIE_OPENAI_MODEL_NAME`     | Chat model                                            | `gpt-4o-mini`      |
+| `ROOKIE_EMBEDDING_MODEL`       | Embeddings model name                                 | `nomic-embed-text` |
+| `ROOKIE_EMBEDDING_VECTOR_SIZE` | Vector dimensions for the model                       | `768`              |
+| `ROOKIE_EMBEDDING_BASE_URL`    | Embeddings endpoint (OpenAI-compatible)               | OpenAI             |
 
 #### Quality / determinism
 
-| Variable                        | Description                                             | Default       |
-| ------------------------------- | ------------------------------------------------------- | ------------- |
-| `ROOKIE_LLM_TEMPERATURE`        | Sampling temperature for all calls                      | `0.2`         |
-| `ROOKIE_LLM_SEED`               | Optional integer seed (ignored if unsupported)          | (unset)       |
-| `ROOKIE_STRUCTURED_OUTPUT_MODE` | `json_schema` \| `json_object` \| `text`                | `json_object` |
-| `ROOKIE_LLM_MAX_REPAIR_ATTEMPTS`| Repair retries when JSON fails zod validation           | `1`           |
-| `ROOKIE_LLM_MAX_RETRIES`        | Backoff retries on transient 429/5xx/network errors     | `3`           |
-| `ROOKIE_LLM_RETRY_BASE_MS`      | Base backoff delay (exponential + jitter)               | `500`         |
-| `ROOKIE_LLM_CALL_TIMEOUT_MS`    | Per-call timeout for one LLM completion; raise for slow local models | `300000` |
-| `ROOKIE_MAX_CONTEXT_TOKENS`     | Token budget before loop compaction (per-message cap → distillation of old history → initial-context trim) | `12000` |
-| `ROOKIE_CLASSIFIER_VOTES`       | Self-consistency votes in the failure classifier        | `3`           |
-| `ROOKIE_BM25_K1` / `_B` / `_AVG_LEN` | BM25 sparse-vector parameters                    | `1.5/0.75/256`|
+| Variable                             | Description                                                                                                | Default        |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------- | -------------- |
+| `ROOKIE_LLM_TEMPERATURE`             | Sampling temperature for all calls                                                                         | `0.2`          |
+| `ROOKIE_LLM_SEED`                    | Optional integer seed (ignored if unsupported)                                                             | (unset)        |
+| `ROOKIE_STRUCTURED_OUTPUT_MODE`      | `json_schema` \| `json_object` \| `text`                                                                   | `json_object`  |
+| `ROOKIE_LLM_MAX_REPAIR_ATTEMPTS`     | Repair retries when JSON fails zod validation                                                              | `1`            |
+| `ROOKIE_LLM_MAX_RETRIES`             | Backoff retries on transient 429/5xx/network errors                                                        | `3`            |
+| `ROOKIE_LLM_RETRY_BASE_MS`           | Base backoff delay (exponential + jitter)                                                                  | `500`          |
+| `ROOKIE_LLM_CALL_TIMEOUT_MS`         | Per-call timeout for one LLM completion; raise for slow local models                                       | `300000`       |
+| `ROOKIE_MAX_CONTEXT_TOKENS`          | Token budget before loop compaction (per-message cap → distillation of old history → initial-context trim) | `12000`        |
+| `ROOKIE_CLASSIFIER_VOTES`            | Self-consistency votes in the failure classifier                                                           | `3`            |
+| `ROOKIE_BM25_K1` / `_B` / `_AVG_LEN` | BM25 sparse-vector parameters                                                                              | `1.5/0.75/256` |
 
 > `json_schema` mode derives a strict JSON Schema from the zod definitions automatically. If a server rejects it, Rookie degrades to `json_object` at runtime — safe to try on capable models, harmless on small ones.
 
 #### Agent limits
 
-| Variable                              | Description                                              | Default  |
-| ------------------------------------- | -------------------------------------------------------- | -------- |
-| `ROOKIE_MAX_RESEARCH_ITERATIONS`      | Max RAG research iterations per agentic loop             | `5`      |
-| `ROOKIE_MAX_VERIFICATION_ITERATIONS`  | Max verification iterations per agentic loop             | `5`      |
-| `ROOKIE_DEFAULT_SEARCH_LIMIT`         | Number of chunks fetched per search call                 | `10`     |
-| `ROOKIE_RELATED_DOCS_LIMIT`           | Final number of chunks passed to the failure classifier  | `25`     |
-| `ROOKIE_MAX_RESULT_CHARS`             | Max characters of a Docker execution result kept in context | `3000` |
-| `ROOKIE_MAX_CONTEXT_CHARS`            | Max characters of accumulated agent context              | `50000`  |
-| `ROOKIE_MAX_SCENARIO_DOCS_CHARS`      | Max characters of docs passed for scenario planning      | `100000` |
-| `ROOKIE_MAX_FILE_READ_CHARS`          | Max characters returned by a single VFS `read_file` before truncation (large files steer the agent to `grep_file` / `search_knowledge_base`) | `16000` |
+| Variable                             | Description                                                                                                                                  | Default  |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `ROOKIE_MAX_RESEARCH_ITERATIONS`     | Max RAG research iterations per agentic loop                                                                                                 | `5`      |
+| `ROOKIE_MAX_VERIFICATION_ITERATIONS` | Max verification iterations per agentic loop                                                                                                 | `5`      |
+| `ROOKIE_DEFAULT_SEARCH_LIMIT`        | Number of chunks fetched per search call                                                                                                     | `10`     |
+| `ROOKIE_RELATED_DOCS_LIMIT`          | Final number of chunks passed to the failure classifier                                                                                      | `25`     |
+| `ROOKIE_MAX_RESULT_CHARS`            | Max characters of a Docker execution result kept in context                                                                                  | `3000`   |
+| `ROOKIE_MAX_CONTEXT_CHARS`           | Max characters of accumulated agent context                                                                                                  | `50000`  |
+| `ROOKIE_MAX_SCENARIO_DOCS_CHARS`     | Max characters of docs passed for scenario planning                                                                                          | `100000` |
+| `ROOKIE_MAX_FILE_READ_CHARS`         | Max characters returned by a single VFS `read_file` before truncation (large files steer the agent to `grep_file` / `search_knowledge_base`) | `16000`  |
+| `ROOKIE_PARALLEL_GOALS`              | Goals run concurrently per master-plan batch (`1` = sequential, safest for rate-limited endpoints; `2–4` balances throughput)                | `1`      |
 
 #### Chunking
 
 > **Note:** changing these values requires re-indexing all projects (`DELETE /projects/:id` and re-create).
 
-| Variable                | Description                                        | Default |
-| ----------------------- | -------------------------------------------------- | ------- |
-| `ROOKIE_CHUNK_SIZE`     | Target chunk size in characters                    | `1200`  |
-| `ROOKIE_CHUNK_OVERLAP`  | Overlap carried into the next chunk for continuity | `150`   |
+| Variable               | Description                                        | Default |
+| ---------------------- | -------------------------------------------------- | ------- |
+| `ROOKIE_CHUNK_SIZE`    | Target chunk size in characters                    | `1200`  |
+| `ROOKIE_CHUNK_OVERLAP` | Overlap carried into the next chunk for continuity | `150`   |
 
 #### Docs crawling (`POST /projects/from-url`)
 
-| Variable                       | Description                                                                 | Default |
-| ------------------------------ | --------------------------------------------------------------------------- | ------- |
-| `ROOKIE_SPA_MIN_TEXT_CHARS`    | Below this body-text length + a JS app root (`#swagger-ui`, `#app`, …) a page is treated as an unrendered SPA and skipped | `200` |
-| `ROOKIE_READABILITY_MIN_CHARS` | Below this extracted-article length, fall back to direct `main`/`body` extraction (for terse reference pages) | `250` |
+| Variable                       | Description                                                                                                               | Default |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `ROOKIE_SPA_MIN_TEXT_CHARS`    | Below this body-text length + a JS app root (`#swagger-ui`, `#app`, …) a page is treated as an unrendered SPA and skipped | `200`   |
+| `ROOKIE_READABILITY_MIN_CHARS` | Below this extracted-article length, fall back to direct `main`/`body` extraction (for terse reference pages)             | `250`   |
 
 #### Sandbox (untrusted-code execution)
 
-| Variable                          | Description                                        | Default          |
-| --------------------------------- | -------------------------------------------------- | ---------------- |
-| `ROOKIE_SANDBOX_HARDENING`        | Apply non-root/cap-drop/read-only/pids-limit flags | `true`           |
-| `ROOKIE_SANDBOX_USER`             | `uid:gid` to run as                                | `1000:1000`      |
-| `ROOKIE_SANDBOX_PIDS_LIMIT`       | Max processes (fork-bomb guard)                    | `256`            |
-| `ROOKIE_SANDBOX_NETWORK_MODE`     | `network` \| `none` \| `<docker-network-name>`     | `network`        |
-| `ROOKIE_SANDBOX_AUTO_INSTALL_DEPS`| `npm install` packages imported by generated code  | `true`           |
+| Variable                           | Description                                         | Default          |
+| ---------------------------------- | --------------------------------------------------- | ---------------- |
+| `ROOKIE_SANDBOX_HARDENING`         | Apply non-root/cap-drop/read-only/pids-limit flags  | `true`           |
+| `ROOKIE_SANDBOX_USER`              | `uid:gid` to run as                                 | `1000:1000`      |
+| `ROOKIE_SANDBOX_PIDS_LIMIT`        | Max processes (fork-bomb guard)                     | `256`            |
+| `ROOKIE_SANDBOX_NETWORK_MODE`      | `network` \| `none` \| `<docker-network-name>`      | `network`        |
+| `ROOKIE_SANDBOX_NETWORK_NAME`      | Docker network attached when `NETWORK_MODE=network` | `rookie-network` |
+| `ROOKIE_SANDBOX_AUTO_INSTALL_DEPS` | `npm install` packages imported by generated code   | `true`           |
+| `ROOKIE_SANDBOX_STEP_TIMEOUT_MS`   | Per-step Docker execution timeout (ms)              | `60000`          |
 
 > **Egress note:** container hardening covers the in-container attack surface, but
 > `docker run` flags cannot allowlist outbound hosts. For real egress control,
@@ -186,13 +189,13 @@ ROOKIE_RERANKER_MODEL=jina-reranker-v2-base-multilingual
 ROOKIE_RERANKER_TOP_N=20
 ```
 
-| Variable                | Description                                                          | Default |
-| ----------------------- | -------------------------------------------------------------------- | ------- |
-| `ROOKIE_RERANKER_MODE`  | `off` \| `llm` \| `api` (cross-encoder rerank)                       | `llm`   |
-| `ROOKIE_RERANKER_TOP_N` | Rerank this many top candidates before returning `relatedDocsLimit`  | `20`    |
-| `ROOKIE_RERANKER_BASE_URL` | Base URL of a Jina/Cohere/TEI `/rerank` endpoint (api mode only)  | —       |
-| `ROOKIE_RERANKER_API_KEY`  | Bearer token for the reranker endpoint (api mode only)            | —       |
-| `ROOKIE_RERANKER_MODEL`    | Model name passed to the reranker endpoint (api mode only)        | —       |
+| Variable                   | Description                                                         | Default |
+| -------------------------- | ------------------------------------------------------------------- | ------- |
+| `ROOKIE_RERANKER_MODE`     | `off` \| `llm` \| `api` (cross-encoder rerank)                      | `llm`   |
+| `ROOKIE_RERANKER_TOP_N`    | Rerank this many top candidates before returning `relatedDocsLimit` | `20`    |
+| `ROOKIE_RERANKER_BASE_URL` | Base URL of a Jina/Cohere/TEI `/rerank` endpoint (api mode only)    | —       |
+| `ROOKIE_RERANKER_API_KEY`  | Bearer token for the reranker endpoint (api mode only)              | —       |
+| `ROOKIE_RERANKER_MODEL`    | Model name passed to the reranker endpoint (api mode only)          | —       |
 
 #### Mode: `off`
 
@@ -221,6 +224,7 @@ export ROOKIE_CLASSIFIER_VOTES=3
 ```
 
 Notes for small models:
+
 - Keep `ROOKIE_STRUCTURED_OUTPUT_MODE=json_object` (or `text` for the smallest models). All JSON is validated and repaired against zod schemas regardless of mode.
 - BM25 retrieval is computed server-side in Qdrant and is model-independent, so it stays accurate even with a weak LLM.
 - If a model's tool-calling is weak, lower `ROOKIE_MAX_RESEARCH_ITERATIONS` to avoid loops.
@@ -263,14 +267,15 @@ The frontend is available at `http://localhost:5173`, the backend at `http://loc
 ## Workflow
 
 1. **Add Documentation**: Upload API specification files directly, or crawl a documentation website:
-   - `POST /files` + `POST /projects` — upload local files and create a project
+   - `POST /files/upload` (single) or `POST /files/upload-many` (batch) + `POST /projects` — upload local files and create a project
    - `POST /projects/from-url` — provide a URL; Rookie ingests it as Markdown and indexes everything automatically. Ingestion is standards-first: if the origin publishes an `llms-full.txt` it is used directly; otherwise the crawler walks up to N same-origin pages, extracting main content with Mozilla Readability and converting to Markdown with Turndown (tables and code blocks preserved). JavaScript-rendered pages (e.g. Swagger UI) are detected and skipped with an actionable error pointing to the raw OpenAPI JSON instead.
 2. **Indexing**: The system chunks each file structure-aware (heading boundaries, fenced code blocks preserved), generates BM25 sparse + dense embeddings, and stores them in Qdrant.
 3. **Define Test Suite**: Specify the testing goal, execution mode (`TEST_SCENARIO` or `CODE_GENERATION`), and initial context (e.g., auth tokens as JSON).
-4. **Execution**:
+4. **Execution** (`POST /planner/run`, or `POST /planner/rerun` to replay a saved plan's goals against updated docs):
    - **Master Planner** generates diverse, realistic user goals from the documentation.
    - For each goal, an **Agentic RAG loop** (Research → Verification → Generation) produces and runs JavaScript code in a Docker sandbox.
    - State (`ctx`) is passed between steps; failures are classified semantically (MISSING / AMBIGUOUS / INCORRECT / CONFIG / ENVIRONMENT).
+   - Both planner endpoints **stream progress as NDJSON** (`Content-Type: application/x-ndjson`, one JSON event per line — `INIT`, `GOALS_GENERATED`, `GOAL_START`/`GOAL_PROGRESS`/`GOAL_COMPLETE`, `SUMMARY_GENERATED`, terminal `COMPLETE`/`ERROR`); the terminal event carries the persisted `MASTER_PLAN` report.
 5. **Reporting**: Review structured reports with per-step failure analysis, related documentation fragments, and suggested fixes.
 
 ## Experiments
@@ -303,5 +308,9 @@ deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json --full 
 
 ## API Documentation
 
-Once the server is running, you can access the interactive API documentation at:
-`http://localhost:3000/reference` (Scalar) or `http://localhost:3000/ui` (Swagger UI).
+Once the server is running:
+
+- **Interactive API reference (Scalar):** `http://localhost:3000/` — the server root serves the Scalar explorer.
+- **Raw OpenAPI 3.0 document:** `http://localhost:3000/docs` — the generated spec, consumable by Swagger UI, Postman, codegen, etc.
+
+> The OpenAPI document is generated from the zod schemas via `@hono/zod-openapi`, so it always matches the deployed routes.

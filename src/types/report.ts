@@ -3,8 +3,8 @@ import * as types from "./index.ts";
 export type ReportId = string & { __reportId: never };
 export type StepStatus = "SUCCESS" | "FAILED";
 export type ReportStatus = "PENDING" | "RUNNING" | "SUCCESS" | "FAILED" | "PARTIAL_FAILURE";
-export type DetailedResults = { 
-    finalOutput?: string; 
+export type DetailedResults = {
+    finalOutput?: string;
     executionPlan?: any;
     initialContext?: string;
     steps?: any[];
@@ -115,6 +115,8 @@ export interface Report {
     executionPlan: unknown;
     steps: StepResult[];
     detailedResults?: DetailedResults;
+    /** Full agentic-loop transcript (CODE_GENERATION runs). */
+    conversationHistory?: unknown[];
     createdAt: string;
     durationMs?: number;
     masterPlanId?: string;

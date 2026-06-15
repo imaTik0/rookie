@@ -36,8 +36,10 @@ export function extractDocExamples(
     for (const file of files) {
         const filename = file.metadata.filename;
         // Only scan text/markdown/plain files; skip binaries.
-        if (!filename.match(/\.(md|txt|rst|mdx|html?)$/i) &&
-            !filename.match(/\.(js|ts|mjs|cjs)$/i)) continue;
+        if (
+            !filename.match(/\.(md|txt|rst|mdx|html?)$/i) &&
+            !filename.match(/\.(js|ts|mjs|cjs)$/i)
+        ) continue;
 
         const content = dec.decode(file.buffer);
         const lines = content.split("\n");
@@ -57,7 +59,10 @@ export function extractDocExamples(
                 const lang = fenceMatch[1].toLowerCase();
                 if (JS_LIKE.has(lang) || lang === "") {
                     // Only capture if explicitly JS/TS (skip unlabelled fences to avoid noise).
-                    if (!JS_LIKE.has(lang)) { i++; continue; }
+                    if (!JS_LIKE.has(lang)) {
+                        i++;
+                        continue;
+                    }
 
                     const fenceStartLine = i + 1; // 1-based
                     const codeLines: string[] = [];
@@ -69,7 +74,10 @@ export function extractDocExamples(
 
                     const code = codeLines.join("\n").trim();
                     // Skip trivially short snippets that can't be meaningful programs.
-                    if (code.length < 20) { i++; continue; }
+                    if (code.length < 20) {
+                        i++;
+                        continue;
+                    }
 
                     // Collect context: prose lines immediately before the fence.
                     const contextLines: string[] = [];

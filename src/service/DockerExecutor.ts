@@ -168,9 +168,12 @@ export class DockerExecutor {
             // World-writable tmpfs so a non-root user can build/run there.
             "--tmpfs=/eval:rw,exec,size=512m,mode=1777",
             "--tmpfs=/tmp:rw,exec,size=128m,mode=1777",
-            "-w", "/eval",
-            "-e", "HOME=/eval",
-            "-e", "npm_config_cache=/eval/.npm",
+            "-w",
+            "/eval",
+            "-e",
+            "HOME=/eval",
+            "-e",
+            "npm_config_cache=/eval/.npm",
         ];
         if (this.config.user) args.push("--user", this.config.user);
         return args;
@@ -192,9 +195,7 @@ export class DockerExecutor {
             : "";
 
         // When hardening is on the workdir/tmpfs are already prepared; otherwise mkdir.
-        const prep = this.config.hardening
-            ? "cd /eval"
-            : "mkdir -p /eval && cd /eval";
+        const prep = this.config.hardening ? "cd /eval" : "mkdir -p /eval && cd /eval";
 
         return `
 set -e

@@ -26,10 +26,48 @@ export const DEFAULT_BM25_PARAMS: Bm25Params = { k1: 1.5, b: 0.75, avgLen: 256 }
 // Compact English stopword list. Kept small on purpose: technical docs are
 // keyword-dense and over-aggressive stopping hurts recall.
 const STOPWORDS = new Set([
-    "the", "a", "an", "and", "or", "but", "if", "then", "else", "for", "of", "to",
-    "in", "on", "at", "by", "is", "are", "was", "were", "be", "been", "being",
-    "this", "that", "these", "those", "it", "its", "as", "from", "with", "you",
-    "your", "we", "our", "they", "their", "can", "will", "would", "should",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "if",
+    "then",
+    "else",
+    "for",
+    "of",
+    "to",
+    "in",
+    "on",
+    "at",
+    "by",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "this",
+    "that",
+    "these",
+    "those",
+    "it",
+    "its",
+    "as",
+    "from",
+    "with",
+    "you",
+    "your",
+    "we",
+    "our",
+    "they",
+    "their",
+    "can",
+    "will",
+    "would",
+    "should",
 ]);
 
 /** Deterministic, non-negative 32-bit token id (FNV-1a). Stays within Qdrant's u32 range. */
@@ -38,7 +76,8 @@ export function tokenId(token: string): number {
     for (let i = 0; i < token.length; i++) {
         hash ^= token.charCodeAt(i);
         // hash *= 16777619, kept in 32-bit space
-        hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>> 0;
+        hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) >>>
+            0;
     }
     return hash >>> 0;
 }

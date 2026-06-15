@@ -35,8 +35,7 @@ export const CreateProjectSchema = z
             .array(z.string().openapi({ example: "file_clx123abc..." }))
             .optional()
             .openapi({
-                description:
-                    "Optional IDs of already-uploaded files to link and index into the " +
+                description: "Optional IDs of already-uploaded files to link and index into the " +
                     "project's vector collection on creation. Files must already exist " +
                     "(upload via `POST /files/upload`).",
             }),
@@ -55,15 +54,13 @@ export const CreateProjectFromUrlSchema = z
         }),
         url: z.string().url().openapi({
             example: "https://docs.example.com",
-            description:
-                "Documentation entry-point URL to ingest. If the origin serves an " +
+            description: "Documentation entry-point URL to ingest. If the origin serves an " +
                 "`llms-full.txt` it is used directly; otherwise same-origin pages are " +
                 "crawled from this URL.",
         }),
         maxPages: z.number().int().min(1).max(200).optional().default(50).openapi({
             example: 50,
-            description:
-                "Maximum number of pages to crawl (1–200). Ignored when an " +
+            description: "Maximum number of pages to crawl (1–200). Ignored when an " +
                 "`llms-full.txt` is found. Larger values mean longer crawl times.",
         }),
     })

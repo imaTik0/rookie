@@ -75,9 +75,7 @@ function countContextTokens(
         (sum, m) => sum + countMessageTokens(m as { content?: unknown; tool_calls?: unknown }),
         0,
     );
-    const toolTokens = tools
-        ? Math.ceil(countTokens(JSON.stringify(tools)) * 1.5)
-        : 0;
+    const toolTokens = tools ? Math.ceil(countTokens(JSON.stringify(tools)) * 1.5) : 0;
     return msgTokens + toolTokens;
 }
 
@@ -117,7 +115,9 @@ function extractToolGroups(
             thoughts: m.content ?? "",
             calls: m.tool_calls.map((tc) => {
                 let args: Record<string, unknown> = {};
-                try { args = JSON.parse(tc.function.arguments || "{}") as Record<string, unknown>; } catch { /* ignore */ }
+                try {
+                    args = JSON.parse(tc.function.arguments || "{}") as Record<string, unknown>;
+                } catch { /* ignore */ }
                 return { name: tc.function.name, args };
             }),
             results: [],
@@ -174,8 +174,7 @@ async function distillGroupsToSummary(
             messages: [
                 {
                     role: "system",
-                    content:
-                        "You are a technical API research distiller. " +
+                    content: "You are a technical API research distiller. " +
                         "Extract EVERY concrete fact: endpoint paths, HTTP methods, " +
                         "required/optional parameters with exact names and types, " +
                         "authentication headers and schemes, request body field names, " +
@@ -185,7 +184,8 @@ async function distillGroupsToSummary(
                 },
                 {
                     role: "user",
-                    content: `Distill the following research steps into a compact factsheet:\n\n${formatted}`,
+                    content:
+                        `Distill the following research steps into a compact factsheet:\n\n${formatted}`,
                 },
             ],
             max_tokens: 1500,
@@ -252,10 +252,15 @@ async function pruneMessages(
                 emitLog(onProgress, `Distilling ${groups.length} research step(s) into factsheet…`);
                 summary = await distillGroupsToSummary(openai, modelName, callTimeoutMs, groups);
                 logger.log(
-                    `${phaseLabel} Distilled ${groups.length} groups → ${countTokens(summary)} tokens`,
+                    `${phaseLabel} Distilled ${groups.length} groups → ${
+                        countTokens(summary)
+                    } tokens`,
                 );
             } catch (err) {
-                logger.error(err, `${phaseLabel} Distillation failed, dropping groups without summary`);
+                logger.error(
+                    err,
+                    `${phaseLabel} Distillation failed, dropping groups without summary`,
+                );
             }
 
             // Remove old groups (reverse so earlier indices stay valid)
@@ -298,7 +303,11 @@ async function pruneMessages(
 // ─────────────────────────────────────────────────────────────────────────────
 
 function safeParse(json: string): unknown {
-    try { return JSON.parse(json || "{}"); } catch { return { _raw: json }; }
+    try {
+        return JSON.parse(json || "{}");
+    } catch {
+        return { _raw: json };
+    }
 }
 
 interface StreamedCompletion {
@@ -348,7 +357,7 @@ async function streamCompletion(
             let i = tcd.index;
             if (i === undefined) {
                 if (tcd.id) {
-                    const existingIdx = toolAcc.findIndex(t => t.id === tcd.id);
+                    const existingIdx = toolAcc.findIndex((t) => t.id === tcd.id);
                     i = existingIdx >= 0 ? existingIdx : toolAcc.length;
                 } else {
                     i = Math.max(0, toolAcc.length - 1);
@@ -364,7 +373,11 @@ async function streamCompletion(
 
     const tool_calls = toolAcc
         .filter(Boolean)
-        .map((t) => ({ id: t.id, type: "function" as const, function: { name: t.name, arguments: t.args } }));
+        .map((t) => ({
+            id: t.id,
+            type: "function" as const,
+            function: { name: t.name, arguments: t.args },
+        }));
 
     const message = {
         role: "assistant",
@@ -382,12 +395,18 @@ export async function runAgenticLoop(
     config: AgenticLoopConfig,
 ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
     const {
-        modelName, messages, tools, toolHandlers,
-        readySignal, maxIterations, phaseLabel, onTrace,
+        modelName,
+        messages,
+        tools,
+        toolHandlers,
+        readySignal,
+        maxIterations,
+        phaseLabel,
+        onTrace,
     } = config;
 
     let iterations = 0;
-    let isReady   = false;
+    let isReady = false;
 
     const tokenBudget = config.maxContextTokens ??
         (config.maxContextChars ? Math.floor(config.maxContextChars / 4) : Infinity);
@@ -405,9 +424,14 @@ export async function runAgenticLoop(
             logger.log(`${phaseLabel} Token budget exceeded — compacting context...`);
             emitLog(onProgress, `Token budget exceeded — compacting context...`);
             await pruneMessages(
-                messages, tokenBudget,
-                openai, modelName, callTimeoutMs,
-                logger, phaseLabel, onProgress,
+                messages,
+                tokenBudget,
+                openai,
+                modelName,
+                callTimeoutMs,
+                logger,
+                phaseLabel,
+                onProgress,
                 tools,
             );
             contextTokens = countContextTokens(messages, tools);
@@ -415,11 +439,20 @@ export async function runAgenticLoop(
         }
 
         const { message, usage } = await withRetry(
-            () => streamCompletion(openai, modelName, messages, tools, config, callTimeoutMs, onProgress),
+            () =>
+                streamCompletion(
+                    openai,
+                    modelName,
+                    messages,
+                    tools,
+                    config,
+                    callTimeoutMs,
+                    onProgress,
+                ),
             {
-                retries:     config.maxRetries  ?? 3,
+                retries: config.maxRetries ?? 3,
                 baseDelayMs: config.retryBaseMs,
-                label:       `${phaseLabel} chat.completions`,
+                label: `${phaseLabel} chat.completions`,
                 logger,
             },
         );
@@ -428,15 +461,15 @@ export async function runAgenticLoop(
 
         if (onTrace) {
             await onTrace({
-                id:        crypto.randomUUID(),
+                id: crypto.randomUUID(),
                 timestamp: Date.now(),
-                type:      "LLM_CALL",
-                content:   { messages: messages.slice(0, -1), response: message, phase: phaseLabel },
+                type: "LLM_CALL",
+                content: { messages: messages.slice(0, -1), response: message, phase: phaseLabel },
                 tokens: usage
                     ? {
-                        promptTokens:     usage.prompt_tokens,
+                        promptTokens: usage.prompt_tokens,
                         completionTokens: usage.completion_tokens,
-                        totalTokens:      usage.total_tokens,
+                        totalTokens: usage.total_tokens,
                     }
                     : undefined,
             });
@@ -459,20 +492,32 @@ export async function runAgenticLoop(
             const toolResults = await Promise.all(
                 am.tool_calls.map(async (toolCall) => {
                     const handler = toolHandlers[toolCall.function.name];
-                    const parsedArgs = safeParse(toolCall.function.arguments) as Record<string, unknown>;
+                    const parsedArgs = safeParse(toolCall.function.arguments) as Record<
+                        string,
+                        unknown
+                    >;
                     emitToolCall(onProgress, toolCall.function.name, parsedArgs);
                     let result: string;
                     if (handler) {
                         try {
-                            const args = JSON.parse(toolCall.function.arguments || "{}") as Record<string, unknown>;
+                            const args = JSON.parse(toolCall.function.arguments || "{}") as Record<
+                                string,
+                                unknown
+                            >;
                             result = await handler(toolCall.id, args);
                         } catch (err) {
                             result = `TOOL_ERROR: ${(err as Error)?.message ?? String(err)}`;
-                            logger.error(err, `${phaseLabel} tool '${toolCall.function.name}' failed`);
+                            logger.error(
+                                err,
+                                `${phaseLabel} tool '${toolCall.function.name}' failed`,
+                            );
                         }
                     } else {
                         result = `TOOL_ERROR: Unknown tool "${toolCall.function.name}"`;
-                        logger.error(null, `${phaseLabel} unregistered tool '${toolCall.function.name}'`);
+                        logger.error(
+                            null,
+                            `${phaseLabel} unregistered tool '${toolCall.function.name}'`,
+                        );
                     }
                     return { toolCall, result };
                 }),
@@ -484,14 +529,14 @@ export async function runAgenticLoop(
 
                 if (onTrace) {
                     await onTrace({
-                        id:        crypto.randomUUID(),
+                        id: crypto.randomUUID(),
                         timestamp: Date.now(),
-                        type:      "TOOL_CALL",
-                        content:   {
-                            tool:   toolCall.function.name,
-                            args:   safeParse(toolCall.function.arguments),
+                        type: "TOOL_CALL",
+                        content: {
+                            tool: toolCall.function.name,
+                            args: safeParse(toolCall.function.arguments),
                             result,
-                            phase:  phaseLabel,
+                            phase: phaseLabel,
                         },
                     });
                 }

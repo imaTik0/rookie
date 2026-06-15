@@ -57,7 +57,12 @@ export class FileHelpers {
             (dbFile.mimetype.startsWith("application/json") || dbFile.filename.endsWith(".json")) &&
             this._isOpenApiJson(content)
         ) {
-            const openApiChunks = this._chunkOpenApiJson(content, dbFile.filename, opts, dbFile._id);
+            const openApiChunks = this._chunkOpenApiJson(
+                content,
+                dbFile.filename,
+                opts,
+                dbFile._id,
+            );
             if (openApiChunks.length > 0) return openApiChunks;
         }
 
@@ -224,7 +229,10 @@ export class FileHelpers {
     /** Detect an OpenAPI / Swagger JSON spec by the presence of `paths` + version key. */
     private _isOpenApiJson(content: string): boolean {
         // Quick pre-check before full parse.
-        if (!content.includes('"paths"') && !content.includes('"swagger"') && !content.includes('"openapi"')) {
+        if (
+            !content.includes('"paths"') && !content.includes('"swagger"') &&
+            !content.includes('"openapi"')
+        ) {
             return false;
         }
         try {

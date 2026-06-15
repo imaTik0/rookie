@@ -23,12 +23,14 @@ export class PlannerController {
                     initialContext,
                     async (msg) => {
                         await stream.writeln(msg);
-                    }
+                    },
                 );
                 await stream.writeln(JSON.stringify({ type: "COMPLETE", result }));
             } catch (error) {
                 const err = error as { message?: string };
-                await stream.writeln(JSON.stringify({ type: "ERROR", message: err?.message || "Unknown error" }));
+                await stream.writeln(
+                    JSON.stringify({ type: "ERROR", message: err?.message || "Unknown error" }),
+                );
             }
         }) as any;
     };
@@ -52,7 +54,9 @@ export class PlannerController {
                 await stream.writeln(JSON.stringify({ type: "COMPLETE", result }));
             } catch (error) {
                 const err = error as { message?: string };
-                await stream.writeln(JSON.stringify({ type: "ERROR", message: err?.message || "Unknown error" }));
+                await stream.writeln(
+                    JSON.stringify({ type: "ERROR", message: err?.message || "Unknown error" }),
+                );
             }
         }) as any;
     };

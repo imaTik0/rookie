@@ -15,8 +15,7 @@ const UploadFileRoute = createRoute({
     path: "/files/upload",
     tags: ["Files"],
     summary: "Upload a new file (max 10MB)",
-    description:
-        `Uploads a single documentation file (max 10 MB) and stores it; whitespace is \
+    description: `Uploads a single documentation file (max 10 MB) and stores it; whitespace is \
 normalised on ingest. The file is created **standalone** — it is not searchable until linked \
 to a project (via \`POST /projects\` with \`fileIds\`, or \`POST /projects/{id}/files\`), at \
 which point it is chunked and indexed. Send the file in a \`multipart/form-data\` body under \
@@ -110,8 +109,7 @@ const DownloadFileRoute = createRoute({
     path: "/files/{id}/download",
     tags: ["Files"],
     summary: "Download a file by ID",
-    description:
-        `Streams the raw stored bytes of a file as an attachment (\`Content-Disposition: \
+    description: `Streams the raw stored bytes of a file as an attachment (\`Content-Disposition: \
 attachment\`) with the original filename and MIME type. For documentation crawled from a URL \
 this is the extracted Markdown.`,
     request: {

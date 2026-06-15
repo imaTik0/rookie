@@ -1,166 +1,166 @@
 {
-  "meta": {
-    "project": "Gitea",
-    "configKey": "gitea",
-    "oldImage": "gitea/gitea:1.22.6",
-    "newImage": "gitea/gitea:1.23.8",
-    "projectId": "6a27d8eb0a881e3f2d4946fd",
-    "timestamp": "2026-06-09T09:20:57.987Z",
-    "rookieUrl": "http://localhost:3000",
-    "outputFile": "/Users/pawel/repos/mgr/rookie/experiment-gitea-1780996857987.json"
-  },
-  "baseline": {
-    "masterPlanId": "6a27da290a881e3f2d494703",
-    "goals": [
-      "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
-    ],
-    "breakdown": [
-      {
-        "goal": "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints",
-        "status": "FAILED",
-        "reportId": "6a27da180a881e3f2d494702"
-      }
-    ],
-    "structuredSummary": {
-      "executiveSummary": "The documentation for administrative API endpoints is critically lacking authentication requirements. While endpoint schemas are provided, the failure to specify required OAuth2 scopes (specifically `write:admin`) led to a 100% failure rate for the tested administrative workflow. It is highly recommended to add a 'Required Scopes' section to all `/admin` path endpoints to prevent 403 Forbidden errors during integration.",
-      "overallPassRate": 0,
-      "failureTaxonomy": {
-        "MISSING": 2,
-        "AMBIGUOUS": 0,
-        "INCORRECT": 0,
-        "CONFIG": 1,
-        "ENVIRONMENT": 0,
-        "UNKNOWN": 0
-      },
-      "topFailingFunctions": [
-        {
-          "functionName": "POST /admin/users",
-          "count": 1,
-          "goals": [
-            "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
-          ]
-        },
-        {
-          "functionName": "POST /admin/users/{username}/keys",
-          "count": 1,
-          "goals": [
-            "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
-          ]
-        },
-        {
-          "functionName": "POST /admin/users/${targetUsername}/badges",
-          "count": 1,
-          "goals": [
-            "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
-          ]
-        }
-      ],
-      "goalsBreakdown": [
-        {
-          "goal": "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints",
-          "status": "FAILED",
-          "reportId": "6a27da180a881e3f2d494702",
-          "keyFindings": "All steps failed with 403 Forbidden errors because the documentation does not specify that the `write:admin` scope is required for administrative endpoints."
-        }
-      ],
-      "documentationGapDetails": [
-        {
-          "fragment": "## [](#tag/admin/operation/adminAddUserBadges)Add a badge to a user",
-          "file": "docs.gitea.com_api_1.22_.md",
-          "proposedFix": "## [](#tag/admin/operation/adminAddUserBadges)Add a badge to a user\n\n**Authentication:** Required\n**Required Scope:** `write:admin`",
-          "affectedGoals": [
-            "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
-          ]
-        },
-        {
-          "fragment": "None. The provided documentation fragments contain request body schemas and operation tags but completely omit the authentication/scope requirements for the admin endpoints.",
-          "file": null,
-          "proposedFix": "## [](#tag/admin/operation/adminAddUserSSHKey) Add an SSH key to a user\n\n**Authentication Required**\n**Required Scope:** `write:admin`\n\n##### Request Body schema: application/json\n\n| key | string (required) | The SSH public key |\n| title | string | A label for the key |\n| read_only | boolean | Whether the key is read-only |",
-          "affectedGoals": [
-            "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
-          ]
-        }
-      ],
-      "recommendations": [
-        "Explicitly document the required OAuth2 scopes (e.g., `write:admin`) for every endpoint under the `/admin` path.",
-        "Add a global 'Authentication' section to the API documentation explaining how to generate tokens with specific scopes."
-      ]
+    "meta": {
+        "project": "Gitea",
+        "configKey": "gitea",
+        "oldImage": "gitea/gitea:1.22.6",
+        "newImage": "gitea/gitea:1.23.8",
+        "projectId": "6a27d8eb0a881e3f2d4946fd",
+        "timestamp": "2026-06-09T09:20:57.987Z",
+        "rookieUrl": "http://localhost:3000",
+        "outputFile": "/Users/pawel/repos/mgr/rookie/experiment-gitea-1780996857987.json"
     },
-    "markdownSummary": null
-  },
-  "experiment": {
-    "masterPlanId": "6a27daf80a881e3f2d494709",
-    "goals": [
-      "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list"
-    ],
-    "breakdown": [
-      {
-        "goal": "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list",
-        "status": "FAILED",
-        "reportId": "6a27daed0a881e3f2d494708"
-      }
-    ],
-    "structuredSummary": {
-      "executiveSummary": "The documentation for repository topic management is critically incomplete, specifically regarding the addition and replacement of topics. While listing and deleting topics worked, the lack of API specifications for POST and PATCH operations led to runtime crashes due to unexpected empty response bodies (204 No Content). It is recommended to add full endpoint definitions for `/repos/{owner}/{repo}/topics` and its sub-resources, explicitly detailing response status codes and body formats.",
-      "overallPassRate": 0,
-      "failureTaxonomy": {
-        "MISSING": 2,
-        "AMBIGUOUS": 0,
-        "INCORRECT": 0,
-        "CONFIG": 0,
-        "ENVIRONMENT": 0,
-        "UNKNOWN": 0
-      },
-      "topFailingFunctions": [
-        {
-          "functionName": "response.json()",
-          "count": 2,
-          "goals": [
-            "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list"
-          ]
-        }
-      ],
-      "goalsBreakdown": [
-        {
-          "goal": "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list",
-          "status": "FAILED",
-          "reportId": "6a27daed0a881e3f2d494708",
-          "keyFindings": "Failed during 'Add a Topic' and 'Replace Topic List' steps because the documentation for these endpoints was missing, leading the developer to incorrectly assume JSON responses for 204 No Content status codes."
-        }
-      ],
-      "documentationGapDetails": [
-        {
-          "fragment": "None",
-          "file": null,
-          "proposedFix": "##### Add a Topic to a Repository\n`POST /repos/{owner}/{repo}/topics/{topic}`\n\n**Responses:**\n- **204 No Content**: Topic successfully added. The response body is empty.",
-          "affectedGoals": [
-            "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list"
-          ]
+    "baseline": {
+        "masterPlanId": "6a27da290a881e3f2d494703",
+        "goals": [
+            "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
+        ],
+        "breakdown": [
+            {
+                "goal": "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints",
+                "status": "FAILED",
+                "reportId": "6a27da180a881e3f2d494702"
+            }
+        ],
+        "structuredSummary": {
+            "executiveSummary": "The documentation for administrative API endpoints is critically lacking authentication requirements. While endpoint schemas are provided, the failure to specify required OAuth2 scopes (specifically `write:admin`) led to a 100% failure rate for the tested administrative workflow. It is highly recommended to add a 'Required Scopes' section to all `/admin` path endpoints to prevent 403 Forbidden errors during integration.",
+            "overallPassRate": 0,
+            "failureTaxonomy": {
+                "MISSING": 2,
+                "AMBIGUOUS": 0,
+                "INCORRECT": 0,
+                "CONFIG": 1,
+                "ENVIRONMENT": 0,
+                "UNKNOWN": 0
+            },
+            "topFailingFunctions": [
+                {
+                    "functionName": "POST /admin/users",
+                    "count": 1,
+                    "goals": [
+                        "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
+                    ]
+                },
+                {
+                    "functionName": "POST /admin/users/{username}/keys",
+                    "count": 1,
+                    "goals": [
+                        "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
+                    ]
+                },
+                {
+                    "functionName": "POST /admin/users/${targetUsername}/badges",
+                    "count": 1,
+                    "goals": [
+                        "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
+                    ]
+                }
+            ],
+            "goalsBreakdown": [
+                {
+                    "goal": "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints",
+                    "status": "FAILED",
+                    "reportId": "6a27da180a881e3f2d494702",
+                    "keyFindings": "All steps failed with 403 Forbidden errors because the documentation does not specify that the `write:admin` scope is required for administrative endpoints."
+                }
+            ],
+            "documentationGapDetails": [
+                {
+                    "fragment": "## [](#tag/admin/operation/adminAddUserBadges)Add a badge to a user",
+                    "file": "docs.gitea.com_api_1.22_.md",
+                    "proposedFix": "## [](#tag/admin/operation/adminAddUserBadges)Add a badge to a user\n\n**Authentication:** Required\n**Required Scope:** `write:admin`",
+                    "affectedGoals": [
+                        "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
+                    ]
+                },
+                {
+                    "fragment": "None. The provided documentation fragments contain request body schemas and operation tags but completely omit the authentication/scope requirements for the admin endpoints.",
+                    "file": null,
+                    "proposedFix": "## [](#tag/admin/operation/adminAddUserSSHKey) Add an SSH key to a user\n\n**Authentication Required**\n**Required Scope:** `write:admin`\n\n##### Request Body schema: application/json\n\n| key | string (required) | The SSH public key |\n| title | string | A label for the key |\n| read_only | boolean | Whether the key is read-only |",
+                    "affectedGoals": [
+                        "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints"
+                    ]
+                }
+            ],
+            "recommendations": [
+                "Explicitly document the required OAuth2 scopes (e.g., `write:admin`) for every endpoint under the `/admin` path.",
+                "Add a global 'Authentication' section to the API documentation explaining how to generate tokens with specific scopes."
+            ]
         },
-        {
-          "fragment": "N/A - No documentation for the /repos/{owner}/{repo}/topics endpoint was provided in the fragments.",
-          "file": null,
-          "proposedFix": "### Replace Repository Topic List\n\n`PATCH /repos/{owner}/{repo}/topics`\n\n##### Request Body schema: application/json\n\n| Field | Type | Description |\n| --- | --- | --- |\n| topics | array of strings | The list of topics to set for the repository |\n\n##### Responses\n- **200 OK**: Returns the updated topic list.\n- **204 No Content**: Successfully updated (no body returned).",
-          "affectedGoals": [
-            "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list"
-          ]
-        }
-      ],
-      "recommendations": [
-        "Document the `POST /repos/{owner}/{repo}/topics/{topic}` endpoint and explicitly state that it returns a 204 No Content response to prevent `response.json()` parsing errors.",
-        "Provide a complete API reference for the `PATCH /repos/{owner}/{repo}/topics` endpoint, including the required JSON request body schema (array of strings) and expected response codes."
-      ]
+        "markdownSummary": null
     },
-    "markdownSummary": null
-  },
-  "drift": {
-    "regressions": [],
-    "improvements": [],
-    "stable": [
-      {
-        "goal": "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints",
-        "status": "FAILED"
-      }
-    ]
-  }
+    "experiment": {
+        "masterPlanId": "6a27daf80a881e3f2d494709",
+        "goals": [
+            "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list"
+        ],
+        "breakdown": [
+            {
+                "goal": "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list",
+                "status": "FAILED",
+                "reportId": "6a27daed0a881e3f2d494708"
+            }
+        ],
+        "structuredSummary": {
+            "executiveSummary": "The documentation for repository topic management is critically incomplete, specifically regarding the addition and replacement of topics. While listing and deleting topics worked, the lack of API specifications for POST and PATCH operations led to runtime crashes due to unexpected empty response bodies (204 No Content). It is recommended to add full endpoint definitions for `/repos/{owner}/{repo}/topics` and its sub-resources, explicitly detailing response status codes and body formats.",
+            "overallPassRate": 0,
+            "failureTaxonomy": {
+                "MISSING": 2,
+                "AMBIGUOUS": 0,
+                "INCORRECT": 0,
+                "CONFIG": 0,
+                "ENVIRONMENT": 0,
+                "UNKNOWN": 0
+            },
+            "topFailingFunctions": [
+                {
+                    "functionName": "response.json()",
+                    "count": 2,
+                    "goals": [
+                        "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list"
+                    ]
+                }
+            ],
+            "goalsBreakdown": [
+                {
+                    "goal": "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list",
+                    "status": "FAILED",
+                    "reportId": "6a27daed0a881e3f2d494708",
+                    "keyFindings": "Failed during 'Add a Topic' and 'Replace Topic List' steps because the documentation for these endpoints was missing, leading the developer to incorrectly assume JSON responses for 204 No Content status codes."
+                }
+            ],
+            "documentationGapDetails": [
+                {
+                    "fragment": "None",
+                    "file": null,
+                    "proposedFix": "##### Add a Topic to a Repository\n`POST /repos/{owner}/{repo}/topics/{topic}`\n\n**Responses:**\n- **204 No Content**: Topic successfully added. The response body is empty.",
+                    "affectedGoals": [
+                        "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list"
+                    ]
+                },
+                {
+                    "fragment": "N/A - No documentation for the /repos/{owner}/{repo}/topics endpoint was provided in the fragments.",
+                    "file": null,
+                    "proposedFix": "### Replace Repository Topic List\n\n`PATCH /repos/{owner}/{repo}/topics`\n\n##### Request Body schema: application/json\n\n| Field | Type | Description |\n| --- | --- | --- |\n| topics | array of strings | The list of topics to set for the repository |\n\n##### Responses\n- **200 OK**: Returns the updated topic list.\n- **204 No Content**: Successfully updated (no body returned).",
+                    "affectedGoals": [
+                        "Manage repository topics by listing existing topics, adding new ones, deleting specific topics, or replacing the entire topic list"
+                    ]
+                }
+            ],
+            "recommendations": [
+                "Document the `POST /repos/{owner}/{repo}/topics/{topic}` endpoint and explicitly state that it returns a 204 No Content response to prevent `response.json()` parsing errors.",
+                "Provide a complete API reference for the `PATCH /repos/{owner}/{repo}/topics` endpoint, including the required JSON request body schema (array of strings) and expected response codes."
+            ]
+        },
+        "markdownSummary": null
+    },
+    "drift": {
+        "regressions": [],
+        "improvements": [],
+        "stable": [
+            {
+                "goal": "Automate the creation of a new user and assign them a specific SSH public key and set of badges using administrative endpoints",
+                "status": "FAILED"
+            }
+        ]
+    }
 }

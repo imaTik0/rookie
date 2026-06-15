@@ -57,7 +57,7 @@ export function registerController(
     const prefix = Reflect.getMetadata("prefix", controllerInstance.constructor) || "";
     const routes = Reflect.getMetadata("routes", controllerInstance.constructor) || [];
 
-    for (const { _method, route, handlerName } of routes) {
+    for (const { route, handlerName } of routes) {
         const handler = controllerInstance[handlerName].bind(
             controllerInstance,
         );

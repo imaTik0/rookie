@@ -1,6 +1,6 @@
 import * as path from "@std/path";
 import { IOC } from "./IOC.ts";
-import { isManualRegistrationSet } from "./decorator.ts";
+import { shouldAutoRegister } from "./decorator.ts";
 
 export interface Registry {
     register(type: unknown): void;
@@ -24,9 +24,14 @@ export class Scanner {
         for (const entry of entries) {
             const entryPath = path.resolve(dirPath, entry.name);
             if (Deno.statSync(entryPath).isDirectory) {
-                this.scan(registry, entryPath, filter);
+                // Must await: controllers live in subdirectories, and callers
+                // (Container.init) rely on registration being complete on return.
+                await this.scan(registry, entryPath, filter);
             } else if (
                 (entry.name.endsWith(".js") || entry.name.endsWith(".ts")) &&
+                // Never import co-located test files: their top-level Deno.test()
+                // calls would run at startup (and break when scanning under a test).
+                !entry.name.endsWith(".test.ts") &&
                 (!filter || filter.test(entry.name))
             ) {
                 try {
@@ -35,7 +40,7 @@ export class Scanner {
                         const exported = module[key];
                         if (
                             typeof exported == "function" &&
-                            isManualRegistrationSet(exported)
+                            shouldAutoRegister(exported)
                         ) {
                             if (Scanner.DEBUG) {
                                 console.log(

@@ -12,8 +12,7 @@ const ListJobsRoute = createRoute({
     path: "/jobs",
     tags: ["Jobs"],
     summary: "List async jobs (paginated, filterable)",
-    description:
-        `Returns a paginated list of async jobs, most recent first. Jobs are long-running \
+    description: `Returns a paginated list of async jobs, most recent first. Jobs are long-running \
 operations submitted via other endpoints (e.g. \`POST /projects/from-url\`, \
 \`POST /testsuites/{id}/execute\`). Filter with \`kind\` and \`status\` to find, for example, all \
 currently \`RUNNING\` crawls.`,

@@ -30,8 +30,7 @@ const CreateTestSuiteRoute = createRoute({
     path: "/testsuites",
     tags: ["Test suites"],
     summary: "Create a new Test Suite",
-    description:
-        `Defines a reusable test against a project's documentation. A test suite is a \
+    description: `Defines a reusable test against a project's documentation. A test suite is a \
 **specification only** — it does not run until you call one of the \`/execute\` endpoints.
 
 Pick a \`mode\`:
@@ -88,7 +87,8 @@ const GetTestSuiteRoute = createRoute({
     path: "/testsuites/{testSuiteId}",
     tags: ["Test suites"],
     summary: "Get a single Test Suite by ID",
-    description: "Returns one test-suite definition by ID. This is the spec, not its execution results — see the Reports API for run output.",
+    description:
+        "Returns one test-suite definition by ID. This is the spec, not its execution results — see the Reports API for run output.",
     request: { params: TestSuiteIdParam },
     responses: {
         200: commonResponses["200"],
@@ -123,7 +123,8 @@ const DeleteTestSuiteRoute = createRoute({
     path: "/testsuites/{testSuiteId}",
     tags: ["Test suites"],
     summary: "Delete a Test Suite",
-    description: "Deletes a test-suite definition. Reports already produced by its past executions are retained. Returns `204 No Content`.",
+    description:
+        "Deletes a test-suite definition. Reports already produced by its past executions are retained. Returns `204 No Content`.",
     request: { params: TestSuiteIdParam },
     responses: {
         204: { description: "Test Suite deleted successfully" }, // 204 has no body
@@ -147,7 +148,8 @@ polling, use \`GET /testsuites/{id}/execute/stream\` (SSE).`,
     request: { params: TestSuiteIdParam },
     responses: {
         202: {
-            description: "Execution accepted; returns the job to poll (`result.reportId` on success).",
+            description:
+                "Execution accepted; returns the job to poll (`result.reportId` on success).",
             content: { "application/json": { schema: JobSchema } },
         },
         404: commonResponses["404"],
@@ -159,8 +161,7 @@ const StreamExecuteTestSuiteRoute = createRoute({
     path: "/testsuites/{testSuiteId}/execute/stream",
     tags: ["Test suites"],
     summary: "Execute a Test Suite and stream logs via SSE",
-    description:
-        `Same execution as \`POST .../execute\`, but streams live progress over \
+    description: `Same execution as \`POST .../execute\`, but streams live progress over \
 **Server-Sent Events** so a UI can follow the agent in real time. Default \`message\` events \
 carry human-readable progress logs (research queries, generated code, container STDOUT/STDERR); \
 a terminal \`done\` event carries the final report as JSON, or an \`error\` event carries a \
@@ -168,7 +169,8 @@ message if the run fails. Consume with an \`EventSource\` client.`,
     request: { params: TestSuiteIdParam },
     responses: {
         200: {
-            description: "An SSE stream of progress events ending in a `done` (report) or `error` event.",
+            description:
+                "An SSE stream of progress events ending in a `done` (report) or `error` event.",
         },
         404: commonResponses["404"],
     },

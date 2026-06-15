@@ -7,8 +7,7 @@ export const PlannerRoutes = {
         path: "/planner/rerun",
         tags: ["Planner"],
         summary: "Re-run an existing master plan (streaming)",
-        description:
-            `Re-runs a previously saved MASTER_PLAN report, **skipping goal generation** \
+        description: `Re-runs a previously saved MASTER_PLAN report, **skipping goal generation** \
 and reusing the goals that were produced in the original run. Progress is **streamed as NDJSON** \
 identical to \`/planner/run\`.
 
@@ -30,12 +29,13 @@ measuring natural variance across executions).`,
                             ).openapi({ example: "rep_abc123" }),
                             projectId: z.string().optional().describe(
                                 "Override the project to run against (e.g. a project with updated docs). " +
-                                "Defaults to the original plan's project.",
+                                    "Defaults to the original plan's project.",
                             ),
                             initialContext: z.string().optional().describe(
                                 "JSON string injected as execution context. Defaults to the original plan's context.",
                             ).openapi({
-                                example: '{"apiBase":"http://host.docker.internal:14000/api/v1","token":"<token>"}',
+                                example:
+                                    '{"apiBase":"http://host.docker.internal:14000/api/v1","token":"<token>"}',
                             }),
                         }),
                     },
@@ -89,14 +89,16 @@ This is long-running — duration scales with \`maxGoals\` and model/sandbox lat
                             projectId: z.string().describe("ID of the project to analyse").openapi({
                                 example: "proj_clx123abc0000m8ols1234567",
                             }),
-                            maxGoals: z.number().int().min(1).max(15).optional().default(5).describe(
-                                "Maximum number of developer goals to generate and execute (1–15)",
-                            ),
+                            maxGoals: z.number().int().min(1).max(15).optional().default(5)
+                                .describe(
+                                    "Maximum number of developer goals to generate and execute (1–15)",
+                                ),
                             initialContext: z.string().optional().default("{}").describe(
                                 "JSON string injected as the initial execution context for every goal " +
                                     "(e.g. base URL and auth token)",
                             ).openapi({
-                                example: '{"apiBase":"http://host.docker.internal:14000/api/v1","token":"<token>"}',
+                                example:
+                                    '{"apiBase":"http://host.docker.internal:14000/api/v1","token":"<token>"}',
                             }),
                         }),
                     },
@@ -114,7 +116,8 @@ This is long-running — duration scales with \`maxGoals\` and model/sandbox lat
                     "NDJSON progress stream; the terminal `COMPLETE` line carries the persisted master-plan report.",
             },
             400: {
-                description: "Invalid request, or the project has no indexed documentation to plan over.",
+                description:
+                    "Invalid request, or the project has no indexed documentation to plan over.",
                 content: { "application/json": { schema: ErrorSchema } },
             },
         },

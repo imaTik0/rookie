@@ -160,7 +160,9 @@ export const ReportSchema = z.object({
     masterPlanId: z.string().optional(),
     masterPlanReports: z.array(z.string()).optional(),
     rerunFromMasterPlanId: z.string().optional()
-        .describe("ID of the master plan this report was re-run from (present only for rerun reports)."),
+        .describe(
+            "ID of the master plan this report was re-run from (present only for rerun reports).",
+        ),
     structuredSummary: z.any().optional(),
     coverageReport: z.array(CoverageItemSchema).optional()
         .describe("Research-phase documentation coverage breakdown."),
@@ -225,7 +227,9 @@ export const ReportListQuerySchema = PaginationQuerySchema.extend({
     }),
 });
 
-export const PaginatedReportListSchema = paginated(ListReportItemSchema).openapi("PaginatedReports");
+export const PaginatedReportListSchema = paginated(ListReportItemSchema).openapi(
+    "PaginatedReports",
+);
 
 export type ReportType = z.infer<typeof ReportType>;
 export type Report = z.infer<typeof ReportSchema>;

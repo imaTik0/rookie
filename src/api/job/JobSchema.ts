@@ -1,5 +1,5 @@
 import { z } from "@hono/zod-openapi";
-import { PaginationQuerySchema, paginated } from "../CommonSchema.ts";
+import { paginated, PaginationQuerySchema } from "../CommonSchema.ts";
 
 export const JobKindSchema = z.enum(["EXECUTE_TEST_SUITE", "CRAWL_DOCS"])
     .openapi({ example: "CRAWL_DOCS", description: "The kind of work the job performs." });

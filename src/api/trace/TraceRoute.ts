@@ -42,8 +42,7 @@ const GetTraceByIdRoute = createRoute({
     path: "/traces/{traceId}",
     tags: ["Traces"],
     summary: "Get a specific trace by ID",
-    description:
-        `Returns a single trace document by ID, including its full ordered list of events \
+    description: `Returns a single trace document by ID, including its full ordered list of events \
 (\`LLM_CALL\` / \`TOOL_CALL\`) and the phase/goal metadata it was recorded under.`,
     request: { params: TraceIdParam },
     responses: {

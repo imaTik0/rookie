@@ -32,8 +32,8 @@ import {
     confusionMatrix,
     detectionMetrics,
     GapLabel,
-    LocalizationRecord,
     localizationMetrics,
+    LocalizationRecord,
     macroF1,
     mean,
     perLabelMetrics,
@@ -128,7 +128,10 @@ async function streamMasterPlan(
 }
 
 /** Run a fresh master plan for a project. */
-async function runMasterPlan(projectId: string, maxGoals: number): Promise<{ reportIds: string[]; masterPlanId: string | null }> {
+async function runMasterPlan(
+    projectId: string,
+    maxGoals: number,
+): Promise<{ reportIds: string[]; masterPlanId: string | null }> {
     return streamMasterPlan("/planner/run", { projectId, maxGoals, initialContext: "{}" });
 }
 
@@ -285,12 +288,19 @@ async function main() {
             // ── Phase 1: run on original (broken) docs ────────────────────────
             const fileIds = await uploadFiles(fixture);
             const projectId = await createProject(fixture.name, fileIds);
-            const { reportIds, masterPlanId } = await runMasterPlan(projectId, fixture.goals.length);
+            const { reportIds, masterPlanId } = await runMasterPlan(
+                projectId,
+                fixture.goals.length,
+            );
             const reports = (await Promise.all(reportIds.map(getReport))).filter(
                 (r): r is ReportLike & { id: string } => !!r,
             );
 
-            console.log(`  [BEFORE] ${reports.length} goal report(s), masterPlanId=${masterPlanId ?? "n/a"}`);
+            console.log(
+                `  [BEFORE] ${reports.length} goal report(s), masterPlanId=${
+                    masterPlanId ?? "n/a"
+                }`,
+            );
             const beforeScores = await scoreReports(reports, fixture, before);
             patchableDefectsBefore += beforeScores.patchableDefects;
 
@@ -304,18 +314,24 @@ async function main() {
             );
             for (const defect of fixture.expectedDefects) {
                 const kw = defect.matchKeywords.map((k) => k.toLowerCase());
-                const match = docFailures.find((f) => kw.some((k) => failureText(f.step).includes(k)));
+                const match = docFailures.find((f) =>
+                    kw.some((k) => failureText(f.step).includes(k))
+                );
                 if (match) {
                     const fa = match.step.failureAnalysis!;
                     console.log(
                         `  [BEFORE DETECTED] ${defect.id}: predicted=${fa.documentationGap} ` +
                             `conf=${fa.confidence ?? "n/a"} ` +
-                            `fragment=${fa.fragmentVerification?.verified
-                                ? `verified@${fa.fragmentVerification.file}:${fa.fragmentVerification.lineStart}`
-                                : "unverified"}`,
+                            `fragment=${
+                                fa.fragmentVerification?.verified
+                                    ? `verified@${fa.fragmentVerification.file}:${fa.fragmentVerification.lineStart}`
+                                    : "unverified"
+                            }`,
                     );
                 } else {
-                    console.log(`  [BEFORE MISSED]   ${defect.id} (expected ${defect.expectedGap})`);
+                    console.log(
+                        `  [BEFORE MISSED]   ${defect.id} (expected ${defect.expectedGap})`,
+                    );
                 }
             }
 
@@ -324,9 +340,18 @@ async function main() {
                 fixturesWithRerun++;
                 console.log(`  [AFTER]  Re-running goals on fixed docs...`);
                 try {
-                    const fixedFileIds = await uploadFiles({ ...fixture, files: fixture.fixedFiles });
-                    const fixedProjectId = await createProject(`${fixture.name}-fixed`, fixedFileIds);
-                    const { reportIds: rerunReportIds } = await rerunMasterPlan(masterPlanId, fixedProjectId);
+                    const fixedFileIds = await uploadFiles({
+                        ...fixture,
+                        files: fixture.fixedFiles,
+                    });
+                    const fixedProjectId = await createProject(
+                        `${fixture.name}-fixed`,
+                        fixedFileIds,
+                    );
+                    const { reportIds: rerunReportIds } = await rerunMasterPlan(
+                        masterPlanId,
+                        fixedProjectId,
+                    );
                     const rerunReports = (await Promise.all(rerunReportIds.map(getReport))).filter(
                         (r): r is ReportLike & { id: string } => !!r,
                     );
@@ -350,7 +375,9 @@ async function main() {
                             const fa = match.step.failureAnalysis!;
                             console.log(
                                 `  [AFTER  DETECTED] ${defect.id}: predicted=${fa.documentationGap} ` +
-                                    `conf=${fa.confidence ?? "n/a"} (persisted gap — fix may be incomplete)`,
+                                    `conf=${
+                                        fa.confidence ?? "n/a"
+                                    } (persisted gap — fix may be incomplete)`,
                             );
                         } else {
                             console.log(`  [AFTER  RESOLVED] ${defect.id} ✓`);
@@ -372,7 +399,11 @@ async function main() {
         patchable: number,
     ) {
         console.log(`\n========== ${label} ==========`);
-        const det = detectionMetrics(acc.detected.value, acc.totalGold.value, acc.totalFlagged.value);
+        const det = detectionMetrics(
+            acc.detected.value,
+            acc.totalGold.value,
+            acc.totalFlagged.value,
+        );
         console.log(
             `Gap detection: precision=${det.precision.toFixed(3)} ` +
                 `recall=${det.recall.toFixed(3)} f1=${det.f1.toFixed(3)} ` +
@@ -383,7 +414,11 @@ async function main() {
             const cm = confusionMatrix(acc.goldLabels, acc.predLabels);
             const per = perLabelMetrics(cm);
             console.log(`Classifier macro-F1 (matched defects): ${macroF1(per).toFixed(3)}`);
-            console.log(`Classifier Cohen's kappa: ${cohenKappa(acc.goldLabels, acc.predLabels).toFixed(3)}`);
+            console.log(
+                `Classifier Cohen's kappa: ${
+                    cohenKappa(acc.goldLabels, acc.predLabels).toFixed(3)
+                }`,
+            );
             console.table(per);
 
             const loc = localizationMetrics(acc.localization);
@@ -405,17 +440,23 @@ async function main() {
                 `spurious flags=${mean(acc.confidenceSpurious).toFixed(3)} ` +
                 `(n=${acc.confidenceSpurious.length})` +
                 (acc.confidenceTrue.length && acc.confidenceSpurious.length
-                    ? ` — separation ${(mean(acc.confidenceTrue) - mean(acc.confidenceSpurious)).toFixed(3)}`
+                    ? ` — separation ${
+                        (mean(acc.confidenceTrue) - mean(acc.confidenceSpurious)).toFixed(3)
+                    }`
                     : ""),
         );
         console.log(
             `Goal pass rate (strict): ${
-                acc.goalsTotal.value === 0 ? "0" : (acc.goalsPassed.value / acc.goalsTotal.value).toFixed(3)
+                acc.goalsTotal.value === 0
+                    ? "0"
+                    : (acc.goalsPassed.value / acc.goalsTotal.value).toFixed(3)
             } (${acc.goalsPassed.value}/${acc.goalsTotal.value}, +${acc.goalsPartial.value} partial)`,
         );
         console.log(
             `Step pass rate: ${
-                acc.stepsTotal.value === 0 ? "0" : (acc.stepsPassed.value / acc.stepsTotal.value).toFixed(3)
+                acc.stepsTotal.value === 0
+                    ? "0"
+                    : (acc.stepsPassed.value / acc.stepsTotal.value).toFixed(3)
             } (${acc.stepsPassed.value}/${acc.stepsTotal.value})`,
         );
         console.log(
@@ -428,25 +469,49 @@ async function main() {
     printMetrics("EVALUATION SUMMARY — BEFORE (broken docs)", before, patchableDefectsBefore);
 
     if (fixturesWithRerun > 0) {
-        printMetrics("EVALUATION SUMMARY — AFTER (fixed docs, same goals)", after, patchableDefectsAfter);
+        printMetrics(
+            "EVALUATION SUMMARY — AFTER (fixed docs, same goals)",
+            after,
+            patchableDefectsAfter,
+        );
 
         // Delta summary
-        const detBefore = detectionMetrics(before.detected.value, before.totalGold.value, before.totalFlagged.value);
-        const detAfter = detectionMetrics(after.detected.value, after.totalGold.value, after.totalFlagged.value);
-        const passRateBefore = before.goalsTotal.value === 0 ? 0 : before.goalsPassed.value / before.goalsTotal.value;
-        const passRateAfter = after.goalsTotal.value === 0 ? 0 : after.goalsPassed.value / after.goalsTotal.value;
+        const detBefore = detectionMetrics(
+            before.detected.value,
+            before.totalGold.value,
+            before.totalFlagged.value,
+        );
+        const detAfter = detectionMetrics(
+            after.detected.value,
+            after.totalGold.value,
+            after.totalFlagged.value,
+        );
+        const passRateBefore = before.goalsTotal.value === 0
+            ? 0
+            : before.goalsPassed.value / before.goalsTotal.value;
+        const passRateAfter = after.goalsTotal.value === 0
+            ? 0
+            : after.goalsPassed.value / after.goalsTotal.value;
 
         console.log("\n========== BEFORE → AFTER DELTA ==========");
         console.log(
-            `Gap detection recall: ${detBefore.recall.toFixed(3)} → ${detAfter.recall.toFixed(3)} ` +
-                `(${(detAfter.recall - detBefore.recall >= 0 ? "+" : "")}${(detAfter.recall - detBefore.recall).toFixed(3)})`,
+            `Gap detection recall: ${detBefore.recall.toFixed(3)} → ${
+                detAfter.recall.toFixed(3)
+            } ` +
+                `(${(detAfter.recall - detBefore.recall >= 0 ? "+" : "")}${
+                    (detAfter.recall - detBefore.recall).toFixed(3)
+                })`,
         );
         console.log(
             `Goal pass rate: ${passRateBefore.toFixed(3)} → ${passRateAfter.toFixed(3)} ` +
-                `(${(passRateAfter - passRateBefore >= 0 ? "+" : "")}${(passRateAfter - passRateBefore).toFixed(3)})`,
+                `(${(passRateAfter - passRateBefore >= 0 ? "+" : "")}${
+                    (passRateAfter - passRateBefore).toFixed(3)
+                })`,
         );
         console.log(
-            `Defects resolved by fix: ${before.detected.value - after.detected.value}/${before.detected.value}`,
+            `Defects resolved by fix: ${
+                before.detected.value - after.detected.value
+            }/${before.detected.value}`,
         );
         console.log("===========================================");
     }

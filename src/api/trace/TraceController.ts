@@ -9,7 +9,9 @@ export class TraceController {
     constructor(private traceRepository: TraceRepository) {}
 
     @Get(TraceRoutes.GetTracesByTestSuiteRoute)
-    getTracesByTestSuite: RouteHandler<typeof TraceRoutes.GetTracesByTestSuiteRoute> = async (c) => {
+    getTracesByTestSuite: RouteHandler<typeof TraceRoutes.GetTracesByTestSuiteRoute> = async (
+        c,
+    ) => {
         const { testSuiteId } = c.req.valid("param");
         const traces = await this.traceRepository.getByTestSuiteId(testSuiteId);
         return c.json(traces as any, 200);

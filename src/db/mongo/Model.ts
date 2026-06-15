@@ -76,5 +76,3 @@ export interface JobModel {
     startedAt?: Date;
     finishedAt?: Date;
 }
-
-

@@ -1,118 +1,118 @@
 {
-  "meta": {
-    "project": "Gitea",
-    "configKey": "gitea",
-    "oldImage": "gitea/gitea:1.22.6",
-    "newImage": "gitea/gitea:1.23.8",
-    "projectId": "6a2b30dcab26eaa0dedcc45b",
-    "timestamp": "2026-06-11T22:08:38.375Z",
-    "rookieUrl": "http://localhost:3000",
-    "outputFile": "/Users/pawel/repos/mgr/rookie/experiment-gitea-1781215718362.json"
-  },
-  "baseline": {
-    "masterPlanId": "6a2b315eab26eaa0dedcc461",
-    "goals": [
-      "Create a new repository on behalf of a specific user with a custom description and private visibility"
-    ],
-    "breakdown": [
-      {
-        "goal": "Create a new repository on behalf of a specific user with a custom description and private visibility",
-        "status": "FAILED",
-        "reportId": "6a2b3158ab26eaa0dedcc460"
-      }
-    ],
-    "structuredSummary": {
-      "executiveSummary": "The documentation for the Gitea Admin API is functionally accurate regarding endpoints and request bodies but fails to specify critical authentication requirements. A key failure was observed where the `adminCreateRepo` operation lacked documentation regarding the necessary `write:admin` OAuth2 scope, leading to 403 Forbidden errors. It is recommended that all admin-level API endpoints be updated to explicitly list required scopes.",
-      "overallPassRate": 0,
-      "failureTaxonomy": {
-        "CONFIG": 1
-      },
-      "topFailingFunctions": [
-        {
-          "functionName": "adminCreateRepo",
-          "count": 1,
-          "goals": [
-            "Create a new repository on behalf of a specific user with a custom description and private visibility"
-          ]
-        }
-      ],
-      "goalsBreakdown": [
-        {
-          "goal": "Create a new repository on behalf of a specific user with a custom description and private visibility",
-          "status": "FAILED",
-          "reportId": "6a2b3158ab26eaa0dedcc460",
-          "keyFindings": "The request was correctly formed, but failed with a 403 Forbidden error because the documentation did not specify the required 'write:admin' scope for the token."
-        }
-      ],
-      "documentationGapDetails": [
-        {
-          "fragment": "## [](#tag/admin/operation/adminCreateRepo)Create a repository on behalf of a user",
-          "proposedFix": "## [](#tag/admin/operation/adminCreateRepo)Create a repository on behalf of a user\n\n**Authentication Required:** Admin Token\n**Required Scopes:** `write:admin`",
-          "affectedGoals": [
-            "Create a new repository on behalf of a specific user with a custom description and private visibility"
-          ],
-          "file": "docs.gitea.com_api_1.22_.md",
-          "documentationGap": "CONFIG",
-          "lineStart": 1285,
-          "lineEnd": 1285,
-          "verified": true,
-          "occurrences": 1,
-          "meanConfidence": 1
-        }
-      ],
-      "recommendations": [
-        "Audit all admin-level API documentation in `docs.gitea.com_api_1.22_.md` to ensure that required OAuth2 scopes (e.g., `write:admin`) are explicitly listed for every endpoint."
-      ]
+    "meta": {
+        "project": "Gitea",
+        "configKey": "gitea",
+        "oldImage": "gitea/gitea:1.22.6",
+        "newImage": "gitea/gitea:1.23.8",
+        "projectId": "6a2b30dcab26eaa0dedcc45b",
+        "timestamp": "2026-06-11T22:08:38.375Z",
+        "rookieUrl": "http://localhost:3000",
+        "outputFile": "/Users/pawel/repos/mgr/rookie/experiment-gitea-1781215718362.json"
     },
-    "markdownSummary": null
-  },
-  "experiment": {
-    "masterPlanId": "6a2b31e5ab26eaa0dedcc467",
-    "goals": [
-      "Manage repository topics by listing, adding, deleting, or replacing the list of topics for a specific repository"
-    ],
-    "breakdown": [
-      {
-        "goal": "Manage repository topics by listing, adding, deleting, or replacing the list of topics for a specific repository",
-        "status": "SUCCESS",
-        "reportId": "6a2b31e0ab26eaa0dedcc466"
-      }
-    ],
-    "structuredSummary": {
-      "executiveSummary": "The documentation for repository topic management is highly effective, with all tested scenarios passing successfully. The API endpoints for listing, adding, replacing, and deleting topics are well-documented and function as expected. No critical gaps or ambiguities were identified during this execution cycle.",
-      "overallPassRate": 1,
-      "failureTaxonomy": {},
-      "topFailingFunctions": [],
-      "goalsBreakdown": [
-        {
-          "goal": "Manage repository topics by listing, adding, deleting, or replacing the list of topics for a specific repository",
-          "status": "SUCCESS",
-          "reportId": "6a2b31e0ab26eaa0dedcc466",
-          "keyFindings": "All operations (List, Add, Replace, Delete) were completed successfully without any documentation-related friction."
-        }
-      ],
-      "documentationGapDetails": [],
-      "recommendations": [
-        "Maintain current documentation standards for repository topic management as they are currently providing 100% success rate for developer goals."
-      ]
+    "baseline": {
+        "masterPlanId": "6a2b315eab26eaa0dedcc461",
+        "goals": [
+            "Create a new repository on behalf of a specific user with a custom description and private visibility"
+        ],
+        "breakdown": [
+            {
+                "goal": "Create a new repository on behalf of a specific user with a custom description and private visibility",
+                "status": "FAILED",
+                "reportId": "6a2b3158ab26eaa0dedcc460"
+            }
+        ],
+        "structuredSummary": {
+            "executiveSummary": "The documentation for the Gitea Admin API is functionally accurate regarding endpoints and request bodies but fails to specify critical authentication requirements. A key failure was observed where the `adminCreateRepo` operation lacked documentation regarding the necessary `write:admin` OAuth2 scope, leading to 403 Forbidden errors. It is recommended that all admin-level API endpoints be updated to explicitly list required scopes.",
+            "overallPassRate": 0,
+            "failureTaxonomy": {
+                "CONFIG": 1
+            },
+            "topFailingFunctions": [
+                {
+                    "functionName": "adminCreateRepo",
+                    "count": 1,
+                    "goals": [
+                        "Create a new repository on behalf of a specific user with a custom description and private visibility"
+                    ]
+                }
+            ],
+            "goalsBreakdown": [
+                {
+                    "goal": "Create a new repository on behalf of a specific user with a custom description and private visibility",
+                    "status": "FAILED",
+                    "reportId": "6a2b3158ab26eaa0dedcc460",
+                    "keyFindings": "The request was correctly formed, but failed with a 403 Forbidden error because the documentation did not specify the required 'write:admin' scope for the token."
+                }
+            ],
+            "documentationGapDetails": [
+                {
+                    "fragment": "## [](#tag/admin/operation/adminCreateRepo)Create a repository on behalf of a user",
+                    "proposedFix": "## [](#tag/admin/operation/adminCreateRepo)Create a repository on behalf of a user\n\n**Authentication Required:** Admin Token\n**Required Scopes:** `write:admin`",
+                    "affectedGoals": [
+                        "Create a new repository on behalf of a specific user with a custom description and private visibility"
+                    ],
+                    "file": "docs.gitea.com_api_1.22_.md",
+                    "documentationGap": "CONFIG",
+                    "lineStart": 1285,
+                    "lineEnd": 1285,
+                    "verified": true,
+                    "occurrences": 1,
+                    "meanConfidence": 1
+                }
+            ],
+            "recommendations": [
+                "Audit all admin-level API documentation in `docs.gitea.com_api_1.22_.md` to ensure that required OAuth2 scopes (e.g., `write:admin`) are explicitly listed for every endpoint."
+            ]
+        },
+        "markdownSummary": null
     },
-    "markdownSummary": null
-  },
-  "drift": {
-    "regressions": [],
-    "improvements": [
-      {
-        "goal": "Create a new repository on behalf of a specific user with a custom description and private visibility",
-        "baseline": "FAILED",
-        "experiment": "SUCCESS"
-      }
-    ],
-    "stable": []
-  },
-  "docsPatch": {
-    "patchFile": null,
-    "markdownFile": "/Users/pawel/repos/mgr/rookie/experiment-gitea-1781215718362-docs-proposal.md",
-    "patchedClusters": 0,
-    "unpatchedClusters": 0
-  }
+    "experiment": {
+        "masterPlanId": "6a2b31e5ab26eaa0dedcc467",
+        "goals": [
+            "Manage repository topics by listing, adding, deleting, or replacing the list of topics for a specific repository"
+        ],
+        "breakdown": [
+            {
+                "goal": "Manage repository topics by listing, adding, deleting, or replacing the list of topics for a specific repository",
+                "status": "SUCCESS",
+                "reportId": "6a2b31e0ab26eaa0dedcc466"
+            }
+        ],
+        "structuredSummary": {
+            "executiveSummary": "The documentation for repository topic management is highly effective, with all tested scenarios passing successfully. The API endpoints for listing, adding, replacing, and deleting topics are well-documented and function as expected. No critical gaps or ambiguities were identified during this execution cycle.",
+            "overallPassRate": 1,
+            "failureTaxonomy": {},
+            "topFailingFunctions": [],
+            "goalsBreakdown": [
+                {
+                    "goal": "Manage repository topics by listing, adding, deleting, or replacing the list of topics for a specific repository",
+                    "status": "SUCCESS",
+                    "reportId": "6a2b31e0ab26eaa0dedcc466",
+                    "keyFindings": "All operations (List, Add, Replace, Delete) were completed successfully without any documentation-related friction."
+                }
+            ],
+            "documentationGapDetails": [],
+            "recommendations": [
+                "Maintain current documentation standards for repository topic management as they are currently providing 100% success rate for developer goals."
+            ]
+        },
+        "markdownSummary": null
+    },
+    "drift": {
+        "regressions": [],
+        "improvements": [
+            {
+                "goal": "Create a new repository on behalf of a specific user with a custom description and private visibility",
+                "baseline": "FAILED",
+                "experiment": "SUCCESS"
+            }
+        ],
+        "stable": []
+    },
+    "docsPatch": {
+        "patchFile": null,
+        "markdownFile": "/Users/pawel/repos/mgr/rookie/experiment-gitea-1781215718362-docs-proposal.md",
+        "patchedClusters": 0,
+        "unpatchedClusters": 0
+    }
 }

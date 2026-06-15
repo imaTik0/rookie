@@ -15,7 +15,7 @@ import {
     taxonomyOf,
     topFailingFunctionsOf,
 } from "../feedback/gapAggregate.ts";
-import { extractDocExamples, docExampleLabel } from "../feedback/docExamples.ts";
+import { docExampleLabel, extractDocExamples } from "../feedback/docExamples.ts";
 import { tokenOverlap } from "../feedback/fragmentVerify.ts";
 
 export type { DocFile } from "../types/file.ts";
@@ -72,21 +72,28 @@ export class PlannerService {
         const endpointInventory = this.extractEndpointInventory(validFiles);
         onProgress?.(JSON.stringify({
             type: "log",
-            content: `Analyzing documentation and generating user goals (${endpointInventory ? "with endpoint inventory" : "no inventory"})...`,
+            content: `Analyzing documentation and generating user goals (${
+                endpointInventory ? "with endpoint inventory" : "no inventory"
+            })...`,
         }));
 
         const goals = await this.promptService.promptForUserGoals(
             projectId as string,
             validFiles,
             maxGoals,
-            (msg) => { onProgress?.(JSON.stringify({ type: "log", content: msg })); },
+            (msg) => {
+                onProgress?.(JSON.stringify({ type: "log", content: msg }));
+            },
             endpointInventory,
         );
 
         onProgress?.(JSON.stringify({ type: "GOALS_GENERATED", goals }));
 
         const { reportIds, executionReports } = await this.executeGoals(
-            goals, projectId, initialContext, onProgress,
+            goals,
+            projectId,
+            initialContext,
+            onProgress,
         );
 
         return this.aggregateAndSave({
@@ -130,7 +137,9 @@ export class PlannerService {
         const projectId = overrides.projectId ?? original.projectId;
         const initialContext = overrides.initialContext ?? original.initialContext ?? "{}";
 
-        onProgress?.(JSON.stringify({ type: "INIT", projectId, rerun: true, originalMasterPlanId }));
+        onProgress?.(
+            JSON.stringify({ type: "INIT", projectId, rerun: true, originalMasterPlanId }),
+        );
 
         const validFiles = await this.loadProjectFiles(projectId);
         const docExampleResults = await this.runDocExamples(validFiles, onProgress);
@@ -142,7 +151,10 @@ export class PlannerService {
         }));
 
         const { reportIds, executionReports } = await this.executeGoals(
-            goals, projectId, initialContext, onProgress,
+            goals,
+            projectId,
+            initialContext,
+            onProgress,
         );
 
         // Use the original plan's gap details as regression baseline so reruns
@@ -190,7 +202,12 @@ export class PlannerService {
         if (docExamples.length === 0) return [];
 
         const capped = docExamples.slice(0, 10);
-        onProgress?.(JSON.stringify({ type: "log", content: `Running ${capped.length} documentation code examples...` }));
+        onProgress?.(
+            JSON.stringify({
+                type: "log",
+                content: `Running ${capped.length} documentation code examples...`,
+            }),
+        );
 
         const results = await Promise.all(
             capped.map(async (ex): Promise<DocExampleResult> => {
@@ -203,7 +220,12 @@ export class PlannerService {
                     }));
                     return { label, success: result.success, error: result.error };
                 } catch {
-                    onProgress?.(JSON.stringify({ type: "log", content: `Doc example [${label}]: FAIL (executor error)` }));
+                    onProgress?.(
+                        JSON.stringify({
+                            type: "log",
+                            content: `Doc example [${label}]: FAIL (executor error)`,
+                        }),
+                    );
                     return { label, success: false, error: "Executor error" };
                 }
             }),
@@ -255,7 +277,9 @@ export class PlannerService {
 
             const report = await this.executor.executeTestSuite(
                 testSuite._id as types.test.TestSuiteId,
-                (msg) => { onProgress?.(JSON.stringify({ type: "GOAL_PROGRESS", goal, log: msg })); },
+                (msg) => {
+                    onProgress?.(JSON.stringify({ type: "GOAL_PROGRESS", goal, log: msg }));
+                },
             );
 
             if (report) {
@@ -267,7 +291,12 @@ export class PlannerService {
                     error: s.error?.substring(0, 400),
                     failureAnalysis: s.failureAnalysis,
                 }));
-                executionReports.push({ goal, status: report.status, reportId: report._id as string, steps: stepSummary });
+                executionReports.push({
+                    goal,
+                    status: report.status,
+                    reportId: report._id as string,
+                    steps: stepSummary,
+                });
 
                 // Accumulate KB findings — written after each goal completes so
                 // they're visible to the next batch but not to concurrent siblings.
@@ -278,14 +307,34 @@ export class PlannerService {
                     kbLines.push(`\n## Goal: ${goal}`);
                     for (const s of failedSteps.slice(0, 3)) {
                         const fa = s.failureAnalysis!;
-                        kbLines.push(`- **${fa.documentationGap}** in \`${fa.failedFunction}\`: ${fa.reasoning.slice(0, 200)}`);
-                        if (fa.suggestedDocsFix) kbLines.push(`  Fix: ${fa.suggestedDocsFix.slice(0, 150)}`);
+                        kbLines.push(
+                            `- **${fa.documentationGap}** in \`${fa.failedFunction}\`: ${
+                                fa.reasoning.slice(0, 200)
+                            }`,
+                        );
+                        if (fa.suggestedDocsFix) {
+                            kbLines.push(`  Fix: ${fa.suggestedDocsFix.slice(0, 150)}`);
+                        }
                     }
                 }
-                onProgress?.(JSON.stringify({ type: "GOAL_COMPLETE", goal, status: report.status, reportId: report._id }));
+                onProgress?.(
+                    JSON.stringify({
+                        type: "GOAL_COMPLETE",
+                        goal,
+                        status: report.status,
+                        reportId: report._id,
+                    }),
+                );
             } else {
                 executionReports.push({ goal, status: "FAILED", reportId: null, steps: [] });
-                onProgress?.(JSON.stringify({ type: "GOAL_COMPLETE", goal, status: "FAILED", reportId: null }));
+                onProgress?.(
+                    JSON.stringify({
+                        type: "GOAL_COMPLETE",
+                        goal,
+                        status: "FAILED",
+                        reportId: null,
+                    }),
+                );
             }
 
             await this.testSuiteRepository.delete(testSuite._id as types.test.TestSuiteId);
@@ -313,15 +362,24 @@ export class PlannerService {
         onProgress?: (msg: string) => void;
     }) {
         const {
-            projectId, goals, initialContext, reportIds, executionReports,
-            docExampleResults, priorGaps, rerunFromMasterPlanId, onProgress,
+            projectId,
+            goals,
+            initialContext,
+            reportIds,
+            executionReports,
+            docExampleResults,
+            priorGaps,
+            rerunFromMasterPlanId,
+            onProgress,
         } = opts;
 
         const findings = collectFindings(executionReports);
         const clusters = clusterGaps(findings);
         const regressionMap = await this.computeRegressionStatus(projectId, clusters, priorGaps);
 
-        onProgress?.(JSON.stringify({ type: "log", content: "Generating final master summary..." }));
+        onProgress?.(
+            JSON.stringify({ type: "log", content: "Generating final master summary..." }),
+        );
         const { structured, markdown } = await this.promptService.promptForMasterSummary(
             executionReports,
             clusters,
@@ -351,7 +409,7 @@ export class PlannerService {
         structured.goalsBreakdown = executionReports.map((r) => ({
             goal: r.goal,
             status: r.status,
-            reportId: r.reportId,
+            reportId: r.reportId as types.report.ReportId | null,
             keyFindings: llmFindingsByGoal.get(r.goal) ?? "",
         }));
 
@@ -477,10 +535,16 @@ export class PlannerService {
                         const paths = obj.paths as Record<string, Record<string, unknown>>;
                         for (const [apiPath, methods] of Object.entries(paths)) {
                             for (const [method, def] of Object.entries(methods)) {
-                                if (["parameters", "summary", "description"].includes(method)) continue;
+                                if (["parameters", "summary", "description"].includes(method)) {
+                                    continue;
+                                }
                                 const d = def as Record<string, unknown>;
                                 const summary = (d?.summary || d?.description || "") as string;
-                                lines.push(`- ${method.toUpperCase()} ${apiPath}${summary ? ` — ${summary.slice(0, 80)}` : ""}`);
+                                lines.push(
+                                    `- ${method.toUpperCase()} ${apiPath}${
+                                        summary ? ` — ${summary.slice(0, 80)}` : ""
+                                    }`,
+                                );
                             }
                         }
                         continue;

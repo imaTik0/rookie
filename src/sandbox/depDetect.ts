@@ -8,11 +8,43 @@
  */
 
 const NODE_BUILTINS = new Set([
-    "assert", "buffer", "child_process", "cluster", "console", "crypto", "dgram",
-    "dns", "events", "fs", "http", "http2", "https", "net", "os", "path", "perf_hooks",
-    "process", "querystring", "readline", "stream", "string_decoder", "timers", "tls",
-    "tty", "url", "util", "v8", "vm", "worker_threads", "zlib", "module", "async_hooks",
-    "fs/promises", "stream/promises", "timers/promises", "dns/promises",
+    "assert",
+    "buffer",
+    "child_process",
+    "cluster",
+    "console",
+    "crypto",
+    "dgram",
+    "dns",
+    "events",
+    "fs",
+    "http",
+    "http2",
+    "https",
+    "net",
+    "os",
+    "path",
+    "perf_hooks",
+    "process",
+    "querystring",
+    "readline",
+    "stream",
+    "string_decoder",
+    "timers",
+    "tls",
+    "tty",
+    "url",
+    "util",
+    "v8",
+    "vm",
+    "worker_threads",
+    "zlib",
+    "module",
+    "async_hooks",
+    "fs/promises",
+    "stream/promises",
+    "timers/promises",
+    "dns/promises",
 ]);
 
 /** Reduce a specifier like `@scope/pkg/sub` or `pkg/sub` to its installable name. */
@@ -28,9 +60,7 @@ function packageNameOf(specifier: string): string | null {
         return null;
     }
     const parts = specifier.split("/");
-    const name = specifier.startsWith("@")
-        ? parts.slice(0, 2).join("/")
-        : parts[0];
+    const name = specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
     if (!name || NODE_BUILTINS.has(name) || NODE_BUILTINS.has(specifier)) return null;
     return name;
 }

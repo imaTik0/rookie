@@ -2,7 +2,7 @@
  * Unit tests for the evaluation metrics. Run with: `deno test src/eval/metrics.test.ts`
  * These need no infrastructure (no Mongo/Qdrant/Docker/LLM).
  */
-import { assertAlmostEquals, assertEquals } from "jsr:@std/assert";
+import { assertAlmostEquals, assertEquals } from "@std/assert";
 import {
     accuracy,
     cohenKappa,

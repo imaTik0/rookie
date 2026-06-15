@@ -43,10 +43,21 @@ export type SmokeTestCallback = (
     code: string,
 ) => Promise<string>;
 
-export interface ReadFileArgs { filename: string; }
-export interface HeadFileArgs { filename: string; lines: number; }
-export interface TailFileArgs { filename: string; lines: number; }
-export interface GrepFileArgs { filename: string; pattern: string; }
+export interface ReadFileArgs {
+    filename: string;
+}
+export interface HeadFileArgs {
+    filename: string;
+    lines: number;
+}
+export interface TailFileArgs {
+    filename: string;
+    lines: number;
+}
+export interface GrepFileArgs {
+    filename: string;
+    pattern: string;
+}
 
 export interface RouterPlanResponse {
     steps: {

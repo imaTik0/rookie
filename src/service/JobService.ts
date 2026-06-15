@@ -110,7 +110,11 @@ export class JobService {
         switch (job.kind) {
             case "EXECUTE_TEST_SUITE": {
                 const testSuiteId = job.params.testSuiteId as types.test.TestSuiteId;
-                const report = await this.executor.executeTestSuite(testSuiteId, onProgress, signal);
+                const report = await this.executor.executeTestSuite(
+                    testSuiteId,
+                    onProgress,
+                    signal,
+                );
                 if (!report) throw new Error("Test suite or its project was not found");
                 return { reportId: report._id, status: report.status };
             }

@@ -7,27 +7,27 @@ import type { DocFile } from "../types/file.ts";
 import { ConfigService } from "./ConfigService.ts";
 import { TraceRepository } from "../db/mongo/TraceRepository.ts";
 import {
+    GET_ENDPOINT_TOOL,
+    GREP_CORPUS_TOOL,
+    GREP_FILE_TOOL,
+    HEAD_FILE_TOOL,
+    LIST_FILES_TOOL,
+    OUTLINE_FILE_TOOL,
+    READ_FILE_TOOL,
+    READ_SECTION_TOOL,
     SEARCH_TOOL,
     SMOKE_TEST_TOOL,
-    LIST_FILES_TOOL,
-    READ_FILE_TOOL,
-    HEAD_FILE_TOOL,
     TAIL_FILE_TOOL,
-    GREP_FILE_TOOL,
-    GREP_CORPUS_TOOL,
-    OUTLINE_FILE_TOOL,
-    READ_SECTION_TOOL,
-    GET_ENDPOINT_TOOL,
 } from "./prompt/constants.ts";
 import { emitLog, emitToken, ProgressCallback } from "./prompt/helpers.ts";
 import {
     CodeGenerationResponse,
     PromptOptions,
+    RouterPlanResponse,
     SearchToolArgs,
     SmokeTestCallback,
     SmokeTestToolArgs,
     StructuredResponse,
-    RouterPlanResponse,
 } from "./prompt/types.ts";
 import * as templates from "./prompt/templates.ts";
 import { runAgenticLoop } from "./prompt/agenticLoop.ts";
@@ -52,7 +52,10 @@ export class PromptService {
     /** Common deterministic generation params (temperature/seed) for raw chat calls. */
     private llmParams(): Record<string, unknown> {
         const llm = this.configService.values.llm;
-        return { temperature: llm.temperature, ...(llm.seed !== undefined ? { seed: llm.seed } : {}) };
+        return {
+            temperature: llm.temperature,
+            ...(llm.seed !== undefined ? { seed: llm.seed } : {}),
+        };
     }
 
     /**
@@ -97,11 +100,14 @@ export class PromptService {
         options: PromptOptions = {},
         onProgress?: ProgressCallback,
     ): Promise<StructuredResponse> {
-        const goal = `Generate a comprehensive test scenario. Preferences: ${options.userPreferences || "None"}. Steps: ${options.minimalLength || 10}-${options.maximalLength || 20}.`;
-        
+        const goal = `Generate a comprehensive test scenario. Preferences: ${
+            options.userPreferences || "None"
+        }. Steps: ${options.minimalLength || 10}-${options.maximalLength || 20}.`;
+
         // 1. Router
         const plan = await this.promptForExecutionPlan(vectorCollectionName, goal, onProgress);
-        const planStepsStr = plan.steps.map(s => `- ${s.stepExplanation} (Action: ${s.action})`).join("\n");
+        const planStepsStr = plan.steps.map((s) => `- ${s.stepExplanation} (Action: ${s.action})`)
+            .join("\n");
 
         // 2. Research / Exploration using agentic loop
         const systemPrompt = `You are a Research Agent planning a test scenario. 
@@ -113,18 +119,38 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
 
         const messages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[] = [
             { role: "system", content: systemPrompt },
-            { role: "user", content: `Start your research to generate a ${options.minimalLength || 10}-${options.maximalLength || 20} steps scenario.` }
+            {
+                role: "user",
+                content: `Start your research to generate a ${options.minimalLength || 10}-${
+                    options.maximalLength || 20
+                } steps scenario.`,
+            },
         ];
 
         const toolHandlers = {
             search_knowledge_base: async (_id: string, rawArgs: any) => {
                 const args = rawArgs as SearchToolArgs;
                 emitLog(onProgress, `Agent searching: "${args.query}"`);
-                const results = await this.performRAGSearch(vectorCollectionName, args.query, this.configService.values.limits.defaultSearchLimit);
-                const truncated = results.map((r) => ({ ...r, payload: r.payload ? { ...r.payload, content: (r.payload.content || "").substring(0, this.configService.values.limits.maxResultChars) } : r.payload }));
+                const results = await this.performRAGSearch(
+                    vectorCollectionName,
+                    args.query,
+                    this.configService.values.limits.defaultSearchLimit,
+                );
+                const truncated = results.map((r) => ({
+                    ...r,
+                    payload: r.payload
+                        ? {
+                            ...r.payload,
+                            content: (r.payload.content || "").substring(
+                                0,
+                                this.configService.values.limits.maxResultChars,
+                            ),
+                        }
+                        : r.payload,
+                }));
                 return JSON.stringify(truncated);
             },
-            ...this.createVfsToolHandlers(files, onProgress)
+            ...this.createVfsToolHandlers(files, onProgress),
         };
 
         const traceTracker = await this.createTraceTracker("Research Phase", goal);
@@ -132,14 +158,21 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         const finalMessages = await runAgenticLoop(this.openai, this.logger, onProgress, {
             modelName: this.configService.values.openAI.modelName,
             messages,
-            tools: [SEARCH_TOOL, LIST_FILES_TOOL, READ_FILE_TOOL, HEAD_FILE_TOOL, TAIL_FILE_TOOL, GREP_FILE_TOOL],
+            tools: [
+                SEARCH_TOOL,
+                LIST_FILES_TOOL,
+                READ_FILE_TOOL,
+                HEAD_FILE_TOOL,
+                TAIL_FILE_TOOL,
+                GREP_FILE_TOOL,
+            ],
             toolHandlers,
             readySignal: "READY_FOR_GENERATION",
             maxIterations: this.configService.values.limits.maxResearchIterations,
             maxContextChars: this.configService.values.limits.maxContextChars,
             phaseLabel: "Scenario Research",
             ...this.loopParams(),
-            onTrace: traceTracker
+            onTrace: traceTracker,
         });
 
         // 3. Generation Phase
@@ -153,7 +186,10 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             .map((m) => typeof m.content === "string" ? m.content : "")
             .join("\n\n");
 
-        const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(0, this.configService.values.limits.maxContextChars);
+        const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(
+            0,
+            this.configService.values.limits.maxContextChars,
+        );
 
         const genSystemPrompt = templates.createSystemPrompt(options.mandatoryImports);
         const userPrompt = templates.createUserPrompt(
@@ -228,18 +264,20 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
 
         const frictionEvents: types.report.FrictionEvent[] = [];
 
-        let { initialDocsContent, contextFound, messages: researchMessages } = await this.runResearchPhase(
-            vectorCollectionName,
-            userGoal,
-            files,
-            onProgress,
-        );
+        let { initialDocsContent, contextFound, messages: researchMessages } = await this
+            .runResearchPhase(
+                vectorCollectionName,
+                userGoal,
+                files,
+                onProgress,
+            );
 
         // The research agent's explicit COVERED / NEEDS RESEARCH gap analysis is
         // documentation feedback in its own right — extract and persist it.
         const coverageReport = await this.extractCoverageReport(researchMessages);
 
-        let verificationMessages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[] = [];
+        let verificationMessages:
+            import("@openai/openai").default.Chat.ChatCompletionMessageParam[] = [];
         let isVerified = false;
         let feedbackIterations = 0;
         const maxFeedbackLoops = 3;
@@ -281,17 +319,23 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                     const additionalDocs = await this.performRAGSearch(
                         vectorCollectionName,
                         query,
-                        this.configService.values.limits.defaultSearchLimit
+                        this.configService.values.limits.defaultSearchLimit,
                     );
-                    const formattedAdditionalDocs = JSON.stringify(additionalDocs.map(r => ({
+                    const formattedAdditionalDocs = JSON.stringify(additionalDocs.map((r) => ({
                         ...r,
-                        payload: r.payload ? {
-                            ...r.payload,
-                            content: (r.payload.content || "").substring(0, this.configService.values.limits.maxResultChars)
-                        } : r.payload
+                        payload: r.payload
+                            ? {
+                                ...r.payload,
+                                content: (r.payload.content || "").substring(
+                                    0,
+                                    this.configService.values.limits.maxResultChars,
+                                ),
+                            }
+                            : r.payload,
                     })));
 
-                    contextFound += `\n\n### ADDITIONAL RAG SEARCH RESULTS FOR "${query}" ###\n` + formattedAdditionalDocs;
+                    contextFound += `\n\n### ADDITIONAL RAG SEARCH RESULTS FOR "${query}" ###\n` +
+                        formattedAdditionalDocs;
                     feedbackIterations++;
                     continue;
                 }
@@ -330,8 +374,9 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
 
             const searchQueries: string[] = [];
             for (const m of researchMessages) {
-                const toolCalls = (m as { tool_calls?: { function?: { name?: string; arguments?: string } }[] })
-                    .tool_calls;
+                const toolCalls =
+                    (m as { tool_calls?: { function?: { name?: string; arguments?: string } }[] })
+                        .tool_calls;
                 for (const tc of toolCalls ?? []) {
                     if (tc.function?.name === "search_knowledge_base" && tc.function.arguments) {
                         try {
@@ -362,15 +407,24 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             if (m.role === "assistant") {
                 const clean: OpenAI.Chat.ChatCompletionAssistantMessageParam = { ...m };
                 if (typeof clean.content === "string") {
-                    clean.content = clean.content.replace(/```[\s\S]*?```/g, "[Generated Code Block]");
+                    clean.content = clean.content.replace(
+                        /```[\s\S]*?```/g,
+                        "[Generated Code Block]",
+                    );
                 }
                 if (Array.isArray(clean.tool_calls)) {
                     clean.tool_calls = clean.tool_calls.map((tc) => {
-                        if (tc.function?.name === "smoke_test_code" && tc.function?.arguments) {
+                        // Narrow away custom tool calls (which have no `.function`).
+                        if (!("function" in tc)) return tc;
+                        const fn = tc.function;
+                        if (fn?.name === "smoke_test_code" && fn?.arguments) {
                             try {
-                                const args = JSON.parse(tc.function.arguments) as Record<string, unknown>;
+                                const args = JSON.parse(fn.arguments) as Record<string, unknown>;
                                 if (args.code) args.code = "[Code Snippet Truncated]";
-                                return { ...tc, function: { ...tc.function, arguments: JSON.stringify(args) } };
+                                return {
+                                    ...tc,
+                                    function: { ...fn, arguments: JSON.stringify(args) },
+                                };
                             } catch {
                                 return tc;
                             }
@@ -389,7 +443,13 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         userGoal: string,
         files: DocFile[],
         onProgress: ProgressCallback,
-    ): Promise<{ initialDocsContent: string; contextFound: string; messages: OpenAI.Chat.ChatCompletionMessageParam[] }> {
+    ): Promise<
+        {
+            initialDocsContent: string;
+            contextFound: string;
+            messages: OpenAI.Chat.ChatCompletionMessageParam[];
+        }
+    > {
         const initialSearchResults = await this.performRAGSearch(
             vectorCollectionName,
             userGoal,
@@ -413,8 +473,15 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             // so the agent can read full files instead of only truncated search chunks.
             tools: [
                 SEARCH_TOOL,
-                LIST_FILES_TOOL, READ_FILE_TOOL, HEAD_FILE_TOOL, TAIL_FILE_TOOL,
-                GREP_FILE_TOOL, GREP_CORPUS_TOOL, OUTLINE_FILE_TOOL, READ_SECTION_TOOL, GET_ENDPOINT_TOOL,
+                LIST_FILES_TOOL,
+                READ_FILE_TOOL,
+                HEAD_FILE_TOOL,
+                TAIL_FILE_TOOL,
+                GREP_FILE_TOOL,
+                GREP_CORPUS_TOOL,
+                OUTLINE_FILE_TOOL,
+                READ_SECTION_TOOL,
+                GET_ENDPOINT_TOOL,
             ],
             toolHandlers: {
                 search_knowledge_base: async (_id, rawArgs) => {
@@ -430,7 +497,10 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                         payload: r.payload
                             ? {
                                 ...r.payload,
-                                content: (r.payload.content || "").substring(0, this.configService.values.limits.maxResultChars),
+                                content: (r.payload.content || "").substring(
+                                    0,
+                                    this.configService.values.limits.maxResultChars,
+                                ),
                             }
                             : r.payload,
                     }));
@@ -444,7 +514,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             maxContextChars: this.configService.values.limits.maxContextChars,
             phaseLabel: "Agentic RAG Research",
             ...this.loopParams(),
-            onTrace: traceTracker
+            onTrace: traceTracker,
         });
 
         const agentSynthesis = finalMessages
@@ -478,7 +548,8 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         const query = userGoal.substring(0, 2000);
         const maxDocsChars = this.configService.values.limits.maxScenarioDocsChars;
 
-        const combinedRaw = `#### Initial Documentation:\n${initialDocsContent}\n\n#### Researched Documentation:\n${contextFound}`;
+        const combinedRaw =
+            `#### Initial Documentation:\n${initialDocsContent}\n\n#### Researched Documentation:\n${contextFound}`;
         const smartDocs = await this.rankAndFilterDocs(combinedRaw, query, maxDocsChars);
 
         this.logger.log(`Agentic RAG Verification Phase (Smoke Testing)...`);
@@ -519,7 +590,10 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                         payload: r.payload
                             ? {
                                 ...r.payload,
-                                content: (r.payload.content || "").substring(0, this.configService.values.limits.maxResultChars),
+                                content: (r.payload.content || "").substring(
+                                    0,
+                                    this.configService.values.limits.maxResultChars,
+                                ),
                             }
                             : r.payload,
                     }));
@@ -566,7 +640,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             maxContextChars: this.configService.values.limits.maxContextChars,
             phaseLabel: "Verification",
             ...this.loopParams(),
-            onTrace: traceTracker
+            onTrace: traceTracker,
         });
     }
 
@@ -581,15 +655,15 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         );
 
         // Preserve a larger window of context to avoid hallucinations
-        const verificationCompleteIdx = verificationMessages.findLastIndex(m => 
+        const verificationCompleteIdx = verificationMessages.findLastIndex((m) =>
             typeof m.content === "string" && m.content.includes("VERIFICATION_COMPLETE")
         );
-        
+
         const lastFewMessagesStart = Math.max(0, verificationCompleteIdx - 10);
-        
+
         const relevantMessages = verificationMessages.filter((m, i, arr) => {
             if (m.role === "system" || (m.role === "user" && i <= 1)) return true;
-            
+
             // Keep the last 10 messages of the verification phase for context
             if (i >= lastFewMessagesStart) return true;
 
@@ -598,7 +672,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                 m.role === "tool" && typeof m.content === "string" &&
                 m.content.startsWith("SUCCESS")
             ) return true;
-            
+
             return false;
         });
 
@@ -662,7 +736,10 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         return results
             .map((res, i) =>
                 `--- DOCUMENT ${i + 1} (Score: ${res.score}) ---\n${
-                    (res.payload?.content || "No content").substring(0, this.configService.values.limits.maxResultChars)
+                    (res.payload?.content || "No content").substring(
+                        0,
+                        this.configService.values.limits.maxResultChars,
+                    )
                 }\n`
             )
             .join("\n");
@@ -712,7 +789,9 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         limit: number = this.configService.values.limits.defaultSearchLimit,
     ): Promise<types.vector.SearchResult<types.file.FileShard>[]> {
         try {
-            this.logger.log(`RAG search — collection: "${collectionName}" query: "${query.slice(0, 120)}"`);
+            this.logger.log(
+                `RAG search — collection: "${collectionName}" query: "${query.slice(0, 120)}"`,
+            );
             const collection = await this.vectorCollectionFactory.createCollection<
                 types.file.FileShard
             >(collectionName);
@@ -722,9 +801,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
 
             // When reranking is enabled, over-fetch then let the reranker cut to `limit`.
             const rerankCfg = this.configService.values.reranker;
-            const fetchLimit = rerankCfg.mode === "off"
-                ? limit
-                : Math.max(limit, rerankCfg.topN);
+            const fetchLimit = rerankCfg.mode === "off" ? limit : Math.max(limit, rerankCfg.topN);
 
             const raw = await collection.searchHybrid(
                 dense[0] as types.vector.DenseVector,
@@ -783,16 +860,15 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         // Format captured HTTP traffic as a concise classifier input section.
         const httpSection = httpTrafficLog && httpTrafficLog.length > 0
             ? `\n\n### HTTP TRAFFIC DURING EXECUTION\n` +
-              httpTrafficLog.slice(0, 20).map((e) =>
-                  `${e.method} ${e.url} → ${e.responseStatus ?? e.error ?? "no response"}` +
-                  (e.responseBody ? `\n  Response: ${e.responseBody.slice(0, 300)}` : "")
-              ).join("\n")
+                httpTrafficLog.slice(0, 20).map((e) =>
+                    `${e.method} ${e.url} → ${e.responseStatus ?? e.error ?? "no response"}` +
+                    (e.responseBody ? `\n  Response: ${e.responseBody.slice(0, 300)}` : "")
+                ).join("\n")
             : "";
 
         const system =
             `You are a Documentation Quality Analyst. A code example that was written based on library documentation has CRASHED. Your job is to classify WHY it failed by comparing the error to the documentation.`;
-        const user =
-            `### THE ERROR
+        const user = `### THE ERROR
 ${errorMessage}
 
 ### THE CODE THAT CRASHED
@@ -844,9 +920,14 @@ Respond with a JSON object:
         const votes = this.configService.values.classifier.votes;
         // Fire all votes concurrently — they are fully independent LLM calls.
         const settled = await Promise.allSettled(
-            Array.from({ length: votes }, (_, i) =>
-                this.structured(system, user, schemas.FailureAnalysisSchema)
-                    .catch((err) => { this.logger.error(err, `Failed to classify failure (vote ${i + 1})`); return null; })
+            Array.from(
+                { length: votes },
+                (_, i) =>
+                    this.structured(system, user, schemas.FailureAnalysisSchema)
+                        .catch((err) => {
+                            this.logger.error(err, `Failed to classify failure (vote ${i + 1})`);
+                            return null;
+                        }),
             ),
         );
         const candidates: types.report.FailureAnalysis[] = settled
@@ -893,11 +974,15 @@ Respond with a JSON object:
 
         // Split by document markers (formatSearchResults emits
         // "--- DOCUMENT N (Score: x) ---", so match the trailing metadata too).
-        const chunks = content.split(/--- DOCUMENT \d+[^\n]*---/).filter((c) => c.trim().length > 0);
+        const chunks = content.split(/--- DOCUMENT \d+[^\n]*---/).filter((c) =>
+            c.trim().length > 0
+        );
         if (chunks.length <= 1) {
             // If no markers, fallback to double newlines
             const fallbackChunks = content.split("\n\n").filter((c) => c.trim().length > 0);
-            if (fallbackChunks.length > 1) return this.rankAndFilterDocsByChunks(fallbackChunks, query, maxChars);
+            if (fallbackChunks.length > 1) {
+                return this.rankAndFilterDocsByChunks(fallbackChunks, query, maxChars);
+            }
             return content.substring(0, maxChars);
         }
 
@@ -946,7 +1031,7 @@ Respond with a JSON object:
             dotProduct += vecA[i] * vecB[i];
             normA += vecA[i] * vecA[i];
             normB += vecB[i] * vecB[i];
-                }
+        }
         if (normA === 0 || normB === 0) return 0;
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
@@ -962,9 +1047,11 @@ Respond with a JSON object:
         emitLog(onProgress, `Generating user goals using agentic loop...`);
 
         // 1. Router
-        const goal = `Explore the project and identify up to ${maxGoals} primary user goals or test scenarios for this API/library.`;
+        const goal =
+            `Explore the project and identify up to ${maxGoals} primary user goals or test scenarios for this API/library.`;
         const plan = await this.promptForExecutionPlan(vectorCollectionName, goal, onProgress);
-        const planStepsStr = plan.steps.map(s => `- ${s.stepExplanation} (Action: ${s.action})`).join("\n");
+        const planStepsStr = plan.steps.map((s) => `- ${s.stepExplanation} (Action: ${s.action})`)
+            .join("\n");
 
         // Coverage hint: when we have a known endpoint inventory, steer the research
         // agent toward thorough coverage rather than gravitating to popular endpoints.
@@ -982,29 +1069,54 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
 
         const messages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[] = [
             { role: "system", content: systemPrompt },
-            { role: "user", content: `Start your research.` }
+            { role: "user", content: `Start your research.` },
         ];
 
         const toolHandlers = {
             search_knowledge_base: async (_id: string, rawArgs: any) => {
                 const args = rawArgs as SearchToolArgs;
                 emitLog(onProgress, `Agent searching: "${args.query}"`);
-                const results = await this.performRAGSearch(vectorCollectionName, args.query, this.configService.values.limits.defaultSearchLimit);
-                const truncated = results.map((r) => ({ ...r, payload: r.payload ? { ...r.payload, content: (r.payload.content || "").substring(0, this.configService.values.limits.maxResultChars) } : r.payload }));
+                const results = await this.performRAGSearch(
+                    vectorCollectionName,
+                    args.query,
+                    this.configService.values.limits.defaultSearchLimit,
+                );
+                const truncated = results.map((r) => ({
+                    ...r,
+                    payload: r.payload
+                        ? {
+                            ...r.payload,
+                            content: (r.payload.content || "").substring(
+                                0,
+                                this.configService.values.limits.maxResultChars,
+                            ),
+                        }
+                        : r.payload,
+                }));
                 return JSON.stringify(truncated);
             },
-            ...this.createVfsToolHandlers(files, onProgress)
+            ...this.createVfsToolHandlers(files, onProgress),
         };
 
-        const traceTracker = await this.createTraceTracker("Goals Generation Phase", "Discover documentation goals");
+        const traceTracker = await this.createTraceTracker(
+            "Goals Generation Phase",
+            "Discover documentation goals",
+        );
 
         const finalMessages = await runAgenticLoop(this.openai, this.logger, onProgress, {
             modelName: this.configService.values.openAI.modelName,
             messages,
             tools: [
                 SEARCH_TOOL,
-                LIST_FILES_TOOL, READ_FILE_TOOL, HEAD_FILE_TOOL, TAIL_FILE_TOOL,
-                GREP_FILE_TOOL, GREP_CORPUS_TOOL, OUTLINE_FILE_TOOL, READ_SECTION_TOOL, GET_ENDPOINT_TOOL,
+                LIST_FILES_TOOL,
+                READ_FILE_TOOL,
+                HEAD_FILE_TOOL,
+                TAIL_FILE_TOOL,
+                GREP_FILE_TOOL,
+                GREP_CORPUS_TOOL,
+                OUTLINE_FILE_TOOL,
+                READ_SECTION_TOOL,
+                GET_ENDPOINT_TOOL,
             ],
             toolHandlers,
             readySignal: "READY_FOR_GENERATION",
@@ -1012,7 +1124,7 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
             maxContextChars: this.configService.values.limits.maxContextChars,
             phaseLabel: "Goals Research",
             ...this.loopParams(),
-            onTrace: traceTracker
+            onTrace: traceTracker,
         });
 
         // 3. Generation Phase
@@ -1026,7 +1138,10 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
             .map((m) => typeof m.content === "string" ? m.content : "")
             .join("\n\n");
 
-        const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(0, this.configService.values.limits.maxContextChars);
+        const contextFound = (agentSynthesis + "\n\n" + toolResults).substring(
+            0,
+            this.configService.values.limits.maxContextChars,
+        );
 
         try {
             const parsed = await this.structured(
@@ -1086,11 +1201,11 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
         return {
             list_files: async () => {
                 emitLog(onProgress, "Agent listing VFS files.");
-                return files.map(f => f.metadata.filename).join("\n") || "No files available.";
+                return files.map((f) => f.metadata.filename).join("\n") || "No files available.";
             },
             read_file: async (_id: string, args: any) => {
                 emitLog(onProgress, `Agent reading file: ${args.filename}`);
-                const file = files.find(f => f.metadata.filename === args.filename);
+                const file = files.find((f) => f.metadata.filename === args.filename);
                 if (!file) return `File not found: ${args.filename}`;
                 const content = new TextDecoder().decode(file.buffer);
                 // Cap whole-file reads: a large doc can be 200k+ tokens and would
@@ -1111,24 +1226,33 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
             },
             head_file: async (_id: string, args: any) => {
                 const linesCount = args.lines || 50;
-                emitLog(onProgress, `Agent reading head of file: ${args.filename} (${linesCount} lines)`);
-                const file = files.find(f => f.metadata.filename === args.filename);
+                emitLog(
+                    onProgress,
+                    `Agent reading head of file: ${args.filename} (${linesCount} lines)`,
+                );
+                const file = files.find((f) => f.metadata.filename === args.filename);
                 if (!file) return `File not found: ${args.filename}`;
                 const content = new TextDecoder().decode(file.buffer);
                 return content.split("\n").slice(0, linesCount).join("\n");
             },
             tail_file: async (_id: string, args: any) => {
                 const linesCount = args.lines || 50;
-                emitLog(onProgress, `Agent reading tail of file: ${args.filename} (${linesCount} lines)`);
-                const file = files.find(f => f.metadata.filename === args.filename);
+                emitLog(
+                    onProgress,
+                    `Agent reading tail of file: ${args.filename} (${linesCount} lines)`,
+                );
+                const file = files.find((f) => f.metadata.filename === args.filename);
                 if (!file) return `File not found: ${args.filename}`;
                 const content = new TextDecoder().decode(file.buffer);
                 const lines = content.split("\n");
                 return lines.slice(Math.max(0, lines.length - linesCount)).join("\n");
             },
             grep_file: async (_id: string, args: any) => {
-                emitLog(onProgress, `Agent grepping file: ${args.filename} for pattern: ${args.pattern}`);
-                const file = files.find(f => f.metadata.filename === args.filename);
+                emitLog(
+                    onProgress,
+                    `Agent grepping file: ${args.filename} for pattern: ${args.pattern}`,
+                );
+                const file = files.find((f) => f.metadata.filename === args.filename);
                 if (!file) return `File not found: ${args.filename}`;
                 const content = new TextDecoder().decode(file.buffer);
                 const lines = content.split("\n");
@@ -1141,7 +1265,7 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                 }
                 for (let i = 0; i < lines.length; i++) {
                     if (regex.test(lines[i])) {
-                        result += `[Line ${i+1}]: ${lines[i]}\n`;
+                        result += `[Line ${i + 1}]: ${lines[i]}\n`;
                     }
                 }
                 return result || `No matches found for ${args.pattern} in ${args.filename}`;
@@ -1166,13 +1290,16 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                     for (let i = 0; i < lines.length; i++) {
                         if (regex.test(lines[i])) {
                             const from = Math.max(0, i - contextLines);
-                            const to   = Math.min(lines.length - 1, i + contextLines);
+                            const to = Math.min(lines.length - 1, i + contextLines);
                             results.push(`[${f.metadata.filename}:${i + 1}]`);
                             for (let j = from; j <= to; j++) {
                                 results.push(`${j === i ? ">" : " "} ${j + 1}: ${lines[j]}`);
                             }
                             results.push("");
-                            if (results.length > 500) { results.push("…[truncated — too many matches]"); break; }
+                            if (results.length > 500) {
+                                results.push("…[truncated — too many matches]");
+                                break;
+                            }
                         }
                     }
                     if (results.length > 500) break;
@@ -1182,16 +1309,23 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
 
             outline_file: async (_id: string, args: any) => {
                 emitLog(onProgress, `Agent outlining file: ${args.filename}`);
-                const file = files.find(f => f.metadata.filename === args.filename);
+                const file = files.find((f) => f.metadata.filename === args.filename);
                 if (!file) return `File not found: ${args.filename}`;
                 const content = new TextDecoder().decode(file.buffer);
 
                 // OpenAPI JSON: list paths + methods
-                if (args.filename.endsWith(".json") || args.filename.endsWith(".yaml") || args.filename.endsWith(".yml")) {
+                if (
+                    args.filename.endsWith(".json") || args.filename.endsWith(".yaml") ||
+                    args.filename.endsWith(".yml")
+                ) {
                     if (openApiIndex.has(args.filename)) {
                         const endpoints = openApiIndex.get(args.filename)!;
                         return `OpenAPI spec — ${endpoints.length} endpoints:\n` +
-                            endpoints.map(e => `  ${e.method.toUpperCase()} ${e.path}${e.summary ? ` — ${e.summary}` : ""}`).join("\n");
+                            endpoints.map((e) =>
+                                `  ${e.method.toUpperCase()} ${e.path}${
+                                    e.summary ? ` — ${e.summary}` : ""
+                                }`
+                            ).join("\n");
                     }
                 }
 
@@ -1200,7 +1334,9 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                 const headings: string[] = [];
                 for (let i = 0; i < lines.length; i++) {
                     const m = lines[i].match(/^(#{1,6})\s+(.*)/);
-                    if (m) headings.push(`L${i + 1} ${"  ".repeat(m[1].length - 1)}${m[1]} ${m[2]}`);
+                    if (m) {
+                        headings.push(`L${i + 1} ${"  ".repeat(m[1].length - 1)}${m[1]} ${m[2]}`);
+                    }
                 }
                 return headings.length > 0
                     ? headings.join("\n")
@@ -1209,8 +1345,11 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
 
             read_section: async (_id: string, args: any) => {
                 const heading = String(args.heading || "").toLowerCase();
-                emitLog(onProgress, `Agent reading section "${args.heading}" from ${args.filename}`);
-                const file = files.find(f => f.metadata.filename === args.filename);
+                emitLog(
+                    onProgress,
+                    `Agent reading section "${args.heading}" from ${args.filename}`,
+                );
+                const file = files.find((f) => f.metadata.filename === args.filename);
                 if (!file) return `File not found: ${args.filename}`;
                 const content = new TextDecoder().decode(file.buffer);
                 const lines = content.split("\n");
@@ -1226,7 +1365,9 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                         break;
                     }
                 }
-                if (startIdx === -1) return `No heading matching "${args.heading}" found in ${args.filename}.`;
+                if (startIdx === -1) {
+                    return `No heading matching "${args.heading}" found in ${args.filename}.`;
+                }
 
                 // Collect lines until the next heading of same or higher level.
                 const section: string[] = [lines[startIdx]];
@@ -1243,9 +1384,12 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
             },
 
             get_endpoint: async (_id: string, args: any) => {
-                const targetPath   = String(args.path || "").toLowerCase();
+                const targetPath = String(args.path || "").toLowerCase();
                 const targetMethod = args.method ? String(args.method).toUpperCase() : null;
-                emitLog(onProgress, `Agent looking up endpoint: ${targetMethod || "*"} ${args.path}`);
+                emitLog(
+                    onProgress,
+                    `Agent looking up endpoint: ${targetMethod || "*"} ${args.path}`,
+                );
 
                 const hits: string[] = [];
                 for (const [filename, endpoints] of openApiIndex) {
@@ -1254,14 +1398,17 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                         if (targetMethod && ep.method.toUpperCase() !== targetMethod) continue;
                         hits.push(
                             `**${ep.method.toUpperCase()} ${ep.path}** (${filename})` +
-                            (ep.summary ? `\n${ep.summary}` : "") +
-                            "\n```json\n" + JSON.stringify(ep.definition, null, 2).slice(0, 2000) + "\n```",
+                                (ep.summary ? `\n${ep.summary}` : "") +
+                                "\n```json\n" +
+                                JSON.stringify(ep.definition, null, 2).slice(0, 2000) + "\n```",
                         );
                     }
                 }
                 return hits.length > 0
                     ? hits.join("\n\n---\n\n")
-                    : `No endpoint matching "${args.method ?? "*"} ${args.path}" found in OpenAPI specs.`;
+                    : `No endpoint matching "${
+                        args.method ?? "*"
+                    } ${args.path}" found in OpenAPI specs.`;
             },
         };
     }
@@ -1279,7 +1426,10 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
     ): Map<string, Array<{ method: string; path: string; summary?: string; definition: unknown }>> {
         const cached = this.openApiIndexCache.get(files);
         if (cached) return cached;
-        const index = new Map<string, Array<{ method: string; path: string; summary?: string; definition: unknown }>>();
+        const index = new Map<
+            string,
+            Array<{ method: string; path: string; summary?: string; definition: unknown }>
+        >();
         for (const file of files) {
             const fn: string = file.metadata.filename;
             if (!fn.endsWith(".json") && !fn.endsWith(".yaml") && !fn.endsWith(".yml")) continue;
@@ -1288,12 +1438,23 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                 if (!content.includes('"paths"') && !content.includes("paths:")) continue;
                 const obj = JSON.parse(content) as Record<string, unknown>;
                 if (typeof obj !== "object" || !obj.paths) continue;
-                const endpoints: Array<{ method: string; path: string; summary?: string; definition: unknown }> = [];
-                for (const [apiPath, methods] of Object.entries(obj.paths as Record<string, Record<string, unknown>>)) {
+                const endpoints: Array<
+                    { method: string; path: string; summary?: string; definition: unknown }
+                > = [];
+                for (
+                    const [apiPath, methods] of Object.entries(
+                        obj.paths as Record<string, Record<string, unknown>>,
+                    )
+                ) {
                     for (const [method, def] of Object.entries(methods)) {
                         if (["parameters", "summary", "description"].includes(method)) continue;
                         const d = def as Record<string, unknown>;
-                        endpoints.push({ method, path: apiPath, summary: d?.summary as string | undefined, definition: def });
+                        endpoints.push({
+                            method,
+                            path: apiPath,
+                            summary: d?.summary as string | undefined,
+                            definition: def,
+                        });
                     }
                 }
                 if (endpoints.length > 0) index.set(fn, endpoints);
@@ -1329,7 +1490,7 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
             phase,
             goal,
             testSuiteId,
-            events: []
+            events: [],
         });
 
         return async (event: import("../types/index.ts").trace.TraceEvent) => {

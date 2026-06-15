@@ -224,7 +224,13 @@ export class DocCrawler {
             });
 
             if (parsed.isLikelySpa) {
-                return { url, markdown: "", title: parsed.title, links: parsed.links, isLikelySpa: true };
+                return {
+                    url,
+                    markdown: "",
+                    title: parsed.title,
+                    links: parsed.links,
+                    isLikelySpa: true,
+                };
             }
             if (!parsed.markdown || parsed.markdown.length < 50) return null;
 

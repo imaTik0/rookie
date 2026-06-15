@@ -69,9 +69,12 @@ function bestWindowMatch(
 ): { score: number; lineStart: number; lineEnd: number; matchedText: string } | null {
     const lines = content.split("\n");
     const fragLines = fragmentText.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
-    // Use at least 10 lines so that a single-line fragment (e.g. a heading) still
-    // searches enough context to produce a meaningful match and matched-text block.
-    const windowSize = Math.max(10, Math.min(fragLines.length, 30));
+    // Size the window to the fragment itself (clamped to the document length). A
+    // previous floor of 10 lines diluted the token-overlap score of short
+    // single-line fragments below the verify threshold even when they were a near
+    // word-for-word paraphrase of a doc line.
+    const desired = Math.max(1, Math.min(fragLines.length, 30));
+    const windowSize = Math.min(desired, Math.max(1, lines.length));
 
     let best: { score: number; lineStart: number; lineEnd: number; matchedText: string } | null =
         null;

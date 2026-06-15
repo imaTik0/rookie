@@ -9,10 +9,14 @@ async function go() {
     const config = container.getConfig();
     console.log("================ STARTING ROOKIE ================");
     console.log("Loaded Configuration:");
-    console.log(JSON.stringify({ 
-        ...config.values, 
-        openAI: { ...config.values.openAI, apiKey: "***" } 
-    }, null, 2));
+    console.log(JSON.stringify(
+        {
+            ...config.values,
+            openAI: { ...config.values.openAI, apiKey: "***" },
+        },
+        null,
+        2,
+    ));
     console.log("=================================================");
     container.registerMongoConnection(
         MongoDbManager.init(config.values.mongoDb),
@@ -21,13 +25,13 @@ async function go() {
         VectorManager.init(config.values.qdrantVectorDb),
     );
     container.registerOpenAIFetcher(
-        new OpenAI({ 
+        new OpenAI({
             apiKey: config.values.openAI.apiKey,
             baseURL: config.values.openAI.baseURL,
         }),
     );
     container.registerOpenAIEmbeddingFetcher(
-        new OpenAI({ 
+        new OpenAI({
             apiKey: config.values.openAI.apiKey,
             baseURL: config.values.embeddings.baseURL,
         }),

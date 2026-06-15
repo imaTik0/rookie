@@ -11,6 +11,13 @@ import { DockerExecutor } from "./DockerExecutor.ts";
 import { ReportRepository } from "./ReportRepository.ts";
 import { ConfigService } from "./ConfigService.ts";
 import { isEnvironmentError, parseImportedPackages } from "../sandbox/depDetect.ts";
+import {
+    buildSandboxHarness,
+    HTTP_LOG_END,
+    HTTP_LOG_START,
+    RESULT_END,
+    RESULT_START,
+} from "../sandbox/harness.ts";
 import { JobCancelledError } from "../types/job.ts";
 import {
     CorpusFile,
@@ -71,14 +78,24 @@ export class Executor {
         const testSuite = await this.testSuiteRepository.get(testSuiteId);
         if (!testSuite) {
             this.logger.error(new Error("Not found"), `TestSuite ${testSuiteId} not found`);
-            onProgress?.(JSON.stringify({ type: "log", content: `TestSuite ${testSuiteId} not found` }));
+            onProgress?.(
+                JSON.stringify({ type: "log", content: `TestSuite ${testSuiteId} not found` }),
+            );
             return null;
         }
 
         const project = await this.projectRepository.get(testSuite.projectId);
         if (!project) {
-            this.logger.error(new Error("Not found"), `Project ${testSuite.projectId} not found (referenced by TestSuite ${testSuiteId})`);
-            onProgress?.(JSON.stringify({ type: "log", content: `Project ${testSuite.projectId} not found` }));
+            this.logger.error(
+                new Error("Not found"),
+                `Project ${testSuite.projectId} not found (referenced by TestSuite ${testSuiteId})`,
+            );
+            onProgress?.(
+                JSON.stringify({
+                    type: "log",
+                    content: `Project ${testSuite.projectId} not found`,
+                }),
+            );
             return null;
         }
 
@@ -95,9 +112,21 @@ export class Executor {
         );
 
         if (testSuite.mode === "CODE_GENERATION") {
-            return await this.executeCodeGeneration(testSuite as unknown as types.test.TestSuite, validFiles, startTime, onProgress, signal);
+            return await this.executeCodeGeneration(
+                testSuite as unknown as types.test.TestSuite,
+                validFiles,
+                startTime,
+                onProgress,
+                signal,
+            );
         } else {
-            return await this.executeTestScenario(testSuite as unknown as types.test.TestSuite, validFiles, startTime, onProgress, signal);
+            return await this.executeTestScenario(
+                testSuite as unknown as types.test.TestSuite,
+                validFiles,
+                startTime,
+                onProgress,
+                signal,
+            );
         }
     }
 
@@ -125,7 +154,7 @@ export class Executor {
             async (code) => {
                 const execResult = await this.runStepInDocker(
                     code,
-                    this.parseInitialContext(testSuite.initialContext)
+                    this.parseInitialContext(testSuite.initialContext),
                 );
 
                 if (execResult.success) {
@@ -378,7 +407,9 @@ export class Executor {
                 const line = payload.metadata?.lineNumber
                     ? ` [Line: ${payload.metadata.lineNumber}]`
                     : "";
-                return `--- DOCUMENT: ${fileName}${line} ---\n${payload.content || JSON.stringify(k)}`;
+                return `--- DOCUMENT: ${fileName}${line} ---\n${
+                    payload.content || JSON.stringify(k)
+                }`;
             })
             .join("\n\n").substring(0, 15000);
 
@@ -386,7 +417,8 @@ export class Executor {
         // classifier can pinpoint the fragment that misled the code — not only
         // whatever a post-hoc search happens to retrieve.
         if (usedDocsContext) {
-            relatedDocsText += `\n\n--- DOCUMENTATION CONTEXT USED DURING GENERATION (truncated) ---\n` +
+            relatedDocsText +=
+                `\n\n--- DOCUMENTATION CONTEXT USED DURING GENERATION (truncated) ---\n` +
                 usedDocsContext.substring(0, 10000);
         }
 
@@ -437,9 +469,19 @@ export class Executor {
 
         if (missingModule && corpusMentions(corpus, missingModule)) {
             // Check whether the docs provide installation instructions (install/npm/yarn/pip).
-            const installKeywords = ["npm install", "yarn add", "pip install", "install ", "import ", "require("];
+            const installKeywords = [
+                "npm install",
+                "yarn add",
+                "pip install",
+                "install ",
+                "import ",
+                "require(",
+            ];
             let hasInstallContext = false;
-            let verification: types.report.FragmentVerification = { verified: false, matchScore: 0 };
+            let verification: types.report.FragmentVerification = {
+                verified: false,
+                matchScore: 0,
+            };
 
             for (const file of corpus) {
                 const lines = file.content.split("\n");
@@ -456,7 +498,10 @@ export class Executor {
                         matchedText: lines[idx],
                     };
                     // Look at the surrounding ±5 lines for install instructions.
-                    const window = lines.slice(Math.max(0, idx - 5), Math.min(lines.length, idx + 6));
+                    const window = lines.slice(
+                        Math.max(0, idx - 5),
+                        Math.min(lines.length, idx + 6),
+                    );
                     hasInstallContext = installKeywords.some((kw) =>
                         window.some((l) => l.toLowerCase().includes(kw))
                     );
@@ -471,11 +516,10 @@ export class Executor {
                 documentationGap: "CONFIG",
                 reasoning: docsMissingInstall
                     ? `The documentation references "${missingModule}" but provides no install instructions. ` +
-                      `A reader following the docs would hit this exact error.`
+                        `A reader following the docs would hit this exact error.`
                     : `The documentation references "${missingModule}" but the package could not be ` +
-                      `resolved at runtime, suggesting the install instructions are incomplete or incorrect.`,
-                suggestedDocsFix:
-                    `Add explicit installation instructions for "${missingModule}" ` +
+                        `resolved at runtime, suggesting the install instructions are incomplete or incorrect.`,
+                suggestedDocsFix: `Add explicit installation instructions for "${missingModule}" ` +
                     `(exact package name and install command, e.g. \`npm install ${missingModule}\`) ` +
                     `near its first usage in the docs.`,
                 confidence: 1,
@@ -522,7 +566,10 @@ export class Executor {
         try {
             return JSON.parse(raw);
         } catch {
-            this.logger.error(new Error("Invalid JSON"), `initialContext is not valid JSON: "${raw.slice(0, 120)}" — using empty context`);
+            this.logger.error(
+                new Error("Invalid JSON"),
+                `initialContext is not valid JSON: "${raw.slice(0, 120)}" — using empty context`,
+            );
             return {};
         }
     }
@@ -550,145 +597,7 @@ export class Executor {
             this.logger.log(`Sandbox installing packages: ${packages.join(", ")}`);
         }
 
-        const script = `
-import fs from 'fs';
-const ctx = ${JSON.stringify(currentCtx)};
-const userCode = ${JSON.stringify(userCode)};
-
-fs.writeFileSync('./userStep.js', userCode);
-
-// HTTP traffic interceptor — monkey-patches globalThis.fetch so all HTTP
-// requests made by user code are captured for failure analysis.
-const __httpLog = [];
-const __origFetch = typeof globalThis.fetch === 'function' ? globalThis.fetch.bind(globalThis) : null;
-if (__origFetch) {
-    globalThis.fetch = async (url, opts = {}) => {
-        const __start = Date.now();
-        const __entry = {
-            method: (opts?.method || 'GET').toUpperCase(),
-            url: String(url),
-            requestBody: null,
-            responseStatus: null,
-            responseBody: null,
-            durationMs: null,
-            error: null,
-        };
-        if (opts?.body) {
-            try { __entry.requestBody = typeof opts.body === 'string' ? opts.body.slice(0, 500) : JSON.stringify(opts.body).slice(0, 500); } catch {}
-        }
-        try {
-            const __res = await __origFetch(url, opts);
-            __entry.responseStatus = __res.status;
-            __entry.durationMs = Date.now() - __start;
-            try { const __clone = __res.clone(); __entry.responseBody = (await __clone.text()).slice(0, 1000); } catch {}
-            __httpLog.push(__entry);
-            return __res;
-        } catch (__e) {
-            __entry.error = __e.message ?? String(__e);
-            __entry.durationMs = Date.now() - __start;
-            __httpLog.push(__entry);
-            throw __e;
-        }
-    };
-}
-
-;(async () => {
-    const __emitHttpLog = () => {
-        if (__httpLog.length > 0) {
-            console.log("___HTTP_LOG_START___");
-            console.log(JSON.stringify(__httpLog));
-            console.log("___HTTP_LOG_END___");
-        }
-    };
-    try {
-        const userModule = await import('./userStep.js');
-        const runFunc = typeof userModule.default === 'function' ? userModule.default : (ctx) => { /* no-op */ };
-        const output = await runFunc(ctx);
-        console.log("___RESULT_START___");
-        console.log(JSON.stringify(output || { result: null, ctx }));
-        console.log("___RESULT_END___");
-        __emitHttpLog();
-    } catch (e) {
-        __emitHttpLog();
-
-        // Safe JSON serialiser — handles circular references (e.g. axios error objects
-        // contain Socket→ClientRequest→socket cycles that blow up naive JSON.stringify).
-        const __safeJson = (obj) => {
-            const seen = new WeakSet();
-            return JSON.stringify(obj, (key, value) => {
-                if (typeof value === 'object' && value !== null) {
-                    if (seen.has(value)) return '[Circular]';
-                    seen.add(value);
-                }
-                // Drop Node.js internal socket/stream objects — they're never useful in a
-                // failure report and are almost always the source of circular references.
-                if (value && typeof value === 'object' &&
-                    (value.constructor?.name === 'Socket' ||
-                     value.constructor?.name === 'TLSSocket' ||
-                     value.constructor?.name === 'ClientRequest' ||
-                     value.constructor?.name === 'IncomingMessage')) {
-                    return '[Stream]';
-                }
-                return value;
-            });
-        };
-
-        let serializableError = {};
-
-        // Axios errors: the most useful fields are in e.response and e.config.
-        // The full error object has circular refs via e.request (Socket) — never copy it.
-        if (e && (e.isAxiosError === true || (e.response && e.config))) {
-            serializableError = {
-                message: e.message,
-                name: e.name || 'AxiosError',
-                // HTTP response details — the primary signal for failure analysis
-                status: e.response?.status ?? null,
-                statusText: e.response?.statusText ?? null,
-                responseData: e.response?.data ?? null,
-                responseHeaders: e.response?.headers
-                    ? Object.fromEntries(Object.entries(e.response.headers).slice(0, 10))
-                    : null,
-                // Request details — useful for identifying the wrong endpoint/method
-                requestUrl: e.config?.url ?? null,
-                requestMethod: e.config?.method?.toUpperCase() ?? null,
-                requestBaseURL: e.config?.baseURL ?? null,
-                // Stack for unexpected axios errors (e.g. network timeout)
-                stack: e.stack?.split('\\n').slice(0, 6).join('\\n') ?? null,
-            };
-        } else if (e instanceof Error) {
-            serializableError = {
-                message: e.message,
-                name: e.name,
-                stack: e.stack?.split('\\n').slice(0, 8).join('\\n'),
-                cause: e.cause instanceof Error ? e.cause.message : e.cause,
-            };
-            // Copy any additional plain-value own properties (e.g. e.code = 'ENOTFOUND')
-            for (const key of Object.keys(e)) {
-                if (!['request', 'response', 'config', 'socket'].includes(key)) {
-                    try {
-                        const val = (e)[key];
-                        if (typeof val !== 'function' && typeof val !== 'object') {
-                            serializableError[key] = val;
-                        }
-                    } catch {}
-                }
-            }
-        } else if (typeof e === 'object' && e !== null) {
-            serializableError = { message: String(e) };
-        } else {
-            serializableError = { message: String(e) };
-        }
-
-        try {
-            console.error(__safeJson(serializableError));
-        } catch {
-            // Last-resort fallback if even the safe serialiser fails
-            console.error(JSON.stringify({ message: String(e?.message ?? e), name: String(e?.name ?? 'Error') }));
-        }
-        process.exit(1);
-    }
-})();
-`;
+        const script = buildSandboxHarness(userCode, currentCtx);
 
         try {
             const execResult = await this.dockerExecutor.execute(
@@ -710,13 +619,18 @@ if (__origFetch) {
             }
 
             const stdout = execResult.stdout;
-            const startMarker = "___RESULT_START___";
-            const endMarker = "___RESULT_END___";
+            const startMarker = RESULT_START;
+            const endMarker = RESULT_END;
             const startIndex = stdout.indexOf(startMarker);
             const endIndex = stdout.indexOf(endMarker);
 
             if (startIndex === -1 || endIndex === -1) {
-                return { success: true, result: { ctx: currentCtx, result: null }, logs: fullLogs, httpTrafficLog };
+                return {
+                    success: true,
+                    result: { ctx: currentCtx, result: null },
+                    logs: fullLogs,
+                    httpTrafficLog,
+                };
             }
 
             const jsonStr = stdout.substring(startIndex + startMarker.length, endIndex).trim();
@@ -735,11 +649,11 @@ if (__origFetch) {
 
     /** Parse `___HTTP_LOG_START___` … `___HTTP_LOG_END___` from Docker stdout. */
     private parseHttpLog(stdout: string): types.report.HttpTrafficEntry[] | undefined {
-        const start = stdout.indexOf("___HTTP_LOG_START___");
-        const end   = stdout.indexOf("___HTTP_LOG_END___");
+        const start = stdout.indexOf(HTTP_LOG_START);
+        const end = stdout.indexOf(HTTP_LOG_END);
         if (start === -1 || end === -1) return undefined;
         try {
-            const json = stdout.substring(start + "___HTTP_LOG_START___".length, end).trim();
+            const json = stdout.substring(start + HTTP_LOG_START.length, end).trim();
             return JSON.parse(json) as types.report.HttpTrafficEntry[];
         } catch {
             return undefined;

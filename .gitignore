@@ -3,3 +3,5 @@ samples
 .vscode
 conf
 node_modules
+*.log
+coverage

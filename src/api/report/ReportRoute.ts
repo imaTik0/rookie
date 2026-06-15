@@ -15,8 +15,7 @@ export const ListReportsRoute = createRoute({
     path: "/reports",
     tags: ["Reports"],
     summary: "List reports (slim, paginated, filterable)",
-    description:
-        `Returns a paginated list of execution reports in a **slim** form — id, type \
+    description: `Returns a paginated list of execution reports in a **slim** form — id, type \
 (\`TEST_SCENARIO\`, \`CODE_GENERATION\`, or \`MASTER_PLAN\`), status, timestamps, and master-plan \
 linkage — without the heavy per-step detail. Fetch a single report by ID for the full payload.
 
@@ -39,8 +38,7 @@ export const GetReportRoute = createRoute({
     path: "/reports/{reportId}",
     tags: ["Reports"],
     summary: "Get a single report by ID",
-    description:
-        `Returns the full report: the executed plan, every step (generated code, captured \
+    description: `Returns the full report: the executed plan, every step (generated code, captured \
 STDOUT/STDERR, status, and — for failures — the semantic classification and the related \
 documentation fragments), overall status and duration. For a \`MASTER_PLAN\` report this also \
 includes the generated goals, the structured summary, and links to the per-goal child reports.`,

@@ -49,13 +49,13 @@ Because results depend on the model, run it several times and/or across models
 
 Toggle one variable at a time and re-run to justify design decisions:
 
-| Variable | How |
-| --- | --- |
-| Hybrid vs dense-only retrieval | temporarily query only the dense vector |
-| Reranker on/off | `ROOKIE_RERANKER_MODE=off` vs `llm` |
-| Classifier votes | `ROOKIE_CLASSIFIER_VOTES=1` vs `3` vs `5` |
-| Dependency install on/off | `ROOKIE_SANDBOX_AUTO_INSTALL_DEPS=false` (watch ENVIRONMENT rate rise) |
-| Structured output mode | `ROOKIE_STRUCTURED_OUTPUT_MODE=json_object` vs `text` |
+| Variable                       | How                                                                    |
+| ------------------------------ | ---------------------------------------------------------------------- |
+| Hybrid vs dense-only retrieval | temporarily query only the dense vector                                |
+| Reranker on/off                | `ROOKIE_RERANKER_MODE=off` vs `llm`                                    |
+| Classifier votes               | `ROOKIE_CLASSIFIER_VOTES=1` vs `3` vs `5`                              |
+| Dependency install on/off      | `ROOKIE_SANDBOX_AUTO_INSTALL_DEPS=false` (watch ENVIRONMENT rate rise) |
+| Structured output mode         | `ROOKIE_STRUCTURED_OUTPUT_MODE=json_object` vs `text`                  |
 
 ## Extending the benchmark
 

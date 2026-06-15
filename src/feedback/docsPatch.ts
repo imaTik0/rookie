@@ -107,9 +107,11 @@ export function generateDocsPatch(
     );
 
     const hunks: string[] = [];
-    for (const edit of accepted.sort((a, b) =>
-        a.file.localeCompare(b.file) || a.lineStart - b.lineStart
-    )) {
+    for (
+        const edit of accepted.sort((a, b) =>
+            a.file.localeCompare(b.file) || a.lineStart - b.lineStart
+        )
+    ) {
         const content = fileMap.get(edit.file)!;
         hunks.push(unifiedDiffFor(edit.file, content.split("\n"), edit));
     }
@@ -149,9 +151,11 @@ export function generateDocsPatch(
         md.push(`## Suggestions without a verified docs location`);
         md.push("");
         for (const c of unpatchable) {
-            md.push(`- **${c.documentationGap}** (\`${c.failedFunction}\`, ×${c.occurrences}): ${
-                c.proposedFix || "no concrete fix proposed"
-            }`);
+            md.push(
+                `- **${c.documentationGap}** (\`${c.failedFunction}\`, ×${c.occurrences}): ${
+                    c.proposedFix || "no concrete fix proposed"
+                }`,
+            );
         }
         md.push("");
     }

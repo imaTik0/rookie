@@ -3,7 +3,7 @@
  * docs patch generation). No infrastructure required.
  * Run with: deno test src/feedback/feedback.test.ts
  */
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert";
+import { assertEquals, assertStringIncludes } from "@std/assert";
 import {
     corpusMentions,
     extractMissingModule,
@@ -211,8 +211,7 @@ Deno.test("taxonomyOf and topFailingFunctionsOf are deterministic", () => {
 Deno.test("generateDocsPatch produces a unified diff for verified clusters", () => {
     const clusters = clusterGaps([
         makeFinding("goal A", "_.chunkArray", "INCORRECT", {
-            proposedFragment:
-                "Use `chunk(array, size)` to split an array into groups of `size`:",
+            proposedFragment: "Use `chunk(array, size)` to split an array into groups of `size`:",
             fragmentVerification: {
                 verified: true,
                 file: "lodash.md",

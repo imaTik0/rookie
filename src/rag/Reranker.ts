@@ -97,7 +97,9 @@ function parseRanking(raw: string, n: number): number[] | null {
         const parsed = JSON.parse(text);
         const ranking: unknown = Array.isArray(parsed) ? parsed : parsed.ranking;
         if (!Array.isArray(ranking)) return null;
-        const ints = ranking.map((x) => Number(x)).filter((x) => Number.isInteger(x) && x >= 0 && x < n);
+        const ints = ranking.map((x) => Number(x)).filter((x) =>
+            Number.isInteger(x) && x >= 0 && x < n
+        );
         return ints.length > 0 ? ints : null;
     } catch {
         return null;

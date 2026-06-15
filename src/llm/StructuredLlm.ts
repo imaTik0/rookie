@@ -213,8 +213,7 @@ export async function chatStructured<T>(opts: ChatStructuredOpts<T>): Promise<T>
         messages.push({ role: "assistant", content });
         messages.push({
             role: "user",
-            content:
-                `Your previous response did not match the required schema. ` +
+            content: `Your previous response did not match the required schema. ` +
                 `Validation error: ${lastError}. ` +
                 `Return ONLY corrected JSON that satisfies the schema. No prose, no code fences.`,
         });

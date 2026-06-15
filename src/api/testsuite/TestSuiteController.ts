@@ -82,7 +82,9 @@ export class TestSuiteController {
         const { testSuiteId } = c.req.valid("param");
         // Validate up-front so a missing suite fails fast with 404 rather than
         // surfacing only later via the job's error.
-        const suite = await this.testSuiteService.getTestSuite(testSuiteId as types.test.TestSuiteId);
+        const suite = await this.testSuiteService.getTestSuite(
+            testSuiteId as types.test.TestSuiteId,
+        );
         if (!suite) {
             return c.json({ code: 404, message: "TestSuite not found" }, 404);
         }

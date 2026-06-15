@@ -121,7 +121,8 @@ console.log(text);
             id: "dayjs-relativeTime-plugin",
             file: "dayjs.md",
             expectedGap: "CONFIG",
-            note: "fromNow() needs the relativeTime plugin via dayjs.extend(); setup is undocumented.",
+            note:
+                "fromNow() needs the relativeTime plugin via dayjs.extend(); setup is undocumented.",
             matchKeywords: ["fromNow", "extend", "relativeTime", "is not a function"],
         }],
         // Fixed version: adds the required `dayjs.extend(relativeTime)` call.

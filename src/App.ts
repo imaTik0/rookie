@@ -1,15 +1,9 @@
 import { Logger } from "./Logger.ts";
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { registerController } from "./api/Decorator.ts";
-import { ProjectController } from "./api/project/ProjectController.ts";
+import { registerControllers } from "./api/registerControllers.ts";
 import { Scalar } from "@scalar/hono-api-reference";
 import { ConfigService } from "./service/ConfigService.ts";
 import { Container } from "./Container.ts";
-import { FileController } from "./api/file/FileController.ts";
-import { ReportController } from "./api/report/ReportController.ts";
-import { TestSuiteController } from "./api/testsuite/TestSuiteController.ts";
-import { PlannerController } from "./api/planner/PlannerController.ts";
-import { JobController } from "./api/job/JobController.ts";
 import { JobService } from "./service/JobService.ts";
 
 import { logger } from "hono/logger";
@@ -29,36 +23,7 @@ export class App {
         this.honoServer.use("/*", cors());
         this.honoServer.use(logger((...args) => this.logger.log(...args)));
 
-        registerController(
-            this.honoServer,
-            this.container.resolve<ProjectController>("projectController"),
-            this.logger,
-        );
-        registerController(
-            this.honoServer,
-            this.container.resolve<FileController>("fileController"),
-            this.logger,
-        );
-        registerController(
-            this.honoServer,
-            this.container.resolve<ReportController>("reportController"),
-            this.logger,
-        );
-        registerController(
-            this.honoServer,
-            this.container.resolve<TestSuiteController>("testSuiteController"),
-            this.logger,
-        );
-        registerController(
-            this.honoServer,
-            this.container.resolve<PlannerController>("plannerController"),
-            this.logger,
-        );
-        registerController(
-            this.honoServer,
-            this.container.resolve<JobController>("jobController"),
-            this.logger,
-        );
+        registerControllers(this.honoServer, this.container, this.logger);
 
         // Fail any jobs left RUNNING by a previous process (their in-memory
         // runners did not survive the restart).
