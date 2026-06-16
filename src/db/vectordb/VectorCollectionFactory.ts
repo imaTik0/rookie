@@ -1,8 +1,10 @@
+import { Injectable } from "../../ioc/decorator.ts";
 import { ConfigService } from "../../service/ConfigService.ts";
 import { FileShard } from "../../types/file.ts";
 import { VectorCollection } from "./VectorCollection.ts";
 import { VectorConnection } from "./VectorManger.ts";
 
+@Injectable()
 export class VectorCollectionFactory {
     private existingCollections = new Set<string>();
 

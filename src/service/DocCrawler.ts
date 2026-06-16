@@ -1,3 +1,4 @@
+import { Injectable } from "../ioc/decorator.ts";
 import { Logger } from "../Logger.ts";
 import { ConfigService } from "./ConfigService.ts";
 import { htmlToMarkdown } from "./HtmlToMarkdown.ts";
@@ -33,6 +34,7 @@ const DEFAULT_OPTIONS: CrawlOptions = {
     fetchTimeoutMs: 10000,
 };
 
+@Injectable()
 export class DocCrawler {
     constructor(
         private logger: Logger,

@@ -1,14 +1,15 @@
+import { Injectable } from "../ioc/decorator.ts";
 import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
 import { Logger } from "../Logger.ts";
 import * as types from "../types/index.ts";
 import type { DocFile } from "../types/file.ts";
 import { EmbeddingService } from "./EmbeddingService.ts";
 import { FileService } from "./FileService.ts";
-import { ProjectRepository } from "./ProjectRepository.ts";
+import { ProjectRepository } from "../db/mongo/ProjectRepository.ts";
 import { PromptService } from "./PromptService.ts";
-import { TestSuiteRepository } from "./TestSuiteRepository.ts";
+import { TestSuiteRepository } from "../db/mongo/TestSuiteRepository.ts";
 import { DockerExecutor } from "./DockerExecutor.ts";
-import { ReportRepository } from "./ReportRepository.ts";
+import { ReportRepository } from "../db/mongo/ReportRepository.ts";
 import { ConfigService } from "./ConfigService.ts";
 import { isEnvironmentError, parseImportedPackages } from "../sandbox/depDetect.ts";
 import {
@@ -32,6 +33,7 @@ function throwIfAborted(signal?: AbortSignal): void {
     if (signal?.aborted) throw new JobCancelledError();
 }
 
+@Injectable()
 export class Executor {
     private dockerExecutor: DockerExecutor;
 

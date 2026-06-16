@@ -7,9 +7,9 @@ import { assert, assertEquals } from "@std/assert";
 import { Executor } from "./Executor.ts";
 import type { ConfigService } from "./ConfigService.ts";
 import type { PromptService } from "./PromptService.ts";
-import type { TestSuiteRepository } from "./TestSuiteRepository.ts";
-import type { ProjectRepository } from "./ProjectRepository.ts";
-import type { ReportRepository } from "./ReportRepository.ts";
+import type { TestSuiteRepository } from "../db/mongo/TestSuiteRepository.ts";
+import type { ProjectRepository } from "../db/mongo/ProjectRepository.ts";
+import type { ReportRepository } from "../db/mongo/ReportRepository.ts";
 import { fakeDockerExecutor, fakeLogger } from "../testing/fakes.ts";
 
 const cfg = {

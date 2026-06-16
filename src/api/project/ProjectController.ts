@@ -5,6 +5,7 @@ import { JobService } from "../../service/JobService.ts";
 import { mapJobToApi } from "../job/JobMapper.ts";
 import * as types from "../../types/index.ts";
 import { ProjectRoutes } from "./ProjectRoute.ts";
+import { errorBody } from "../CommonSchema.ts";
 
 @Controller("/projects")
 export class ProjectController {
@@ -22,12 +23,11 @@ export class ProjectController {
                 createProjectDto.fileIds as types.file.FileId[],
             );
             if (!newProject) {
-                return c.json({ code: 500, message: "Failed to create project" }, 500 as any);
+                return c.json({ code: 500, message: "Failed to create project" }, 500);
             }
             return c.json(newProject, 201);
         } catch (error) {
-            const err = error as { message?: string };
-            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
+            return c.json(errorBody(error), 400);
         }
     };
 
@@ -76,8 +76,7 @@ export class ProjectController {
             }
             return c.json(updatedProject, 200);
         } catch (error) {
-            const err = error as { message?: string };
-            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
+            return c.json(errorBody(error), 400);
         }
     };
 
@@ -113,8 +112,7 @@ export class ProjectController {
             }
             return c.json(updatedProject, 200);
         } catch (error) {
-            const err = error as { message?: string };
-            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
+            return c.json(errorBody(error), 400);
         }
     };
 

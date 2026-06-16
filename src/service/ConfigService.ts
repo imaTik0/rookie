@@ -1,3 +1,4 @@
+import { Injectable } from "../ioc/decorator.ts";
 import { Logger } from "../Logger.ts";
 
 export interface ConfigValues {
@@ -129,6 +130,7 @@ function envNum(name: string, fallback: number): number {
     return Number.isFinite(n) ? n : fallback;
 }
 
+@Injectable()
 export class ConfigService {
     private config: ConfigValues;
     constructor(

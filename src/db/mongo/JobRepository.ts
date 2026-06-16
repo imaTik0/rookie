@@ -1,13 +1,15 @@
-import { MongoDbConnection } from "../db/mongo/MongoDbManager.ts";
-import * as db from "../db/mongo/Model.ts";
-import { BaseRepository } from "../db/mongo/BaseRepository.ts";
-import * as types from "../types/index.ts";
+import { Injectable } from "../../ioc/decorator.ts";
+import { MongoDbConnection } from "./MongoDbManager.ts";
+import * as db from "./Model.ts";
+import { BaseRepository } from "./BaseRepository.ts";
+import * as types from "../../types/index.ts";
 
 export interface JobFilter {
     kind?: types.job.JobKind;
     status?: types.job.JobStatus;
 }
 
+@Injectable()
 export class JobRepository extends BaseRepository<types.job.JobId, db.JobModel> {
     static readonly COLLECTION_NAME = "jobs";
 

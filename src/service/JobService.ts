@@ -1,5 +1,6 @@
+import { Injectable } from "../ioc/decorator.ts";
 import { Logger } from "../Logger.ts";
-import { JobFilter, JobRepository } from "./JobRepository.ts";
+import { JobFilter, JobRepository } from "../db/mongo/JobRepository.ts";
 import { Executor } from "./Executor.ts";
 import { ProjectService } from "./ProjectService.ts";
 import * as db from "../db/mongo/Model.ts";
@@ -19,6 +20,7 @@ export interface CancelOutcome {
  * for status/result so clients can poll across requests. In-flight jobs do not
  * survive a process restart — `reconcileOnStartup()` fails any left RUNNING.
  */
+@Injectable()
 export class JobService {
     private readonly running = new Map<types.job.JobId, AbortController>();
     /** Last progress-write timestamp per job, for throttling DB writes. */

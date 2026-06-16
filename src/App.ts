@@ -9,6 +9,9 @@ import { JobService } from "./service/JobService.ts";
 import { logger } from "hono/logger";
 import { cors } from "hono/cors";
 
+// NOTE: intentionally NOT @Injectable — App ↔ Container is a circular import, and
+// emitDecoratorMetadata would reference Container as a value at decoration time
+// (temporal dead zone). App resolves fine via the name-based fallback.
 export class App {
     private honoServer?: OpenAPIHono;
 

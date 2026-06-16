@@ -1,4 +1,12 @@
 // deno-lint-ignore-file ban-types no-prototype-builtins no-explicit-any
+import "reflect-metadata";
+import { getParamOverrides } from "./decorator.ts";
+
+/** Lower-case the first character — class `FooBar` ⇒ binding name `fooBar`. */
+function lowerFirst(name: string): string {
+    return name ? name[0].toLowerCase() + name.slice(1) : name;
+}
+
 export type IOCFactory = (
     parent: unknown,
     parentName: string | null,
@@ -49,6 +57,8 @@ export interface IOCEntry {
 
 export class IOC {
     protected map: { [name: string]: IOCEntry };
+    /** Names currently mid-construction — used to detect circular dependencies. */
+    private resolving = new Set<string>();
 
     constructor(private parent?: IOC) {
         this.map = {};
@@ -112,12 +122,39 @@ export class IOC {
             return <T> result;
         }
         if (entry.type) {
-            const result = this.createCore(entry.type, name);
-            entry.resolved = true;
-            entry.value = result;
-            return <T> result;
+            if (this.resolving.has(name)) {
+                throw new Error(
+                    "Circular dependency detected: " + [...this.resolving, name].join(" -> "),
+                );
+            }
+            this.resolving.add(name);
+            try {
+                const result = this.createCore(entry.type, name);
+                entry.resolved = true;
+                entry.value = result;
+                return <T> result;
+            } finally {
+                this.resolving.delete(name);
+            }
         }
         throw new Error("Invalid ioc entry");
+    }
+
+    /**
+     * Constructor dependency binding-names. Prefers `design:paramtypes` reflection
+     * metadata (emitted for any decorated class) — mapping each parameter type to
+     * its binding name, with `@InjectParam` overrides for ambiguous types. Falls
+     * back to source-text parsing for classes that carry no metadata.
+     */
+    private getConstructorDependencyNames(clazz: Function): string[] {
+        const paramTypes = Reflect.getMetadata("design:paramtypes", clazz) as
+            | Array<{ name?: string }>
+            | undefined;
+        if (!paramTypes) {
+            return ReflectUtils.getClassConstructorParametersNames(clazz);
+        }
+        const overrides = getParamOverrides(clazz);
+        return paramTypes.map((t, i) => overrides[i] ?? lowerFirst(t?.name ?? ""));
     }
 
     createCore<T = unknown>(
@@ -125,9 +162,7 @@ export class IOC {
         clazzName: string,
         props?: { [name: string]: unknown },
     ): T {
-        const parameters = ReflectUtils.getClassConstructorParametersNames(
-            clazz,
-        );
+        const parameters = this.getConstructorDependencyNames(clazz);
         const params: unknown[] = [];
         for (const param of parameters) {
             params.push(

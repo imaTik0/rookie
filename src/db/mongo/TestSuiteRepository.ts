@@ -1,11 +1,13 @@
-import { MongoDbConnection } from "../db/mongo/MongoDbManager.ts";
-import * as db from "../db/mongo/Model.ts";
-import { BaseRepository } from "../db/mongo/BaseRepository.ts";
-import * as types from "../types/index.ts";
+import { Injectable } from "../../ioc/decorator.ts";
+import { MongoDbConnection } from "./MongoDbManager.ts";
+import * as db from "./Model.ts";
+import { BaseRepository } from "./BaseRepository.ts";
+import * as types from "../../types/index.ts";
 
 type UpdateDTO = Partial<Omit<db.TestSuite, "createdAt" | "updatedAt" | "_id">>;
 type CreateDTO = Omit<db.TestSuite, "createdAt" | "updatedAt" | "_id">;
 
+@Injectable()
 export class TestSuiteRepository extends BaseRepository<types.test.TestSuiteId, db.TestSuite> {
     static readonly COLLECTION_NAME = "testsuites";
 

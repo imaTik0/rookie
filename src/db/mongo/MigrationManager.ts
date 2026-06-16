@@ -1,3 +1,4 @@
+import { Injectable } from "../../ioc/decorator.ts";
 import { Logger } from "../../Logger.ts";
 import { MongoDbConnection } from "./MongoDbManager.ts";
 import { Migration001Scheme } from "./migrations/Migration001Scheme.ts";
@@ -14,6 +15,7 @@ const migrations: Migration[] = [
     Migration002Indices,
 ];
 
+@Injectable()
 export class MigrationManager {
     private migrationsCollectionName = "migrations";
     private migrationsCollection;

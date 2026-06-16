@@ -1,8 +1,10 @@
+import { Injectable } from "../ioc/decorator.ts";
 import * as db from "../db/mongo/Model.ts";
-import { TestSuiteRepository } from "./TestSuiteRepository.ts";
+import { TestSuiteRepository } from "../db/mongo/TestSuiteRepository.ts";
 import * as types from "../types/index.ts";
 import { CreateTestSuiteDTO, UpdateTestSuiteDTO } from "../api/testsuite/TestSuiteSchema.ts";
 
+@Injectable()
 export class TestSuiteService {
     constructor(
         private testSuiteRepository: TestSuiteRepository,

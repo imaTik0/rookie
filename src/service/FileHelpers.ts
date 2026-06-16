@@ -1,8 +1,10 @@
+import { Injectable } from "../ioc/decorator.ts";
 import * as path from "@std/path";
 import * as types from "../types/index.ts";
 import * as db from "../db/mongo/Model.ts";
 import striptags from "striptags";
 import { ConfigService } from "./ConfigService.ts";
+import { Logger } from "../Logger.ts";
 
 interface ChunkingOptions {
     chunkSize: number;
@@ -23,10 +25,11 @@ const SUPPORTED_TEXT_MIMES = [
     "text/x-yaml",
 ];
 
+@Injectable()
 export class FileHelpers {
     private readonly textDecoder: TextDecoder;
 
-    constructor(private configService: ConfigService) {
+    constructor(private configService: ConfigService, private logger: Logger) {
         this.textDecoder = new TextDecoder("utf-8");
     }
 
@@ -115,7 +118,7 @@ export class FileHelpers {
                 append: false,
             });
         } catch (error) {
-            console.error(`Error writing content to "${filePath}":`, error);
+            this.logger.error(error, `Error writing content to "${filePath}"`);
             throw error;
         }
     }

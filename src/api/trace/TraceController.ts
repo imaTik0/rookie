@@ -14,7 +14,7 @@ export class TraceController {
     ) => {
         const { testSuiteId } = c.req.valid("param");
         const traces = await this.traceRepository.getByTestSuiteId(testSuiteId);
-        return c.json(traces as any, 200);
+        return c.json(traces, 200);
     };
 
     @Get(TraceRoutes.GetTraceByIdRoute)
@@ -22,8 +22,8 @@ export class TraceController {
         const { traceId } = c.req.valid("param");
         const trace = await this.traceRepository.getById(traceId as types.trace.TraceId);
         if (!trace) {
-            return c.json({ code: 404, message: "Trace not found" } as any, 404);
+            return c.json({ code: 404, message: "Trace not found" }, 404);
         }
-        return c.json(trace as any, 200);
+        return c.json(trace, 200);
     };
 }

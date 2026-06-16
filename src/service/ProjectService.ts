@@ -1,7 +1,8 @@
+import { Injectable } from "../ioc/decorator.ts";
 import { ProjectSchema } from "../api/project/ProjectSchema.ts";
 import * as types from "../types/index.ts";
-import { FileRepository } from "./FileRepository.ts";
-import { ProjectRepository } from "./ProjectRepository.ts";
+import { FileRepository } from "../db/mongo/FileRepository.ts";
+import { ProjectRepository } from "../db/mongo/ProjectRepository.ts";
 import { FileProcessorService } from "./FileProcessorService.ts";
 import { FileHelpers } from "./FileHelpers.ts";
 import { DocCrawler } from "./DocCrawler.ts";
@@ -9,6 +10,7 @@ import * as db from "../db/mongo/Model.ts";
 import { Buffer } from "node:buffer";
 import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
 
+@Injectable()
 export class ProjectService {
     constructor(
         private projectRepository: ProjectRepository,

@@ -6,13 +6,14 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { FileHelpers } from "./FileHelpers.ts";
 import type { ConfigService } from "./ConfigService.ts";
 import type * as db from "../db/mongo/Model.ts";
+import { fakeLogger } from "../testing/fakes.ts";
 
 const cfg = {
     values: { chunking: { chunkSize: 1200, chunkOverlap: 150 } },
 } as unknown as ConfigService;
 
 function helpers() {
-    return new FileHelpers(cfg);
+    return new FileHelpers(cfg, fakeLogger());
 }
 
 function file(filename: string, mimetype: string, content: string): db.File {

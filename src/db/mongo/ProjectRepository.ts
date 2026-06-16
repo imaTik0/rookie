@@ -1,9 +1,11 @@
-import { MongoDbConnection } from "../db/mongo/MongoDbManager.ts";
-import * as types from "../types/index.ts";
-import * as db from "../db/mongo/Model.ts";
-import { BaseRepository } from "../db/mongo/BaseRepository.ts";
+import { Injectable } from "../../ioc/decorator.ts";
+import { MongoDbConnection } from "./MongoDbManager.ts";
+import * as types from "../../types/index.ts";
+import * as db from "./Model.ts";
+import { BaseRepository } from "./BaseRepository.ts";
 import { FileRepository } from "./FileRepository.ts";
 
+@Injectable()
 export class ProjectRepository extends BaseRepository<types.project.ProjectId, db.Project> {
     static readonly COLLECTION_NAME = "projects";
 

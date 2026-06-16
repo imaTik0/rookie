@@ -43,6 +43,10 @@ To create a project directly from a live documentation website instead, use \
                 "Invalid request — e.g. the project name is too short or one or more `fileIds` do not exist.",
             content: { "application/json": { schema: ErrorSchema } },
         },
+        500: {
+            description: "The project could not be created due to an unexpected server error.",
+            content: { "application/json": { schema: ErrorSchema } },
+        },
     },
 });
 

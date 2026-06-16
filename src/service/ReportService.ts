@@ -1,5 +1,6 @@
-import { ReportFilter, ReportRepository } from "./ReportRepository.ts";
-import { ProjectRepository } from "./ProjectRepository.ts";
+import { Injectable } from "../ioc/decorator.ts";
+import { ReportFilter, ReportRepository } from "../db/mongo/ReportRepository.ts";
+import { ProjectRepository } from "../db/mongo/ProjectRepository.ts";
 import { FileService } from "./FileService.ts";
 import * as db from "../db/mongo/Model.ts";
 import * as types from "../types/index.ts";
@@ -8,6 +9,7 @@ import { clusterGaps } from "../feedback/gapAggregate.ts";
 import { generateDocsPatch } from "../feedback/docsPatch.ts";
 import { CorpusFile, corpusFromFiles } from "../feedback/fragmentVerify.ts";
 
+@Injectable()
 export class ReportService {
     constructor(
         private reportRepository: ReportRepository,

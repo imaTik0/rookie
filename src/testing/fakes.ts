@@ -6,7 +6,8 @@
  */
 import type OpenAI from "@openai/openai";
 import type { Logger } from "../Logger.ts";
-import type { JobRepository } from "../service/JobRepository.ts";
+import type { JobRepository } from "../db/mongo/JobRepository.ts";
+import type { EmbeddingService } from "../service/EmbeddingService.ts";
 import type * as db from "../db/mongo/Model.ts";
 import type * as types from "../types/index.ts";
 
@@ -66,6 +67,25 @@ export function apiError(status: number, message = "error"): Error & { status: n
     const e = new Error(message) as Error & { status: number };
     e.status = status;
     return e;
+}
+
+// ── EmbeddingService ─────────────────────────────────────────────────────────────
+
+/**
+ * Fake EmbeddingService. By default every text embeds to the same vector (so
+ * cosine similarity is uniform and ordering is input-stable); pass `embedBatch`
+ * to control scores.
+ */
+export function fakeEmbeddingService(
+    embedBatch?: (texts: string[]) => number[][],
+): EmbeddingService {
+    const batch = embedBatch ?? ((texts: string[]) => texts.map(() => [1, 0, 0]));
+    return {
+        embed: (t: string) => Promise.resolve([batch([t])[0]]),
+        embedBatch: (ts: string[]) => Promise.resolve(batch(ts)),
+        sparseEmbed: () => ({ indices: [], values: [] }),
+        sparseEmbedDocument: () => ({ indices: [], values: [] }),
+    } as unknown as EmbeddingService;
 }
 
 // ── DockerExecutor ───────────────────────────────────────────────────────────────

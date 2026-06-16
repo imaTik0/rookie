@@ -7,7 +7,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { MongoDbManager } from "./MongoDbManager.ts";
 import { MigrationManager } from "./MigrationManager.ts";
-import { ProjectRepository } from "../../service/ProjectRepository.ts";
+import { ProjectRepository } from "./ProjectRepository.ts";
 import type * as types from "../../types/index.ts";
 import { mongoAvailable, TEST_MONGO_URL } from "../../testing/infra.ts";
 import { fakeLogger } from "../../testing/fakes.ts";

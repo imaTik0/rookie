@@ -1,9 +1,11 @@
+import { Injectable } from "../ioc/decorator.ts";
 import { v4 as uuidv4 } from "uuid";
 import * as types from "../types/index.ts";
 import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
 import { Buffer } from "node:buffer";
 import { EmbeddingService } from "./EmbeddingService.ts";
 
+@Injectable()
 export class FileProcessorService {
     constructor(
         private vectorCollectionFactory: VectorCollectionFactory,

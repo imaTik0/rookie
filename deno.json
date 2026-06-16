@@ -36,7 +36,8 @@
     "compilerOptions": {
         "jsx": "precompile",
         "jsxImportSource": "hono/jsx",
-        "experimentalDecorators": true
+        "experimentalDecorators": true,
+        "emitDecoratorMetadata": true
     },
     "nodeModulesDir": "auto",
     "exclude": [

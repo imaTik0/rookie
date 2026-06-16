@@ -1,4 +1,5 @@
 import OpenAI from "@openai/openai";
+import { Injectable, InjectParam } from "../ioc/decorator.ts";
 import { Logger } from "../Logger.ts";
 import { EmbeddingService } from "./EmbeddingService.ts";
 import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
@@ -31,66 +32,55 @@ import {
 } from "./prompt/types.ts";
 import * as templates from "./prompt/templates.ts";
 import { runAgenticLoop } from "./prompt/agenticLoop.ts";
-import { LlmComplete, rerankResults } from "../rag/Reranker.ts";
-import { z } from "zod";
-import { chatStructured, coerceJson } from "../llm/StructuredLlm.ts";
+import { coerceJson } from "../llm/StructuredLlm.ts";
 import * as schemas from "../llm/schemas.ts";
-import { majorityVote } from "../eval/metrics.ts";
+import { llmParams, loopParams, makeStructured, type StructuredFn } from "./prompt/llm.ts";
+import { VfsTools } from "./prompt/VfsTools.ts";
+import { FailureClassifier } from "./prompt/FailureClassifier.ts";
+import { RagSearch } from "./prompt/RagSearch.ts";
 
 export type { CodeGenerationResponse, PromptOptions, StructuredResponse } from "./prompt/types.ts";
 
+@Injectable()
 export class PromptService {
+    /** Hybrid retrieval + rerank + relevance-aware truncation. */
+    private readonly ragSearch: RagSearch;
+    /** Virtual-file-system tools exposed to the research agents. */
+    private readonly vfsTools: VfsTools;
+    /** Self-consistency documentation-gap classification + query refinement. */
+    private readonly failureClassifier: FailureClassifier;
+    /** Structured-output closure bound to the configured LLM. */
+    private readonly structured: StructuredFn;
+
     constructor(
-        private openai: OpenAI,
+        // Two distinct OpenAI instances share one type; resolve this one by name.
+        @InjectParam("openai") private openai: OpenAI,
         private logger: Logger,
-        private embeddingService: EmbeddingService,
-        private vectorCollectionFactory: VectorCollectionFactory,
+        embeddingService: EmbeddingService,
+        vectorCollectionFactory: VectorCollectionFactory,
         private configService: ConfigService,
         private traceRepository: TraceRepository,
-    ) {}
+    ) {
+        this.ragSearch = new RagSearch(
+            openai,
+            embeddingService,
+            vectorCollectionFactory,
+            configService,
+            logger,
+        );
+        this.vfsTools = new VfsTools(configService);
+        this.failureClassifier = new FailureClassifier(openai, configService, logger);
+        this.structured = makeStructured(openai, configService, logger);
+    }
 
     /** Common deterministic generation params (temperature/seed) for raw chat calls. */
     private llmParams(): Record<string, unknown> {
-        const llm = this.configService.values.llm;
-        return {
-            temperature: llm.temperature,
-            ...(llm.seed !== undefined ? { seed: llm.seed } : {}),
-        };
+        return llmParams(this.configService);
     }
 
-    /**
-     * Extra knobs for the agentic loop config (NOT for raw create() calls — these
-     * would be invalid OpenAI body params). Includes determinism + retry + token budget.
-     */
+    /** Extra knobs for the agentic loop config (determinism + retry + token budget). */
     private loopParams(): Record<string, unknown> {
-        const llm = this.configService.values.llm;
-        return {
-            temperature: llm.temperature,
-            ...(llm.seed !== undefined ? { seed: llm.seed } : {}),
-            maxRetries: llm.maxRetries,
-            retryBaseMs: llm.retryBaseMs,
-            callTimeoutMs: llm.callTimeoutMs,
-            maxContextTokens: this.configService.values.limits.maxContextTokens,
-        };
-    }
-
-    /** Request a JSON object from the model and validate it against a zod schema. */
-    private structured<T>(system: string, user: string, schema: z.ZodType<T>): Promise<T> {
-        const llm = this.configService.values.llm;
-        return chatStructured<T>({
-            openai: this.openai,
-            model: this.configService.values.openAI.modelName,
-            system,
-            user,
-            schema,
-            mode: llm.structuredOutputMode,
-            temperature: llm.temperature,
-            seed: llm.seed,
-            maxRepairAttempts: llm.maxRepairAttempts,
-            maxRetries: llm.maxRetries,
-            retryBaseMs: llm.retryBaseMs,
-            logger: this.logger,
-        });
+        return loopParams(this.configService);
     }
 
     public async promptForApiUsageScenario(
@@ -131,7 +121,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             search_knowledge_base: async (_id: string, rawArgs: any) => {
                 const args = rawArgs as SearchToolArgs;
                 emitLog(onProgress, `Agent searching: "${args.query}"`);
-                const results = await this.performRAGSearch(
+                const results = await this.ragSearch.search(
                     vectorCollectionName,
                     args.query,
                     this.configService.values.limits.defaultSearchLimit,
@@ -150,7 +140,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                 }));
                 return JSON.stringify(truncated);
             },
-            ...this.createVfsToolHandlers(files, onProgress),
+            ...this.vfsTools.createHandlers(files, onProgress),
         };
 
         const traceTracker = await this.createTraceTracker("Research Phase", goal);
@@ -224,12 +214,12 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         this.logger.log(`Routing/Planning steps for goal: "${userGoal}"`);
         emitLog(onProgress, `Analyzing task and planning execution steps...`);
 
-        const initialSearchResults = await this.performRAGSearch(
+        const initialSearchResults = await this.ragSearch.search(
             vectorCollectionName,
             userGoal,
             this.configService.values.limits.defaultSearchLimit,
         );
-        const initialDocsContent = this.formatSearchResults(initialSearchResults);
+        const initialDocsContent = this.ragSearch.formatResults(initialSearchResults);
 
         try {
             return await this.structured(
@@ -316,7 +306,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                             "Verification could not proceed with the researched documentation and had to search again.",
                     });
 
-                    const additionalDocs = await this.performRAGSearch(
+                    const additionalDocs = await this.ragSearch.search(
                         vectorCollectionName,
                         query,
                         this.configService.values.limits.defaultSearchLimit,
@@ -450,12 +440,12 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             messages: OpenAI.Chat.ChatCompletionMessageParam[];
         }
     > {
-        const initialSearchResults = await this.performRAGSearch(
+        const initialSearchResults = await this.ragSearch.search(
             vectorCollectionName,
             userGoal,
             this.configService.values.limits.defaultSearchLimit,
         );
-        const initialDocsContent = this.formatSearchResults(initialSearchResults);
+        const initialDocsContent = this.ragSearch.formatResults(initialSearchResults);
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
             { role: "system", content: templates.RESEARCH_SYSTEM_PROMPT },
@@ -487,7 +477,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                 search_knowledge_base: async (_id, rawArgs) => {
                     const args = rawArgs as SearchToolArgs;
                     emitLog(onProgress, `Agent RAG searching knowledge base for: "${args.query}"`);
-                    const results = await this.performRAGSearch(
+                    const results = await this.ragSearch.search(
                         vectorCollectionName,
                         args.query,
                         this.configService.values.limits.defaultSearchLimit,
@@ -506,7 +496,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                     }));
                     return JSON.stringify(truncated);
                 },
-                ...this.createVfsToolHandlers(files, onProgress),
+                ...this.vfsTools.createHandlers(files, onProgress),
             },
             modelName: this.configService.values.openAI.modelName,
             readySignal: "READY_FOR_GENERATION",
@@ -550,7 +540,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
 
         const combinedRaw =
             `#### Initial Documentation:\n${initialDocsContent}\n\n#### Researched Documentation:\n${contextFound}`;
-        const smartDocs = await this.rankAndFilterDocs(combinedRaw, query, maxDocsChars);
+        const smartDocs = await this.ragSearch.rankAndFilterDocs(combinedRaw, query, maxDocsChars);
 
         this.logger.log(`Agentic RAG Verification Phase (Smoke Testing)...`);
         emitLog(onProgress, `Agentic RAG Verification Phase... Smoke testing examples in Docker.`);
@@ -580,7 +570,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                         onProgress,
                         `Agent RAG searching knowledge base (Verification phase) for: "${args.query}"`,
                     );
-                    const results = await this.performRAGSearch(
+                    const results = await this.ragSearch.search(
                         vectorCollectionName,
                         args.query,
                         this.configService.values.limits.defaultSearchLimit,
@@ -730,119 +720,22 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         ) as CodeGenerationResponse;
     }
 
-    private formatSearchResults(
-        results: types.vector.SearchResult<types.file.FileShard>[],
-    ): string {
-        return results
-            .map((res, i) =>
-                `--- DOCUMENT ${i + 1} (Score: ${res.score}) ---\n${
-                    (res.payload?.content || "No content").substring(
-                        0,
-                        this.configService.values.limits.maxResultChars,
-                    )
-                }\n`
-            )
-            .join("\n");
-    }
-
-    /** Shared chat closure used by the reranker; honours determinism config. */
-    private buildLlmComplete(): LlmComplete {
-        return async (system, user) => {
-            const llm = this.configService.values.llm;
-            const resp = await this.openai.chat.completions.create({
-                model: this.configService.values.openAI.modelName,
-                messages: [
-                    { role: "system", content: system },
-                    { role: "user", content: user },
-                ],
-                temperature: llm.temperature,
-                ...(llm.seed !== undefined ? { seed: llm.seed } : {}),
-            } as any);
-            return resp.choices[0]?.message?.content || "";
-        };
-    }
-
     /** Rerank hybrid-retrieval results (no-op unless `reranker.mode` is set). */
-    public async rerankSearchResults(
+    public rerankSearchResults(
         query: string,
         results: types.vector.SearchResult<types.file.FileShard>[],
         limit: number,
     ): Promise<types.vector.SearchResult<types.file.FileShard>[]> {
-        const cfg = this.configService.values.reranker;
-        if (cfg.mode === "off") return results.slice(0, limit);
-        return await rerankResults(
-            query,
-            results,
-            limit,
-            (r) => r.payload?.content || "",
-            cfg,
-            {
-                llmComplete: cfg.mode === "llm" ? this.buildLlmComplete() : undefined,
-                logger: this.logger,
-            },
-        );
+        return this.ragSearch.rerank(query, results, limit);
     }
 
-    private async performRAGSearch(
-        collectionName: string,
-        query: string,
-        limit: number = this.configService.values.limits.defaultSearchLimit,
-    ): Promise<types.vector.SearchResult<types.file.FileShard>[]> {
-        try {
-            this.logger.log(
-                `RAG search — collection: "${collectionName}" query: "${query.slice(0, 120)}"`,
-            );
-            const collection = await this.vectorCollectionFactory.createCollection<
-                types.file.FileShard
-            >(collectionName);
-
-            const dense = await this.embeddingService.embed(query);
-            const sparse = this.embeddingService.sparseEmbed(query);
-
-            // When reranking is enabled, over-fetch then let the reranker cut to `limit`.
-            const rerankCfg = this.configService.values.reranker;
-            const fetchLimit = rerankCfg.mode === "off" ? limit : Math.max(limit, rerankCfg.topN);
-
-            const raw = await collection.searchHybrid(
-                dense[0] as types.vector.DenseVector,
-                sparse,
-                fetchLimit,
-            );
-            return await this.rerankSearchResults(query, raw, limit);
-        } catch (error) {
-            const err = error as types.vector.QdrantError;
-            const errorData = err?.data?.status?.error || err?.message || String(error);
-            this.logger.error(
-                `RAG search failed for collection "${collectionName}": ${
-                    JSON.stringify(errorData).substring(0, 300)
-                }`,
-            );
-            return [];
-        }
+    /** Turn a crash + context into a sharper RAG query (delegates to FailureClassifier). */
+    public refineSearchQuery(error: string, context: string): Promise<string> {
+        return this.failureClassifier.refineSearchQuery(error, context);
     }
 
-    public async refineSearchQuery(
-        error: string,
-        context: string,
-    ): Promise<string> {
-        const prompt = templates.createRefineSearchQueryPrompt(error, context);
-
-        try {
-            const response = await this.openai.chat.completions.create({
-                model: this.configService.values.openAI.modelName,
-                messages: [{ role: "user", content: prompt }],
-                ...this.llmParams(),
-            } as any);
-
-            return response.choices[0]?.message?.content?.trim() ||
-                `${error} ${context}`.substring(0, 500);
-        } catch (err) {
-            this.logger.error(err, "Failed to refine search query");
-            return `${error} ${context}`.substring(0, 500);
-        }
-    }
-
-    public async classifyFailure(
+    /** Classify a documentation-gap failure via self-consistency voting. */
+    public classifyFailure(
         errorMessage: string,
         scriptContent: string,
         relatedDocs: string,
@@ -857,183 +750,14 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         } = {},
         httpTrafficLog?: types.report.HttpTrafficEntry[],
     ): Promise<types.report.FailureAnalysis> {
-        // Format captured HTTP traffic as a concise classifier input section.
-        const httpSection = httpTrafficLog && httpTrafficLog.length > 0
-            ? `\n\n### HTTP TRAFFIC DURING EXECUTION\n` +
-                httpTrafficLog.slice(0, 20).map((e) =>
-                    `${e.method} ${e.url} → ${e.responseStatus ?? e.error ?? "no response"}` +
-                    (e.responseBody ? `\n  Response: ${e.responseBody.slice(0, 300)}` : "")
-                ).join("\n")
-            : "";
-
-        const system =
-            `You are a Documentation Quality Analyst. A code example that was written based on library documentation has CRASHED. Your job is to classify WHY it failed by comparing the error to the documentation.`;
-        const user = `### THE ERROR
-${errorMessage}
-
-### THE CODE THAT CRASHED
-${scriptContent}
-
-### DOCUMENTATION CONTEXT
-(Fragments retrieved for this error, plus — when available — the documentation the code
-generator actually used. Quote pinpointed fragments VERBATIM from this context, never from memory.)
-${relatedDocs || "No related documentation was found."}${httpSection}
-
-### WHAT THE CODE WAS TRYING TO DO
-${stepDescription}
-
-### YOUR TASK
-Determine:
-1. Which function/method call caused the crash
-2. Classify the documentationGap as exactly one of:
-   - MISSING (no docs exist for this function)
-   - AMBIGUOUS (docs exist but are unclear/confusing)
-   - INCORRECT (docs say one thing but the library does another)
-   - CONFIG (library needs configuration/setup that the docs omit)
-   - ENVIRONMENT (the failure is a tooling/runtime problem — missing dependency, install failure, sandbox limit — NOT a documentation problem)
-   - UNKNOWN (cannot determine)
-3. Your reasoning
-4. A concrete suggestion for how the documentation should be fixed
-5. PINPOINTED FRAGMENT: Quote the RELEVANT SECTION from the documentation — NOT just a heading or anchor line.
-   The fragment MUST include ALL of the following that are present in the docs:
-     a) The endpoint/function heading and its description (1-3 sentences)
-     b) All parameters or request body fields (name, type, required/optional, meaning)
-     c) The return value / response schema description
-     d) At least one code example if the docs provide one
-   Format: "[filename]: <multi-line verbatim quote>"
-   Minimum length: the fragment should be at least 5 meaningful lines unless the docs genuinely have less.
-   WRONG ✗: "[api.md]: ## Create a repository"
-   RIGHT ✓: "[api.md]: ## Create a repository\\nCreate a new repository for the specified user.\\n\\n**Parameters**\\n- 'owner' (string, required): ...\\n- 'name' (string, required): ..."
-6. PROPOSED FRAGMENT: A corrected/improved version of that documentation section (same multi-line format).
-
-Respond with a JSON object:
-{
-    "errorMessage": "the key error line",
-    "failedFunction": "the function/method that crashed",
-    "documentationGap": "MISSING | AMBIGUOUS | INCORRECT | CONFIG | ENVIRONMENT | UNKNOWN",
-    "reasoning": "why you classified it this way",
-    "suggestedDocsFix": "concrete suggestion for documentation improvement",
-    "pinpointedFragment": "exact multi-line quote from the docs (minimum 5 lines)",
-    "proposedFragment": "corrected multi-line version of the documentation section"
-}`;
-
-        const votes = this.configService.values.classifier.votes;
-        // Fire all votes concurrently — they are fully independent LLM calls.
-        const settled = await Promise.allSettled(
-            Array.from(
-                { length: votes },
-                (_, i) =>
-                    this.structured(system, user, schemas.FailureAnalysisSchema)
-                        .catch((err) => {
-                            this.logger.error(err, `Failed to classify failure (vote ${i + 1})`);
-                            return null;
-                        }),
-            ),
+        return this.failureClassifier.classify(
+            errorMessage,
+            scriptContent,
+            relatedDocs,
+            stepDescription,
+            options,
+            httpTrafficLog,
         );
-        const candidates: types.report.FailureAnalysis[] = settled
-            .map((r) => (r.status === "fulfilled" ? r.value : null))
-            .filter((v): v is types.report.FailureAnalysis => v !== null);
-
-        if (candidates.length === 0) {
-            return {
-                errorMessage: errorMessage.substring(0, 200),
-                failedFunction: "unknown",
-                documentationGap: "UNKNOWN",
-                reasoning: "Classification failed due to LLM error",
-                suggestedDocsFix: "Manual review required",
-                confidence: 0,
-                votes: 0,
-            };
-        }
-
-        // Self-consistency: majority vote on the category; among candidates that
-        // agree with the winner, prefer the one whose pinpointed fragment best
-        // verifies against the actual documentation corpus.
-        const winningGap = majorityVote(candidates.map((c) => c.documentationGap));
-        const winners = candidates.filter((c) => c.documentationGap === winningGap);
-        const scorer = options.fragmentScorer;
-        const representative = scorer
-            ? [...winners].sort(
-                (a, b) => scorer(b.pinpointedFragment) - scorer(a.pinpointedFragment),
-            )[0]
-            : winners[0];
-
-        return {
-            ...(representative ?? candidates[0]),
-            confidence: Math.round((winners.length / candidates.length) * 1000) / 1000,
-            votes: candidates.length,
-        };
-    }
-
-    private async rankAndFilterDocs(
-        content: string,
-        query: string,
-        maxChars: number,
-    ): Promise<string> {
-        if (content.length <= maxChars) return content;
-
-        // Split by document markers (formatSearchResults emits
-        // "--- DOCUMENT N (Score: x) ---", so match the trailing metadata too).
-        const chunks = content.split(/--- DOCUMENT \d+[^\n]*---/).filter((c) =>
-            c.trim().length > 0
-        );
-        if (chunks.length <= 1) {
-            // If no markers, fallback to double newlines
-            const fallbackChunks = content.split("\n\n").filter((c) => c.trim().length > 0);
-            if (fallbackChunks.length > 1) {
-                return this.rankAndFilterDocsByChunks(fallbackChunks, query, maxChars);
-            }
-            return content.substring(0, maxChars);
-        }
-
-        return this.rankAndFilterDocsByChunks(chunks, query, maxChars);
-    }
-
-    private async rankAndFilterDocsByChunks(
-        chunks: string[],
-        query: string,
-        maxChars: number,
-    ): Promise<string> {
-        try {
-            // Single batched embeddings request for the query + all chunks.
-            const inputs = [query, ...chunks.map((c) => c.substring(0, 3000))];
-            const vectors = await this.embeddingService.embedBatch(inputs);
-            const queryVector = vectors[0];
-
-            const scoredChunks = chunks.map((content, i) => ({
-                content,
-                score: this.cosineSimilarity(queryVector, vectors[i + 1] as number[]),
-            }));
-
-            scoredChunks.sort((a, b) => b.score - a.score);
-
-            // Greedy best-first packing: iterate by descending score, include each
-            // chunk that still fits. Stop once the budget is fully consumed — later
-            // chunks are lower-relevance and skipping them would wrongly admit them.
-            let result = "";
-            for (const sc of scoredChunks) {
-                if ((result.length + sc.content.length) > maxChars) break;
-                result += (result ? "\n\n" : "") + sc.content;
-            }
-
-            return result || chunks[0].substring(0, maxChars);
-        } catch (error) {
-            this.logger.error(error, "Error in smart truncation");
-            return chunks.join("\n\n").substring(0, maxChars);
-        }
-    }
-
-    private cosineSimilarity(vecA: number[], vecB: number[]): number {
-        let dotProduct = 0;
-        let normA = 0;
-        let normB = 0;
-        for (let i = 0; i < vecA.length; i++) {
-            dotProduct += vecA[i] * vecB[i];
-            normA += vecA[i] * vecA[i];
-            normB += vecB[i] * vecB[i];
-        }
-        if (normA === 0 || normB === 0) return 0;
-        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
     public async promptForUserGoals(
@@ -1076,7 +800,7 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
             search_knowledge_base: async (_id: string, rawArgs: any) => {
                 const args = rawArgs as SearchToolArgs;
                 emitLog(onProgress, `Agent searching: "${args.query}"`);
-                const results = await this.performRAGSearch(
+                const results = await this.ragSearch.search(
                     vectorCollectionName,
                     args.query,
                     this.configService.values.limits.defaultSearchLimit,
@@ -1095,7 +819,7 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                 }));
                 return JSON.stringify(truncated);
             },
-            ...this.createVfsToolHandlers(files, onProgress),
+            ...this.vfsTools.createHandlers(files, onProgress),
         };
 
         const traceTracker = await this.createTraceTracker(
@@ -1192,276 +916,6 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
                 markdown: "Failed to generate summary report.",
             };
         }
-    }
-
-    private createVfsToolHandlers(files: DocFile[], onProgress?: ProgressCallback) {
-        // Pre-build a parsed OpenAPI index for get_endpoint lookups.
-        const openApiIndex = this.buildOpenApiIndex(files);
-
-        return {
-            list_files: async () => {
-                emitLog(onProgress, "Agent listing VFS files.");
-                return files.map((f) => f.metadata.filename).join("\n") || "No files available.";
-            },
-            read_file: async (_id: string, args: any) => {
-                emitLog(onProgress, `Agent reading file: ${args.filename}`);
-                const file = files.find((f) => f.metadata.filename === args.filename);
-                if (!file) return `File not found: ${args.filename}`;
-                const content = new TextDecoder().decode(file.buffer);
-                // Cap whole-file reads: a large doc can be 200k+ tokens and would
-                // blow the model context in a single tool result. Return a head
-                // slice and steer the agent toward targeted tools for the rest.
-                const cap = this.configService.values.limits.maxFileReadChars;
-                if (content.length > cap) {
-                    const totalLines = content.split("\n").length;
-                    return content.slice(0, cap) +
-                        `\n\n…[truncated: showing first ${cap} of ${content.length} chars, ` +
-                        `${totalLines} lines total]…\n` +
-                        `This file is large. Use outline_file() to see its structure, ` +
-                        `read_section(heading) to read a specific section, ` +
-                        `grep_corpus(pattern) for cross-file search, ` +
-                        `or search_knowledge_base(query) for semantic lookup.`;
-                }
-                return content;
-            },
-            head_file: async (_id: string, args: any) => {
-                const linesCount = args.lines || 50;
-                emitLog(
-                    onProgress,
-                    `Agent reading head of file: ${args.filename} (${linesCount} lines)`,
-                );
-                const file = files.find((f) => f.metadata.filename === args.filename);
-                if (!file) return `File not found: ${args.filename}`;
-                const content = new TextDecoder().decode(file.buffer);
-                return content.split("\n").slice(0, linesCount).join("\n");
-            },
-            tail_file: async (_id: string, args: any) => {
-                const linesCount = args.lines || 50;
-                emitLog(
-                    onProgress,
-                    `Agent reading tail of file: ${args.filename} (${linesCount} lines)`,
-                );
-                const file = files.find((f) => f.metadata.filename === args.filename);
-                if (!file) return `File not found: ${args.filename}`;
-                const content = new TextDecoder().decode(file.buffer);
-                const lines = content.split("\n");
-                return lines.slice(Math.max(0, lines.length - linesCount)).join("\n");
-            },
-            grep_file: async (_id: string, args: any) => {
-                emitLog(
-                    onProgress,
-                    `Agent grepping file: ${args.filename} for pattern: ${args.pattern}`,
-                );
-                const file = files.find((f) => f.metadata.filename === args.filename);
-                if (!file) return `File not found: ${args.filename}`;
-                const content = new TextDecoder().decode(file.buffer);
-                const lines = content.split("\n");
-                let result = "";
-                let regex: RegExp;
-                try {
-                    regex = new RegExp(args.pattern, "i");
-                } catch {
-                    return `Invalid regex pattern: ${args.pattern}`;
-                }
-                for (let i = 0; i < lines.length; i++) {
-                    if (regex.test(lines[i])) {
-                        result += `[Line ${i + 1}]: ${lines[i]}\n`;
-                    }
-                }
-                return result || `No matches found for ${args.pattern} in ${args.filename}`;
-            },
-
-            // ── New VFS tools ─────────────────────────────────────────────────
-
-            grep_corpus: async (_id: string, args: any) => {
-                const pattern = args.pattern as string;
-                const contextLines = Math.min(Number(args.context_lines) || 2, 10);
-                emitLog(onProgress, `Agent grepping corpus for: ${pattern}`);
-                let regex: RegExp;
-                try {
-                    regex = new RegExp(pattern, "i");
-                } catch {
-                    return `Invalid regex pattern: ${pattern}`;
-                }
-                const results: string[] = [];
-                for (const f of files) {
-                    const content = new TextDecoder().decode(f.buffer);
-                    const lines = content.split("\n");
-                    for (let i = 0; i < lines.length; i++) {
-                        if (regex.test(lines[i])) {
-                            const from = Math.max(0, i - contextLines);
-                            const to = Math.min(lines.length - 1, i + contextLines);
-                            results.push(`[${f.metadata.filename}:${i + 1}]`);
-                            for (let j = from; j <= to; j++) {
-                                results.push(`${j === i ? ">" : " "} ${j + 1}: ${lines[j]}`);
-                            }
-                            results.push("");
-                            if (results.length > 500) {
-                                results.push("…[truncated — too many matches]");
-                                break;
-                            }
-                        }
-                    }
-                    if (results.length > 500) break;
-                }
-                return results.join("\n") || `No matches for pattern: ${pattern}`;
-            },
-
-            outline_file: async (_id: string, args: any) => {
-                emitLog(onProgress, `Agent outlining file: ${args.filename}`);
-                const file = files.find((f) => f.metadata.filename === args.filename);
-                if (!file) return `File not found: ${args.filename}`;
-                const content = new TextDecoder().decode(file.buffer);
-
-                // OpenAPI JSON: list paths + methods
-                if (
-                    args.filename.endsWith(".json") || args.filename.endsWith(".yaml") ||
-                    args.filename.endsWith(".yml")
-                ) {
-                    if (openApiIndex.has(args.filename)) {
-                        const endpoints = openApiIndex.get(args.filename)!;
-                        return `OpenAPI spec — ${endpoints.length} endpoints:\n` +
-                            endpoints.map((e) =>
-                                `  ${e.method.toUpperCase()} ${e.path}${
-                                    e.summary ? ` — ${e.summary}` : ""
-                                }`
-                            ).join("\n");
-                    }
-                }
-
-                // Markdown: headings with line numbers
-                const lines = content.split("\n");
-                const headings: string[] = [];
-                for (let i = 0; i < lines.length; i++) {
-                    const m = lines[i].match(/^(#{1,6})\s+(.*)/);
-                    if (m) {
-                        headings.push(`L${i + 1} ${"  ".repeat(m[1].length - 1)}${m[1]} ${m[2]}`);
-                    }
-                }
-                return headings.length > 0
-                    ? headings.join("\n")
-                    : `No headings found in ${args.filename}. File has ${lines.length} lines.`;
-            },
-
-            read_section: async (_id: string, args: any) => {
-                const heading = String(args.heading || "").toLowerCase();
-                emitLog(
-                    onProgress,
-                    `Agent reading section "${args.heading}" from ${args.filename}`,
-                );
-                const file = files.find((f) => f.metadata.filename === args.filename);
-                if (!file) return `File not found: ${args.filename}`;
-                const content = new TextDecoder().decode(file.buffer);
-                const lines = content.split("\n");
-
-                // Find the first heading that matches (case-insensitive partial match).
-                let startIdx = -1;
-                let headingLevel = 0;
-                for (let i = 0; i < lines.length; i++) {
-                    const m = lines[i].match(/^(#{1,6})\s+(.*)/);
-                    if (m && m[2].toLowerCase().includes(heading)) {
-                        startIdx = i;
-                        headingLevel = m[1].length;
-                        break;
-                    }
-                }
-                if (startIdx === -1) {
-                    return `No heading matching "${args.heading}" found in ${args.filename}.`;
-                }
-
-                // Collect lines until the next heading of same or higher level.
-                const section: string[] = [lines[startIdx]];
-                for (let i = startIdx + 1; i < lines.length; i++) {
-                    const m = lines[i].match(/^(#{1,6})\s+/);
-                    if (m && m[1].length <= headingLevel) break;
-                    section.push(lines[i]);
-                }
-                const result = section.join("\n");
-                const cap = this.configService.values.limits.maxFileReadChars;
-                return result.length > cap
-                    ? result.slice(0, cap) + `\n…[section truncated at ${cap} chars]`
-                    : result;
-            },
-
-            get_endpoint: async (_id: string, args: any) => {
-                const targetPath = String(args.path || "").toLowerCase();
-                const targetMethod = args.method ? String(args.method).toUpperCase() : null;
-                emitLog(
-                    onProgress,
-                    `Agent looking up endpoint: ${targetMethod || "*"} ${args.path}`,
-                );
-
-                const hits: string[] = [];
-                for (const [filename, endpoints] of openApiIndex) {
-                    for (const ep of endpoints) {
-                        if (!ep.path.toLowerCase().includes(targetPath)) continue;
-                        if (targetMethod && ep.method.toUpperCase() !== targetMethod) continue;
-                        hits.push(
-                            `**${ep.method.toUpperCase()} ${ep.path}** (${filename})` +
-                                (ep.summary ? `\n${ep.summary}` : "") +
-                                "\n```json\n" +
-                                JSON.stringify(ep.definition, null, 2).slice(0, 2000) + "\n```",
-                        );
-                    }
-                }
-                return hits.length > 0
-                    ? hits.join("\n\n---\n\n")
-                    : `No endpoint matching "${
-                        args.method ?? "*"
-                    } ${args.path}" found in OpenAPI specs.`;
-            },
-        };
-    }
-
-    // Memoize by array reference: the same `files` array is passed to every
-    // createVfsToolHandlers call within a single request, so parsing happens once.
-    private readonly openApiIndexCache = new WeakMap<
-        object[],
-        Map<string, Array<{ method: string; path: string; summary?: string; definition: unknown }>>
-    >();
-
-    /** Build a path→endpoints index from all OpenAPI JSON files in the project. */
-    private buildOpenApiIndex(
-        files: DocFile[],
-    ): Map<string, Array<{ method: string; path: string; summary?: string; definition: unknown }>> {
-        const cached = this.openApiIndexCache.get(files);
-        if (cached) return cached;
-        const index = new Map<
-            string,
-            Array<{ method: string; path: string; summary?: string; definition: unknown }>
-        >();
-        for (const file of files) {
-            const fn: string = file.metadata.filename;
-            if (!fn.endsWith(".json") && !fn.endsWith(".yaml") && !fn.endsWith(".yml")) continue;
-            try {
-                const content = new TextDecoder().decode(file.buffer);
-                if (!content.includes('"paths"') && !content.includes("paths:")) continue;
-                const obj = JSON.parse(content) as Record<string, unknown>;
-                if (typeof obj !== "object" || !obj.paths) continue;
-                const endpoints: Array<
-                    { method: string; path: string; summary?: string; definition: unknown }
-                > = [];
-                for (
-                    const [apiPath, methods] of Object.entries(
-                        obj.paths as Record<string, Record<string, unknown>>,
-                    )
-                ) {
-                    for (const [method, def] of Object.entries(methods)) {
-                        if (["parameters", "summary", "description"].includes(method)) continue;
-                        const d = def as Record<string, unknown>;
-                        endpoints.push({
-                            method,
-                            path: apiPath,
-                            summary: d?.summary as string | undefined,
-                            definition: def,
-                        });
-                    }
-                }
-                if (endpoints.length > 0) index.set(fn, endpoints);
-            } catch { /* not valid JSON/OpenAPI */ }
-        }
-        this.openApiIndexCache.set(files, index);
-        return index;
     }
 
     /**

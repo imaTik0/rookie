@@ -52,6 +52,16 @@ export function buildMeta(
     };
 }
 
+/**
+ * Standard `{ code, message }` body for a failed request. Centralises the
+ * error-message extraction the controllers previously duplicated; pair with the
+ * matching status, e.g. `c.json(errorBody(err), 400)`.
+ */
+export function errorBody(error: unknown, code = 400): { code: number; message: string } {
+    const err = error as { message?: string };
+    return { code, message: err?.message || "Unknown error" };
+}
+
 export type ErrorSchema = z.infer<typeof ErrorSchema>;
 export type PaginationQuerySchema = z.infer<typeof PaginationQuerySchema>;
 export type PaginationMeta = z.infer<typeof PaginationMetaSchema>;

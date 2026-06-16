@@ -1,8 +1,10 @@
+import { Injectable } from "../../ioc/decorator.ts";
 import { Collection } from "mongodb";
 import { MongoDbConnection } from "./MongoDbManager.ts";
 import * as types from "../../types/index.ts";
 import { Logger } from "../../Logger.ts";
 
+@Injectable()
 export class TraceRepository {
     private collection: Collection<types.trace.Trace>;
 

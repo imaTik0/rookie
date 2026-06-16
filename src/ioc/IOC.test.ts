@@ -1,10 +1,13 @@
 /**
- * Unit tests for the IoC container and its constructor-parameter parser.
- * Pins current resolution behaviour before any metadata-based DI migration.
+ * Unit tests for the IoC container: the legacy source-text parser (now a
+ * fallback), metadata-based type resolution, @InjectParam overrides, and
+ * circular-dependency detection.
  * Run with: deno test src/ioc/IOC.test.ts
  */
+import "reflect-metadata";
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { IOC, ReflectUtils } from "./IOC.ts";
+import { Injectable, InjectParam } from "./decorator.ts";
 
 // ── ReflectUtils ───────────────────────────────────────────────────────────────
 
@@ -102,4 +105,55 @@ Deno.test("create(name, props) overrides a named dependency", () => {
     ioc.register(Service);
     const overridden = ioc.create<Service>("service", { repo: { value: 99 } });
     assertEquals((overridden.repo as { value: number }).value, 99);
+});
+
+// ── metadata-based resolution (design:paramtypes) ────────────────────────────────
+
+Deno.test("resolves @Injectable constructor deps by TYPE metadata, not param name", () => {
+    const ioc = new IOC();
+    @Injectable()
+    class MetaDep {
+        v = 7;
+    }
+    @Injectable()
+    class MetaSvc {
+        // param deliberately NOT named after its type — only metadata can wire this.
+        constructor(public anything: MetaDep) {}
+    }
+    ioc.register(MetaDep);
+    ioc.register(MetaSvc);
+    const svc = ioc.resolve<MetaSvc>("metaSvc");
+    assert(svc.anything instanceof MetaDep);
+    assertEquals(svc.anything.v, 7);
+});
+
+Deno.test("@InjectParam overrides the resolved binding name for a parameter", () => {
+    const ioc = new IOC();
+    @Injectable()
+    class Unused {}
+    @Injectable()
+    class WithOverride {
+        constructor(@InjectParam("customDep") public dep: Unused) {}
+    }
+    ioc.registerValue("customDep", { marker: true });
+    ioc.register(WithOverride);
+    const o = ioc.resolve<WithOverride>("withOverride");
+    assertEquals((o.dep as { marker: boolean }).marker, true);
+});
+
+// ── circular-dependency detection ─────────────────────────────────────────────────
+
+Deno.test("resolve throws on a circular dependency (with the chain)", () => {
+    const ioc = new IOC();
+    // Use `unknown` param types (no @Injectable) so the cycle is exercised via the
+    // fallback parser without a decoration-time circular type reference.
+    class CycA {
+        constructor(public cycB: unknown) {}
+    }
+    class CycB {
+        constructor(public cycA: unknown) {}
+    }
+    ioc.register(CycA);
+    ioc.register(CycB);
+    assertThrows(() => ioc.resolve("cycA"), Error, "Circular dependency");
 });

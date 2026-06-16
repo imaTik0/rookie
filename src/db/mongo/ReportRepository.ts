@@ -1,7 +1,8 @@
-import { MongoDbConnection } from "../db/mongo/MongoDbManager.ts";
-import * as db from "../db/mongo/Model.ts";
-import { BaseRepository } from "../db/mongo/BaseRepository.ts";
-import * as types from "../types/index.ts";
+import { Injectable } from "../../ioc/decorator.ts";
+import { MongoDbConnection } from "./MongoDbManager.ts";
+import * as db from "./Model.ts";
+import { BaseRepository } from "./BaseRepository.ts";
+import * as types from "../../types/index.ts";
 
 export interface ReportFilter {
     projectId?: types.project.ProjectId;
@@ -11,6 +12,7 @@ export interface ReportFilter {
     type?: db.ReportModel["type"];
 }
 
+@Injectable()
 export class ReportRepository extends BaseRepository<types.report.ReportId, db.ReportModel> {
     static readonly COLLECTION_NAME = "reports";
 

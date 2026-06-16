@@ -1,16 +1,19 @@
 import OpenAI from "@openai/openai";
+import { Injectable, InjectParam } from "../ioc/decorator.ts";
 import { ConfigService } from "./ConfigService.ts";
 import * as types from "../types/index.ts";
 import { Bm25Params, encodeDocument, encodeQuery } from "../rag/Bm25.ts";
 import { withRetry } from "../llm/retry.ts";
 
+@Injectable()
 export class EmbeddingService {
     private modelName: string;
     private dimensions: number;
     private bm25Params: Bm25Params;
 
     constructor(
-        private openaiEmbedding: OpenAI,
+        // Distinct from the chat `openai` instance (same type) — resolve by name.
+        @InjectParam("openaiEmbedding") private openaiEmbedding: OpenAI,
         private configService: ConfigService,
     ) {
         this.modelName = configService.values.embeddings.embeddingModel;

@@ -1,9 +1,10 @@
-import { ProjectRepository } from "./ProjectRepository.ts";
+import { Injectable } from "../ioc/decorator.ts";
+import { ProjectRepository } from "../db/mongo/ProjectRepository.ts";
 import { FileService } from "./FileService.ts";
 import { PromptService } from "./PromptService.ts";
 import { Executor } from "./Executor.ts";
-import { TestSuiteRepository } from "./TestSuiteRepository.ts";
-import { ReportRepository } from "./ReportRepository.ts";
+import { TestSuiteRepository } from "../db/mongo/TestSuiteRepository.ts";
+import { ReportRepository } from "../db/mongo/ReportRepository.ts";
 import { ConfigService } from "./ConfigService.ts";
 import { Logger } from "../Logger.ts";
 import * as types from "../types/index.ts";
@@ -43,6 +44,7 @@ interface DocExampleResult {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+@Injectable()
 export class PlannerService {
     constructor(
         private projectRepository: ProjectRepository,

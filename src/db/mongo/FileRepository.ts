@@ -1,10 +1,12 @@
-import { MongoDbConnection } from "../db/mongo/MongoDbManager.ts";
-import * as types from "../types/index.ts";
-import * as db from "../db/mongo/Model.ts";
-import { BaseRepository } from "../db/mongo/BaseRepository.ts";
+import { Injectable } from "../../ioc/decorator.ts";
+import { MongoDbConnection } from "./MongoDbManager.ts";
+import * as types from "../../types/index.ts";
+import * as db from "./Model.ts";
+import { BaseRepository } from "./BaseRepository.ts";
 import { Binary } from "mongodb";
 import { Buffer } from "node:buffer";
 
+@Injectable()
 export class FileRepository extends BaseRepository<types.file.FileId, db.File> {
     static readonly COLLECTION_NAME = "files";
 

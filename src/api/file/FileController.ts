@@ -4,6 +4,7 @@ import { FileService } from "../../service/FileService.ts";
 import { FileConverter } from "./FileConverter.ts";
 import * as types from "../../types/index.ts";
 import { FileRoutes } from "./FileRoute.ts";
+import { errorBody } from "../CommonSchema.ts";
 import { Buffer } from "node:buffer";
 
 @Controller("/files")
@@ -27,8 +28,7 @@ export class FileController {
             const apiFile = this.fileConverter.mapDbFileToApi(dbMetadata);
             return c.json(apiFile, 201);
         } catch (error) {
-            const err = error as { message?: string };
-            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
+            return c.json(errorBody(error), 400);
         }
     };
 
@@ -54,8 +54,7 @@ export class FileController {
             );
             return c.json(apiFiles, 201);
         } catch (error) {
-            const err = error as { message?: string };
-            return c.json({ code: 400, message: err?.message || "Unknown error" }, 400);
+            return c.json(errorBody(error), 400);
         }
     };
 

@@ -1,11 +1,13 @@
-import { FileRepository } from "./FileRepository.ts";
-import { ProjectRepository } from "./ProjectRepository.ts";
+import { Injectable } from "../ioc/decorator.ts";
+import { FileRepository } from "../db/mongo/FileRepository.ts";
+import { ProjectRepository } from "../db/mongo/ProjectRepository.ts";
 import * as types from "../types/index.ts";
 import * as db from "../db/mongo/Model.ts";
 import { Buffer } from "node:buffer";
 import { FileProcessorService } from "./FileProcessorService.ts";
 import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
 
+@Injectable()
 export class FileService {
     constructor(
         private fileRepository: FileRepository,
