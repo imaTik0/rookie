@@ -88,7 +88,14 @@ function makeOpenAiStrict(node: any): any {
 
 /** Strip ```json fences / surrounding prose and isolate the JSON payload. */
 export function extractJson(raw: string): string {
-    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    // Only unwrap an *explicitly* json-labelled fence. A bare ``` fence must NOT
+    // be stripped: the JSON payload's own string values may embed ```yaml / ```js
+    // blocks, and grabbing the first bare fence would capture that inner block
+    // instead of the JSON (e.g. a YAML readiness-probe snippet in a summary field).
+    // Greedy to the *last* ``` so a nested ```yaml/```js block inside a value
+    // doesn't prematurely close the capture; the brace-finder below then isolates
+    // the actual JSON object/array from whatever remains.
+    const fenced = raw.match(/```json\s*([\s\S]*)```/i);
     const body = fenced ? fenced[1] : raw;
     const objStart = body.indexOf("{");
     const arrStart = body.indexOf("[");

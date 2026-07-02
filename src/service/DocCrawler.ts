@@ -258,14 +258,19 @@ export class DocCrawler {
     private getPathPrefix(url: string): string {
         const parsed = new URL(url);
         const segments = parsed.pathname.split("/").filter(Boolean);
+        if (segments.length === 0) return "";
 
-        // Only enforce a prefix if the URL ends with a slash or has multiple segments.
-        // This suggests the user intended to crawl a specific subdirectory.
-        if (url.endsWith("/") || segments.length > 1) {
-            // If it's something like /docs/getting-started, we take /docs
-            if (segments.length > 0) {
-                return "/" + segments[0];
-            }
+        // Confine the crawl to the subtree the start URL points at, so versioned
+        // documentation sites don't bleed across versions (e.g. starting at
+        // /influxdb/v2/ must not pull in /influxdb/v3/ via shared navigation).
+        //  - a directory URL (trailing slash) scopes to its full path;
+        //  - a file-like URL scopes to its parent directory;
+        //  - a bare single segment (e.g. /docs) stays unconstrained (lenient).
+        if (url.endsWith("/")) {
+            return "/" + segments.join("/");
+        }
+        if (segments.length > 1) {
+            return "/" + segments.slice(0, -1).join("/");
         }
         return "";
     }

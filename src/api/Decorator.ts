@@ -54,7 +54,6 @@ export function registerController(
     controllerInstance: any,
     logger: Logger,
 ) {
-    const prefix = Reflect.getMetadata("prefix", controllerInstance.constructor) || "";
     const routes = Reflect.getMetadata("routes", controllerInstance.constructor) || [];
 
     for (const { route, handlerName } of routes) {
@@ -66,9 +65,19 @@ export function registerController(
         });
     }
 
+    // Log by controller class name + the concrete method/path of each route. The
+    // `@Controller` prefix is documentation-only (paths come from each route's
+    // `createRoute({ path })`), so several controllers leave it empty — logging the
+    // class name and real paths avoids the previous blank "Registered controller: ".
+    const name = controllerInstance.constructor?.name ?? "Controller";
+    const paths = routes
+        .map((r: any) =>
+            `${(r.method ?? r.route?.method ?? "?").toUpperCase()} ${r.route?.path ?? "?"}`
+        )
+        .join(", ");
     logger.log(
-        `Registered controller: ${prefix} (${routes.length} route${
-            routes.length === 1 ? "" : "s"
-        })`,
+        `Registered ${name} (${routes.length} route${routes.length === 1 ? "" : "s"})${
+            paths ? ": " + paths : ""
+        }`,
     );
 }

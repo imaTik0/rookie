@@ -104,6 +104,11 @@ interface MasterPlanRun {
 //  EXPERIMENT CONFIGS
 //  Add a new key here to run the same experiment on another project.
 // ─────────────────────────────────────────────────────────────────
+
+// InfluxDB's 'setup' mode lets us pin the admin token, so it's known up front
+// (no setup() hook needed). Shared between the container env and initialContext.
+const INFLUX_ADMIN_TOKEN = "rookie-influx-admin-token";
+
 const EXPERIMENTS: Record<string, ExperimentConfig> = {
     gitea: {
         name: "Gitea",
@@ -152,6 +157,67 @@ const EXPERIMENTS: Record<string, ExperimentConfig> = {
         },
 
         setup: (containerName) => setupGiteaAdmin(containerName),
+    },
+
+    influxdb: {
+        name: "InfluxDB",
+        oldImage: "influxdb:2.6",
+        newImage: "influxdb:2.7",
+
+        container: {
+            name: "rookie-exp-target",
+            port: 8086,
+            hostPort: 14002,
+            // 'setup' mode auto-initialises the org/bucket/user on first boot AND
+            // sets the operator token to DOCKER_INFLUXDB_INIT_ADMIN_TOKEN — so the
+            // token is known up front and no setup() hook is required.
+            env: {
+                DOCKER_INFLUXDB_INIT_MODE: "setup",
+                DOCKER_INFLUXDB_INIT_USERNAME: "rookie_admin",
+                DOCKER_INFLUXDB_INIT_PASSWORD: "rookie_admin123!",
+                DOCKER_INFLUXDB_INIT_ORG: "rookie",
+                DOCKER_INFLUXDB_INIT_BUCKET: "demo",
+                DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: INFLUX_ADMIN_TOKEN,
+                DOCKER_INFLUXDB_INIT_RETENTION: "0",
+            },
+        },
+
+        health: {
+            // /health → 200 {"status":"pass"} once initialisation completes.
+            url: "http://localhost:{hostPort}/health",
+            retries: 25,
+            intervalMs: 3000,
+        },
+
+        // Crawl the server-rendered v2 documentation subtree. The crawler confines
+        // itself to the start URL's path (/influxdb/v2), so shared navigation does NOT
+        // bleed into the InfluxDB 3 docs (/influxdb/v3) — important because these pages
+        // cross-promote v3. Notes: the /api/ reference is a client-rendered Redoc SPA
+        // (skipped by the crawler) and the published OpenAPI is YAML (swagger-json mode
+        // needs JSON), so the guide pages are the right source; they cover the /api/v2
+        // write & query HTTP API with runnable examples. v2 docs are shared across 2.x
+        // minors, so the path is intentionally not version-templated. The trailing
+        // slash matters: it scopes the crawl to the whole /influxdb/v2 tree.
+        docs: {
+            mode: "url-crawl",
+            url: "https://docs.influxdata.com/influxdb/v2/",
+            maxPages: 30,
+        },
+
+        planner: {
+            maxGoals: 8,
+            // Sandbox code reaches the mapped port via host.docker.internal (macOS /
+            // Windows; on Linux use the docker bridge gateway IP). InfluxDB 2.x auth is
+            // an "Authorization: Token <token>" header against /api/v2.
+            initialContext: JSON.stringify({
+                baseUrl: "http://host.docker.internal:{hostPort}",
+                apiBase: "http://host.docker.internal:{hostPort}/api/v2",
+                org: "rookie",
+                bucket: "demo",
+                token: INFLUX_ADMIN_TOKEN,
+            }),
+        },
+        // No setup(): the admin token is provisioned via the container env above.
     },
     // ── template for a second project ──────────────────────────────
     // mattermost: {

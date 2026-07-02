@@ -30,6 +30,32 @@ Deno.test("extractJson returns trimmed body when no JSON present", () => {
     assertEquals(extractJson("  no json here  "), "no json here");
 });
 
+Deno.test("extractJson ignores a nested ```yaml block inside a string value (regression)", () => {
+    // Reproduces the master-planner crash: raw JSON (json_object mode, no outer
+    // fence) whose summary field embeds a YAML readiness-probe snippet. The old
+    // regex grabbed the inner ```yaml block -> JSON.parse('yaml\\nread...') failed.
+    const payload = {
+        examples: [],
+        finalMarkdownSummary:
+            "Use:\n```yaml\nreadinessProbe:\n  httpGet:\n    path: /ready\n    port: 8086\n```",
+    };
+    const parsed = JSON.parse(extractJson(JSON.stringify(payload)));
+    assertEquals(parsed.finalMarkdownSummary, payload.finalMarkdownSummary);
+});
+
+Deno.test("extractJson unwraps ```json even when a value contains a nested ```js block", () => {
+    const payload = { title: "x", code: "```js\nconsole.log(1);\n```" };
+    const raw = "```json\n" + JSON.stringify(payload) + "\n```";
+    assertEquals(JSON.parse(extractJson(raw)).code, payload.code);
+});
+
+Deno.test("coerceJson recovers a payload with a nested ```yaml fence", () => {
+    const s = z.object({ finalMarkdownSummary: z.string() });
+    const raw = JSON.stringify({ finalMarkdownSummary: "```yaml\nkey: val\n```" });
+    const r = coerceJson(raw, s);
+    assert(r.ok);
+});
+
 // ── coerceJson ───────────────────────────────────────────────────────────────
 
 const schema = z.object({ name: z.string() });

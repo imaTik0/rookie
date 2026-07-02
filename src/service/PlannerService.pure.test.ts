@@ -113,3 +113,49 @@ Deno.test("extractEndpointInventory returns undefined when no endpoints found", 
     ]);
     assertEquals(inv, undefined);
 });
+
+// ── executeGoals: per-goal failure isolation (regression) ─────────────────────────
+
+Deno.test("executeGoals: a throwing goal is recorded FAILED, others still complete", async () => {
+    const testSuiteRepo = {
+        create: () => Promise.resolve({ _id: "ts-" + crypto.randomUUID() }),
+        delete: () => Promise.resolve(),
+    };
+    let call = 0;
+    const executor = {
+        // Second goal throws (e.g. structured-output validation failure) — must NOT
+        // abort the whole master plan.
+        executeTestSuite: () => {
+            call++;
+            if (call === 2) {
+                return Promise.reject(
+                    new Error("Structured output failed validation after repairs"),
+                );
+            }
+            return Promise.resolve({ _id: "rep-" + call, status: "SUCCESS", steps: [] });
+        },
+    };
+    const config = { values: { planner: { parallelGoals: 1 } } };
+    // deno-lint-ignore no-explicit-any
+    const ps = new PlannerService(
+        null as never,
+        null as never,
+        null as never,
+        executor as any,
+        testSuiteRepo as any,
+        null as never,
+        config as any,
+        fakeLogger(),
+    ) as any;
+
+    const { reportIds, executionReports } = await ps.executeGoals(
+        ["good goal", "bad goal"],
+        "proj-1",
+        "{}",
+    );
+
+    assertEquals(executionReports.length, 2);
+    assertEquals(executionReports[0].status, "SUCCESS");
+    assertEquals(executionReports[1].status, "FAILED");
+    assertEquals(reportIds.length, 1); // only the successful goal produced a report
+});

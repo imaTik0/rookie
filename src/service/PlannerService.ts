@@ -277,12 +277,21 @@ export class PlannerService {
                 userGoal: goalWithKb,
             });
 
-            const report = await this.executor.executeTestSuite(
-                testSuite._id as types.test.TestSuiteId,
-                (msg) => {
-                    onProgress?.(JSON.stringify({ type: "GOAL_PROGRESS", goal, log: msg }));
-                },
-            );
+            // Isolate per-goal failures: a malformed LLM generation (e.g. structured
+            // output that fails JSON validation) throws — but must not abort the whole
+            // master plan. On error the goal is recorded as FAILED below and the loop
+            // continues, preserving the reports for all other goals.
+            let report: Awaited<ReturnType<typeof this.executor.executeTestSuite>> = null;
+            try {
+                report = await this.executor.executeTestSuite(
+                    testSuite._id as types.test.TestSuiteId,
+                    (msg) => {
+                        onProgress?.(JSON.stringify({ type: "GOAL_PROGRESS", goal, log: msg }));
+                    },
+                );
+            } catch (err) {
+                this.logger.error(err, `Goal failed (non-fatal): ${goal.slice(0, 80)}`);
+            }
 
             if (report) {
                 reportIds.push(report._id as types.report.ReportId);
