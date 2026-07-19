@@ -63,3 +63,26 @@ Add entries to `FIXTURES` in `fixtures.ts`. Each defect needs an `expectedGap`
 and `matchKeywords` (substrings expected to appear in the failure analysis — e.g.
 the crashing function name). Prefer library fixtures with deterministic runtime
 crashes so the ground truth is unambiguous.
+
+## Mutation testing (thesis protocol)
+
+> Szczegółowy opis techniczny systemu (operatory, protokół, korpusy,
+> wymagania) znajduje się w [MUTATION.md](./MUTATION.md) (PL).
+
+`mutation.ts` implements the four documentation-mutation operators
+(`DelParam`→MISSING, `DelExmpl`→MISSING, `ObfuscateType`→AMBIGUOUS,
+`AddFalseInfo`→INCORRECT) with seeded, reproducible first-order mutant
+generation and ground-truth wound locations — unit-tested in `mutation.test.ts`
+(no infrastructure needed).
+
+`runMutation.ts` drives the full protocol against a running stack: a gold
+baseline run (≥90% pass-rate check + false-alarm count) followed by one
+`planner/rerun` per mutant (same goals, no regeneration), scored as MDS per
+operator plus classification confusion/κ over detected mutants. Results are
+written to `mutation-<ts>.json`.
+
+```bash
+deno task eval:mutation -- --dry-run            # inspect the mutant set (no infra)
+deno task eval:mutation                          # full run (stack + LLM required)
+deno task eval:mutation -- --seed 42 --per-operator 2 --fixture <name>
+```

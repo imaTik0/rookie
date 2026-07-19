@@ -72,3 +72,12 @@ Deno.test("isEnvironmentError rejects genuine documentation-gap errors", () => {
     assertEquals(isEnvironmentError("HTTP 401 Unauthorized: missing token"), false);
     assertEquals(isEnvironmentError(""), false);
 });
+
+Deno.test("isEnvironmentError treats harness-contract violations as environment errors", () => {
+    assert(isEnvironmentError("ROOKIE_NO_DEFAULT_EXPORT: the program must export default"));
+    assert(
+        isEnvironmentError(
+            "ROOKIE_UNGROUNDED_SUCCESS: the program exited successfully but never made an HTTP request",
+        ),
+    );
+});

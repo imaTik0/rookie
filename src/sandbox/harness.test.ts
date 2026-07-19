@@ -4,7 +4,7 @@
  * is actually caught — the fake-DockerExecutor tests cannot see harness output.
  * Run with: deno test --allow-all src/sandbox/harness.test.ts
  */
-import { assert, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { DockerExecutor } from "../service/DockerExecutor.ts";
 import { buildSandboxHarness, RESULT_END, RESULT_START } from "./harness.ts";
 import { dockerAvailable } from "../testing/infra.ts";
@@ -41,4 +41,28 @@ Deno.test({
     const r = await new DockerExecutor({ timeoutMs: 20000 }).execute("node", script);
     assert(r.exitCode !== 0, "harness should exit non-zero on a thrown error");
     assertStringIncludes(r.stderr, "boom from user code");
+});
+
+Deno.test({
+    name: "[docker] harness fails hard when the program has no default export",
+    ignore: !HAS_DOCKER,
+}, async () => {
+    const script = buildSandboxHarness("console.log('top-level only');", {});
+    const r = await new DockerExecutor({ timeoutMs: 20000 }).execute("node", script);
+    assert(r.exitCode !== 0, "missing default export must not pass");
+    assertStringIncludes(r.stderr, "ROOKIE_NO_DEFAULT_EXPORT");
+});
+
+Deno.test({
+    name: "[docker] lenient mode (doc examples) still runs top-level code as a no-op module",
+    ignore: !HAS_DOCKER,
+}, async () => {
+    const script = buildSandboxHarness(
+        "console.log('doc example executed');",
+        {},
+        { requireDefaultExport: false },
+    );
+    const r = await new DockerExecutor({ timeoutMs: 20000 }).execute("node", script);
+    assertEquals(r.exitCode, 0);
+    assertStringIncludes(r.stdout, "doc example executed");
 });

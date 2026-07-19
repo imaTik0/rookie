@@ -42,6 +42,7 @@ Deno.test("defaults apply when no env is set", () => {
         assertEquals(c.reranker.mode, "llm");
         assertEquals(c.sandbox.hardening, true);
         assertEquals(c.sandbox.stepTimeoutMs, 60_000);
+        assertEquals(c.sandbox.requireGroundedSuccess, true);
         assertEquals(c.planner.parallelGoals, 1);
     });
 });

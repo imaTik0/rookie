@@ -22,7 +22,9 @@
         "zod": "npm:zod@^4.1.12",
         "reflect-metadata": "npm:reflect-metadata"
     },
-    "workspace": ["./frontend"],
+    "workspace": [
+        "./frontend"
+    ],
     "tasks": {
         "start": "deno run --allow-all --env-file src/init.ts",
         "watch": "deno run --watch --env-file --allow-all src/init.ts | pino-pretty -c -t 'SYS:HH:MM:ss.L'",
@@ -31,7 +33,8 @@
         "test:watch": "deno test --allow-all --watch",
         "eval": "deno run --allow-net --allow-env src/eval/runEval.ts",
         "dev": "deno run --allow-all scripts/run-both.ts dev",
-        "prod": "deno run --allow-all scripts/run-both.ts start"
+        "prod": "deno run --allow-all scripts/run-both.ts start",
+        "eval:mutation": "deno run --allow-net --allow-env --allow-write src/eval/runMutation.ts"
     },
     "compilerOptions": {
         "jsx": "precompile",

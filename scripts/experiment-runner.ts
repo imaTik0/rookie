@@ -19,6 +19,14 @@
 // ─────────────────────────────────────────────────────────────────
 //  ANSI COLORS
 // ─────────────────────────────────────────────────────────────────
+import {
+    type ContainerConfig,
+    type DocsConfig,
+    EXPERIMENTS,
+    type HealthConfig,
+    type PlannerConfig,
+} from "./experiments/targets.ts";
+
 const isTTY = Deno.stdout.isTerminal();
 const c = isTTY
     ? {
@@ -46,48 +54,10 @@ const cyan = (s: string) => `${c.cy}${s}${c.R}`;
 const gray = (s: string) => `${c.gy}${s}${c.R}`;
 
 // ─────────────────────────────────────────────────────────────────
-//  TYPES
+//  RUNNER-LOCAL TYPES
+//  (target configs + their types live in ./experiments/targets.ts;
+//   the selection protocol is documented in ./experiments/SELECTION.md)
 // ─────────────────────────────────────────────────────────────────
-interface ContainerConfig {
-    name: string;
-    port: number;
-    hostPort: number;
-    env: Record<string, string>;
-}
-
-interface HealthConfig {
-    url: string;
-    retries: number;
-    intervalMs: number;
-}
-
-interface DocsConfig {
-    /** 'swagger-json' — fetch OpenAPI JSON, convert to Markdown, upload as file
-     *  'url-crawl'    — pass URL directly to Rookie's built-in HTML crawler */
-    mode: "swagger-json" | "url-crawl";
-    url: string;
-    maxPages: number;
-}
-
-interface PlannerConfig {
-    maxGoals: number;
-    initialContext: string;
-}
-
-interface ExperimentConfig {
-    name: string;
-    oldImage: string;
-    newImage: string;
-    container: ContainerConfig;
-    health: HealthConfig;
-    docs: DocsConfig;
-    planner: PlannerConfig;
-    /** Called once after the container is healthy. Returns extra template vars
-     *  (e.g. `{ apiToken: "abc" }`) that are merged into the fill() context so
-     *  placeholders like `{apiToken}` in initialContext are resolved. */
-    setup?: (containerName: string) => Promise<Record<string, string>>;
-}
-
 interface GoalResult {
     goal: string;
     status: string;
@@ -101,139 +71,6 @@ interface MasterPlanRun {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  EXPERIMENT CONFIGS
-//  Add a new key here to run the same experiment on another project.
-// ─────────────────────────────────────────────────────────────────
-
-// InfluxDB's 'setup' mode lets us pin the admin token, so it's known up front
-// (no setup() hook needed). Shared between the container env and initialContext.
-const INFLUX_ADMIN_TOKEN = "rookie-influx-admin-token";
-
-const EXPERIMENTS: Record<string, ExperimentConfig> = {
-    gitea: {
-        name: "Gitea",
-        oldImage: "gitea/gitea:1.22.6",
-        newImage: "gitea/gitea:1.23.8",
-
-        container: {
-            name: "rookie-exp-target",
-            port: 3000,
-            hostPort: 14000,
-            env: {
-                GITEA__security__INSTALL_LOCK: "true",
-                GITEA__server__HTTP_PORT: "3000",
-                GITEA__database__DB_TYPE: "sqlite3",
-                GITEA__log__LEVEL: "Warn",
-            },
-        },
-
-        health: {
-            url: "http://localhost:{hostPort}/api/healthz",
-            retries: 20,
-            intervalMs: 3000,
-        },
-
-        // docs.gitea.com hosts Redoc-rendered static HTML — fully crawlable and
-        // far more descriptive than the swagger JSON schema alone.
-        // {docsVersion} is extracted from the old image tag as "major.minor".
-        docs: {
-            mode: "url-crawl",
-            url: "https://docs.gitea.com/api/{docsVersion}/",
-            maxPages: 1,
-        },
-
-        planner: {
-            maxGoals: 10,
-            // Code runs inside Docker → host.docker.internal reaches the mapped port
-            // (macOS / Windows). On Linux use the Docker bridge gateway IP instead.
-            // {apiToken} is substituted after setup() runs and creates the admin token.
-            initialContext: JSON.stringify({
-                baseUrl: "http://host.docker.internal:{hostPort}",
-                apiBase: "http://host.docker.internal:{hostPort}/api/v1",
-                username: "gitea_admin",
-                password: "gitea_admin123!",
-                token: "{apiToken}",
-            }),
-        },
-
-        setup: (containerName) => setupGiteaAdmin(containerName),
-    },
-
-    influxdb: {
-        name: "InfluxDB",
-        oldImage: "influxdb:2.6",
-        newImage: "influxdb:2.7",
-
-        container: {
-            name: "rookie-exp-target",
-            port: 8086,
-            hostPort: 14002,
-            // 'setup' mode auto-initialises the org/bucket/user on first boot AND
-            // sets the operator token to DOCKER_INFLUXDB_INIT_ADMIN_TOKEN — so the
-            // token is known up front and no setup() hook is required.
-            env: {
-                DOCKER_INFLUXDB_INIT_MODE: "setup",
-                DOCKER_INFLUXDB_INIT_USERNAME: "rookie_admin",
-                DOCKER_INFLUXDB_INIT_PASSWORD: "rookie_admin123!",
-                DOCKER_INFLUXDB_INIT_ORG: "rookie",
-                DOCKER_INFLUXDB_INIT_BUCKET: "demo",
-                DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: INFLUX_ADMIN_TOKEN,
-                DOCKER_INFLUXDB_INIT_RETENTION: "0",
-            },
-        },
-
-        health: {
-            // /health → 200 {"status":"pass"} once initialisation completes.
-            url: "http://localhost:{hostPort}/health",
-            retries: 25,
-            intervalMs: 3000,
-        },
-
-        // Crawl the server-rendered v2 documentation subtree. The crawler confines
-        // itself to the start URL's path (/influxdb/v2), so shared navigation does NOT
-        // bleed into the InfluxDB 3 docs (/influxdb/v3) — important because these pages
-        // cross-promote v3. Notes: the /api/ reference is a client-rendered Redoc SPA
-        // (skipped by the crawler) and the published OpenAPI is YAML (swagger-json mode
-        // needs JSON), so the guide pages are the right source; they cover the /api/v2
-        // write & query HTTP API with runnable examples. v2 docs are shared across 2.x
-        // minors, so the path is intentionally not version-templated. The trailing
-        // slash matters: it scopes the crawl to the whole /influxdb/v2 tree.
-        docs: {
-            mode: "url-crawl",
-            url: "https://docs.influxdata.com/influxdb/v2/",
-            maxPages: 30,
-        },
-
-        planner: {
-            maxGoals: 8,
-            // Sandbox code reaches the mapped port via host.docker.internal (macOS /
-            // Windows; on Linux use the docker bridge gateway IP). InfluxDB 2.x auth is
-            // an "Authorization: Token <token>" header against /api/v2.
-            initialContext: JSON.stringify({
-                baseUrl: "http://host.docker.internal:{hostPort}",
-                apiBase: "http://host.docker.internal:{hostPort}/api/v2",
-                org: "rookie",
-                bucket: "demo",
-                token: INFLUX_ADMIN_TOKEN,
-            }),
-        },
-        // No setup(): the admin token is provisioned via the container env above.
-    },
-    // ── template for a second project ──────────────────────────────
-    // mattermost: {
-    //   name: "Mattermost",
-    //   oldImage: "mattermost/mattermost-team-edition:9.5",
-    //   newImage: "mattermost/mattermost-team-edition:9.9",
-    //   container: { name: "rookie-exp-target", port: 8065, hostPort: 14001,
-    //     env: { MM_SERVICESETTINGS_SITEURL: "http://localhost:14001" } },
-    //   health: { url: "http://localhost:{hostPort}/api/v4/system/ping", retries: 20, intervalMs: 4000 },
-    //   docs: { url: "http://localhost:{hostPort}/api/v4", maxPages: 60 },
-    //   planner: { maxGoals: 6,
-    //     initialContext: JSON.stringify({ apiBase: "http://host.docker.internal:{hostPort}/api/v4", token: "" }) },
-    // },
-};
-
-// ─────────────────────────────────────────────────────────────────
 //  CLI ARGS
 // ─────────────────────────────────────────────────────────────────
 const arg = (k: string): string | null => {
@@ -244,6 +81,19 @@ const flag = (k: string): boolean => Deno.args.includes(k);
 
 const configName = arg("--config") ?? "gitea";
 const VERBOSE = flag("--verbose") || flag("-v");
+
+if (flag("--list")) {
+    console.log("Available experiment targets:\n");
+    for (const [key, t] of Object.entries(EXPERIMENTS)) {
+        const mark = t.pilot
+            ? " [pilot]"
+            : t.selectionRank
+            ? ` [sample, rank ${t.selectionRank}]`
+            : "";
+        console.log(`  ${key.padEnd(14)} ${t.oldImage} -> ${t.newImage}${mark}`);
+    }
+    Deno.exit(0);
+}
 const cfg = EXPERIMENTS[configName];
 
 if (!cfg) {
@@ -332,6 +182,7 @@ async function dockerStart(image: string, container: ContainerConfig): Promise<v
         `${container.hostPort}:${container.port}`,
         ...envArgs,
         image,
+        ...(container.cmd ?? []),
     ];
     console.log(`${gray("│")}  ${yell("▸")} docker: starting ${bold(image)}`);
     const { code, stderr } = await docker(...args);
@@ -1094,63 +945,6 @@ function printFinalSummary(report: Record<string, unknown>): void {
 // ─────────────────────────────────────────────────────────────────
 //  GITEA SETUP HELPER  (creates admin user + API token via docker exec)
 // ─────────────────────────────────────────────────────────────────
-async function setupGiteaAdmin(containerName: string): Promise<Record<string, string>> {
-    console.log(`${gray("│")}  ${yell("▸")} creating Gitea admin user…`);
-    // Gitea refuses to run as root — must exec as the "git" user.
-    // Idempotent: silently ignore "user already exists" on re-runs.
-    await new Deno.Command("docker", {
-        args: [
-            "exec",
-            "--user",
-            "git",
-            containerName,
-            "gitea",
-            "admin",
-            "user",
-            "create",
-            "--username",
-            "gitea_admin",
-            "--password",
-            "gitea_admin123!",
-            "--email",
-            "admin@gitea.local",
-            "--admin",
-            "--must-change-password=false",
-        ],
-        stdout: "null",
-        stderr: "null",
-    }).output().catch(() => {});
-
-    console.log(`${gray("│")}  ${yell("▸")} generating API token…`);
-    const { stdout, code, stderr } = await new Deno.Command("docker", {
-        args: [
-            "exec",
-            "--user",
-            "git",
-            containerName,
-            "gitea",
-            "admin",
-            "user",
-            "generate-access-token",
-            "--username",
-            "gitea_admin",
-            "--token-name",
-            "experiment",
-            "--raw",
-        ],
-        stdout: "piped",
-        stderr: "piped",
-    }).output();
-
-    if (code !== 0) {
-        throw new Error(
-            `Gitea token generation failed: ${new TextDecoder().decode(stderr).trim()}`,
-        );
-    }
-    const token = new TextDecoder().decode(stdout).trim();
-    console.log(`${gray("│")}  ${green("✓")} token: ${gray(token.slice(0, 8) + "…")}`);
-    return { apiToken: token };
-}
 
 // ─────────────────────────────────────────────────────────────────
 //  MAIN
@@ -1159,7 +953,16 @@ async function main(): Promise<void> {
     // docsVersion = "major.minor" extracted from the old image tag
     const imageVersion = cfg.oldImage.split(":")[1] ?? "";
     const docsVersion = imageVersion.split(".").slice(0, 2).join(".");
-    const vars: Record<string, unknown> = { hostPort: cfg.container.hostPort, docsVersion };
+    // {oldTag} = full old image tag (e.g. "2.9.3", "v2.11");
+    // {docsMajor} = leading version segment (e.g. "29" for nextcloud:29-apache).
+    const oldTag = imageVersion;
+    const docsMajor = imageVersion.replace(/^v/, "").split(/[.-]/)[0];
+    const vars: Record<string, unknown> = {
+        hostPort: cfg.container.hostPort,
+        docsVersion,
+        oldTag,
+        docsMajor,
+    };
 
     banner(`Experiment: ${cfg.name}  (${configName})`);
     console.log(`  ${bold("Old:")}    ${cfg.oldImage}`);

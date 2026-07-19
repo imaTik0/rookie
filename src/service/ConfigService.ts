@@ -114,6 +114,12 @@ export interface ConfigValues {
         autoInstallDeps: boolean;
         /** Per-step Docker execution timeout in milliseconds (default 60 000). */
         stepTimeoutMs: number;
+        /**
+         * Reject exit-0 executions that never made an HTTP request to the API
+         * host(s) declared in the execution context (anti-mock / anti-no-op).
+         * Only enforced when the context contains URLs; library tests are exempt.
+         */
+        requireGroundedSuccess: boolean;
     };
 }
 
@@ -248,6 +254,7 @@ export class ConfigService {
                 networkName: Deno.env.get("ROOKIE_SANDBOX_NETWORK_NAME") || "rookie-network",
                 autoInstallDeps: envBool("ROOKIE_SANDBOX_AUTO_INSTALL_DEPS", true),
                 stepTimeoutMs: envNum("ROOKIE_SANDBOX_STEP_TIMEOUT_MS", 60_000),
+                requireGroundedSuccess: envBool("ROOKIE_SANDBOX_REQUIRE_GROUNDED_SUCCESS", true),
             },
         };
     }

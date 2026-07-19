@@ -82,6 +82,11 @@ Install with \`npm install lodash\`.
 
 Use \`chunk(array, size)\` to split an array into groups of \`size\`:
 
+Parameters:
+
+- \`array\` (array, required): the array to process.
+- \`size\` (number, optional): the length of each chunk, defaults to 1.
+
 \`\`\`js
 import _ from "lodash";
 const groups = _.chunk([1, 2, 3, 4, 5], 2);
@@ -139,6 +144,10 @@ Call \`.fromNow()\` on any dayjs object to get a relative string such as
 "a few seconds ago".
 
 **Required setup:** before using \`.fromNow()\` you must load the \`relativeTime\` plugin:
+
+Parameters:
+
+- \`withoutSuffix\` (boolean, optional): when true, omits the "ago"/"in" suffix.
 
 \`\`\`js
 import dayjs from "dayjs";

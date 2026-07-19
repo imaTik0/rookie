@@ -92,6 +92,12 @@ const ENV_ERROR_SIGNATURES = [
     "Cannot find package",
     "MODULE_NOT_FOUND",
     "ROOKIE_NPM_INSTALL_FAILED",
+    // Agent/harness contract violations — the generated code misbehaved (no
+    // default export, or an exit-0 run that never called the real API). These
+    // are model failures, not documentation gaps: they fail the goal but must
+    // not be attributed to the docs.
+    "ROOKIE_NO_DEFAULT_EXPORT",
+    "ROOKIE_UNGROUNDED_SUCCESS",
     "npm ERR!",
     "ERR_DLOPEN_FAILED",
     "command not found",

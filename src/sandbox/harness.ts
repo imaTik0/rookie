@@ -16,8 +16,39 @@ export const RESULT_END = "___RESULT_END___";
 export const HTTP_LOG_START = "___HTTP_LOG_START___";
 export const HTTP_LOG_END = "___HTTP_LOG_END___";
 
+/** Marker emitted when a program violates the export-default-function contract. */
+export const NO_DEFAULT_EXPORT = "ROOKIE_NO_DEFAULT_EXPORT";
+
+export interface HarnessOptions {
+    /**
+     * Whether the program must export a default function. Generated code is
+     * contractually required to `export default async (ctx) => …` (the prompts
+     * demand it, and ctx passing depends on it) — silently substituting a no-op
+     * would let an empty program "pass". Documentation code examples are exempt:
+     * they are top-level scripts whose import alone executes them.
+     */
+    requireDefaultExport?: boolean;
+}
+
 /** Build the Node harness script for a single sandbox step. */
-export function buildSandboxHarness(userCode: string, ctx: unknown): string {
+export function buildSandboxHarness(
+    userCode: string,
+    ctx: unknown,
+    opts: HarnessOptions = {},
+): string {
+    const requireDefaultExport = opts.requireDefaultExport ?? true;
+    const resolveRunFunc = requireDefaultExport
+        ? `if (typeof userModule.default !== 'function') {
+            __emitHttpLog();
+            console.error(JSON.stringify({
+                name: 'HarnessContractError',
+                message: '${NO_DEFAULT_EXPORT}: the program must export default an async function(ctx). ' +
+                    'A module without one cannot receive the execution context and would run as a no-op.',
+            }));
+            process.exit(1);
+        }
+        const runFunc = userModule.default;`
+        : `const runFunc = typeof userModule.default === 'function' ? userModule.default : (ctx) => { /* no-op: top-level code already ran via import */ };`;
     return `
 import fs from 'fs';
 const ctx = ${JSON.stringify(ctx)};
@@ -70,7 +101,7 @@ if (__origFetch) {
     };
     try {
         const userModule = await import('./userStep.js');
-        const runFunc = typeof userModule.default === 'function' ? userModule.default : (ctx) => { /* no-op */ };
+        ${resolveRunFunc}
         const output = await runFunc(ctx);
         console.log("${RESULT_START}");
         console.log(JSON.stringify(output || { result: null, ctx }));

@@ -37,7 +37,8 @@ export class PlannerController {
 
     @Post(PlannerRoutes.RerunMasterPlanRoute)
     rerunMasterPlan: RouteHandler<typeof PlannerRoutes.RerunMasterPlanRoute> = async (c) => {
-        const { masterPlanId, projectId, initialContext } = c.req.valid("json");
+        const { masterPlanId, projectId, initialContext, goalIndices, skipDocExamples } = c.req
+            .valid("json");
 
         return streamText(c, async (stream) => {
             try {
@@ -46,6 +47,8 @@ export class PlannerController {
                     {
                         projectId: projectId as types.project.ProjectId | undefined,
                         initialContext,
+                        goalIndices,
+                        skipDocExamples,
                     },
                     async (msg) => {
                         await stream.writeln(msg);

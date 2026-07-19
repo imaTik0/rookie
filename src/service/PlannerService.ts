@@ -44,6 +44,26 @@ interface DocExampleResult {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Resolve an optional 0-based `goalIndices` subset against the saved goal list.
+ * Out-of-range / non-integer indices are dropped; an explicitly provided subset
+ * that selects nothing is an error (silently running all goals instead would
+ * defeat the caller's cost expectations).
+ */
+export function selectGoals(savedGoals: string[], goalIndices?: number[]): string[] {
+    if (!goalIndices) return savedGoals;
+    const picked = [...new Set(goalIndices)]
+        .filter((i) => Number.isInteger(i) && i >= 0 && i < savedGoals.length)
+        .sort((a, b) => a - b);
+    if (picked.length === 0) {
+        throw new Error(
+            `goalIndices ${JSON.stringify(goalIndices)} selects none of the ` +
+                `${savedGoals.length} saved goals`,
+        );
+    }
+    return picked.map((i) => savedGoals[i]);
+}
+
 @Injectable()
 export class PlannerService {
     constructor(
@@ -116,13 +136,23 @@ export class PlannerService {
      *  - Skips goal generation — reuses `masterPlanGoals` from the original report.
      *  - Accepts an optional `projectId` override so the same goals can be run
      *    against a project that has updated / fixed documentation.
+     *  - Accepts an optional `goalIndices` subset so callers exercising a single
+     *    documentation fragment (e.g. the mutation harness) can pay for only the
+     *    goals that can possibly touch it.
+     *  - Accepts `skipDocExamples` to bypass the doc-example smoke phase when it
+     *    carries no signal for the caller.
      *  - Records `rerunFromMasterPlanId` on the saved report.
      *  - Uses the ORIGINAL plan's gap details as the regression baseline so you can
      *    immediately see which gaps were resolved by the doc fix.
      */
     public async rerunMasterPlan(
         originalMasterPlanId: string,
-        overrides: { projectId?: types.project.ProjectId; initialContext?: string } = {},
+        overrides: {
+            projectId?: types.project.ProjectId;
+            initialContext?: string;
+            goalIndices?: number[];
+            skipDocExamples?: boolean;
+        } = {},
         onProgress?: (msg: string) => void,
     ) {
         const original = await this.reportRepository.get(
@@ -131,10 +161,11 @@ export class PlannerService {
         if (!original || original.type !== "MASTER_PLAN") {
             throw new Error(`Master plan ${originalMasterPlanId} not found`);
         }
-        const goals: string[] = original.masterPlanGoals ?? [];
-        if (goals.length === 0) {
+        const savedGoals: string[] = original.masterPlanGoals ?? [];
+        if (savedGoals.length === 0) {
             throw new Error("Original master plan has no saved goals to re-run");
         }
+        const goals = selectGoals(savedGoals, overrides.goalIndices);
 
         const projectId = overrides.projectId ?? original.projectId;
         const initialContext = overrides.initialContext ?? original.initialContext ?? "{}";
@@ -144,12 +175,17 @@ export class PlannerService {
         );
 
         const validFiles = await this.loadProjectFiles(projectId);
-        const docExampleResults = await this.runDocExamples(validFiles, onProgress);
+        const docExampleResults = overrides.skipDocExamples
+            ? []
+            : await this.runDocExamples(validFiles, onProgress);
 
         onProgress?.(JSON.stringify({
             type: "GOALS_GENERATED",
             goals,
-            note: `Reusing ${goals.length} goals from master plan ${originalMasterPlanId}`,
+            note: goals.length === savedGoals.length
+                ? `Reusing ${goals.length} goals from master plan ${originalMasterPlanId}`
+                : `Reusing ${goals.length}/${savedGoals.length} goals (goalIndices subset) ` +
+                    `from master plan ${originalMasterPlanId}`,
         }));
 
         const { reportIds, executionReports } = await this.executeGoals(

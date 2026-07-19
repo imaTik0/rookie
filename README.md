@@ -128,15 +128,16 @@ Copy `.env` to set your values — the server loads it automatically (`deno task
 
 #### Sandbox (untrusted-code execution)
 
-| Variable                           | Description                                         | Default          |
-| ---------------------------------- | --------------------------------------------------- | ---------------- |
-| `ROOKIE_SANDBOX_HARDENING`         | Apply non-root/cap-drop/read-only/pids-limit flags  | `true`           |
-| `ROOKIE_SANDBOX_USER`              | `uid:gid` to run as                                 | `1000:1000`      |
-| `ROOKIE_SANDBOX_PIDS_LIMIT`        | Max processes (fork-bomb guard)                     | `256`            |
-| `ROOKIE_SANDBOX_NETWORK_MODE`      | `network` \| `none` \| `<docker-network-name>`      | `network`        |
-| `ROOKIE_SANDBOX_NETWORK_NAME`      | Docker network attached when `NETWORK_MODE=network` | `rookie-network` |
-| `ROOKIE_SANDBOX_AUTO_INSTALL_DEPS` | `npm install` packages imported by generated code   | `true`           |
-| `ROOKIE_SANDBOX_STEP_TIMEOUT_MS`   | Per-step Docker execution timeout (ms)              | `60000`          |
+| Variable                                  | Description                                                                                                                                                                              | Default          |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `ROOKIE_SANDBOX_HARDENING`                | Apply non-root/cap-drop/read-only/pids-limit flags                                                                                                                                       | `true`           |
+| `ROOKIE_SANDBOX_USER`                     | `uid:gid` to run as                                                                                                                                                                      | `1000:1000`      |
+| `ROOKIE_SANDBOX_PIDS_LIMIT`               | Max processes (fork-bomb guard)                                                                                                                                                          | `256`            |
+| `ROOKIE_SANDBOX_NETWORK_MODE`             | `network` \| `none` \| `<docker-network-name>`                                                                                                                                           | `network`        |
+| `ROOKIE_SANDBOX_NETWORK_NAME`             | Docker network attached when `NETWORK_MODE=network`                                                                                                                                      | `rookie-network` |
+| `ROOKIE_SANDBOX_AUTO_INSTALL_DEPS`        | `npm install` packages imported by generated code                                                                                                                                        | `true`           |
+| `ROOKIE_SANDBOX_STEP_TIMEOUT_MS`          | Per-step Docker execution timeout (ms)                                                                                                                                                   | `60000`          |
+| `ROOKIE_SANDBOX_REQUIRE_GROUNDED_SUCCESS` | Reject exit-0 runs that never made a real HTTP call to the API host(s) declared in the execution context (anti-mock / anti-no-op; contexts without URLs, e.g. library tests, are exempt) | `true`           |
 
 > **Egress note:** container hardening covers the in-container attack surface, but
 > `docker run` flags cannot allowlist outbound hosts. For real egress control,
@@ -280,24 +281,38 @@ The frontend is available at `http://localhost:5173`, the backend at `http://loc
 
 ## Experiments
 
-The [`scripts/`](scripts/) directory contains a reproducible **documentation-drift** experiment that uses Rookie to detect when documentation no longer matches a newer software version.
+The repository ships two reproducible evaluation protocols: a **documentation-drift** experiment (real version pairs of self-hosted projects) and a **mutation-testing** protocol (controlled defects injected into gold-standard docs). Both require a running Rookie instance (`deno task start`, defaults to `http://localhost:3000`).
 
-### `experiment-runner.ts`
+### Documentation drift (`scripts/experiment-runner.ts`)
 
-Indexes the documentation for an **old** version of a Dockerized project, then runs the Master Planner against both the old and a **new** container image. Goals that passed on the old API but fail on the new one mark documentation drift.
+Indexes the documentation of an **old** version of a Dockerized project, then runs the Master Planner against both the old and a **new** container image. Goals that passed on the old API but fail on the new one mark documentation drift.
+
+Phases: (1) index docs from the old image → (2) baseline: old docs × old API → (3) experiment: old docs × new API → (4) diff structured summaries and write `experiment-<config>-<ts>.json`.
+
+**Target set.** Targets live in [`scripts/experiments/targets.ts`](scripts/experiments/targets.ts): a pre-registered **20-project sample** drawn from awesome-selfhosted (descending-stars screening, eligibility criteria E1–E8, ≤2 per category) plus two development **pilots** (Gitea, InfluxDB) that are excluded from the evaluation sample. The full selection protocol, screening log and replacement queue are documented in [`scripts/experiments/SELECTION.md`](scripts/experiments/SELECTION.md) — do not add/replace targets except via its replacement rule.
 
 ```bash
-# Rookie must be running (defaults to http://localhost:3000)
-deno run --allow-all scripts/experiment-runner.ts --config gitea
+# list all configured targets (sample ranks + pilots)
+deno run --allow-all scripts/experiment-runner.ts --list
+
+# ALWAYS preflight a target before its first experiment run:
+# verifies image tags, container health, docs ingestibility and credential setup
+deno run --allow-all scripts/experiments/preflight.ts --config jellyfin
+deno run --allow-all scripts/experiments/preflight.ts --all --skip-pilots   # whole sample (pulls ~40 images)
+
+# run the experiment for one target
+deno run --allow-all scripts/experiment-runner.ts --config jellyfin
 deno run --allow-all scripts/experiment-runner.ts --config gitea --verbose
-ROOKIE_URL=http://localhost:3000 deno run --allow-all scripts/experiment-runner.ts --config gitea
+ROOKIE_URL=http://localhost:3000 deno run --allow-all scripts/experiment-runner.ts --config memos
 ```
 
-Phases: (1) index docs from the old image → (2) baseline: old docs × old API → (3) experiment: old docs × new API → (4) diff structured summaries and write `experiment-<config>-<ts>.json`. Targets are defined in the `EXPERIMENTS` map at the top of the file — add a key (image tags, container/health config, docs URL, planner goals, optional `setup` hook for credentials) to run the same experiment on another project.
+A target that fails preflight for technical reasons is replaced by the next reserve from the pre-registered queue (SELECTION.md §6) and the substitution is logged in §8 — never silently swapped.
 
-### `print-report.ts`
+**Requirements:** running Rookie stack (MongoDB, Qdrant, LLM + embeddings backend), Docker with network access (image pulls, and sandboxed code reaches the target via `host.docker.internal`), outbound HTTPS for docs crawling.
 
-Pretty-prints a saved experiment report with colourised tables, pass-rate bars, drift diff, and failure taxonomy.
+### `scripts/print-report.ts`
+
+Pretty-prints a saved drift report with colourised tables, pass-rate bars, drift diff, and failure taxonomy.
 
 ```bash
 deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json          # overview
@@ -305,6 +320,29 @@ deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json --goals
 deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json --gaps   # + documentation gaps
 deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json --full   # everything
 ```
+
+### Mutation testing (`deno task eval:mutation`)
+
+MuTAP-style protocol applied to documentation: four operators inject controlled defects into gold-standard docs (`DelParam`/`DelExmpl` → MISSING, `ObfuscateType` → AMBIGUOUS, `AddFalseInfo` → INCORRECT), and the pipeline is scored on whether it detects and correctly classifies each mutant.
+
+Per gold corpus the driver runs: a **gold baseline** (fresh master plan; checks the ≥90% pass-rate requirement and counts false alarms), then **one targeted `planner/rerun` per mutant**. A rerun is cheap by construction: it re-runs **only the goal(s) that can exercise the wounded fragment** (`goalIndices`, mapped from the mutant's file + section) and skips the doc-example smoke phase (`skipDocExamples` — no signal for any operator). Results — MDS per operator, a confusion matrix and Cohen's κ — go to `mutation-<ts>.json`; errored mutant runs are recorded and excluded from MDS denominators.
+
+Gold corpora: the multi-library corpus in [`src/eval/goldCorpus.ts`](src/eval/goldCorpus.ts) (lodash, dayjs, uuid, slugify, ms — 69 potential mutants) plus every eval fixture with corrected docs (~80 potential mutants total). Mutant generation is seeded and deterministic.
+
+```bash
+deno task eval:mutation -- --dry-run                        # inspect the mutant pool (no infra needed)
+deno task eval:mutation                                      # default: 2 mutants per operator, all corpora
+deno task eval:mutation -- --per-operator all                # exhaustive: one mutant per site (~80)
+deno task eval:mutation -- --seed 42 --per-operator 5        # reproducible subset (20 mutants)
+deno task eval:mutation -- --corpus gold-multilib            # single corpus
+deno task eval:mutation -- --concurrency 4                   # run 4 mutants in parallel
+deno task eval:mutation -- --corpus gold-multilib --gold <masterPlanId>
+                                                             # reuse a previous gold baseline
+```
+
+The driver prints `reuse this baseline next time: --gold <id>` after each fresh gold run — pass that id on subsequent invocations to skip Phase 0 entirely (requires `--corpus`/`--fixture`). While iterating, prefer a small seeded sample (`--per-operator 2`); run `--per-operator all` once for the final numbers.
+
+**Requirements:** the full stack as above; additionally the sandbox must reach the npm registry (`ROOKIE_SANDBOX_AUTO_INSTALL_DEPS=true`, network mode other than `none`) so the documented libraries install inside the container. `--dry-run` needs Deno only. Full technical description (operators, matching rules, corpora, cost guidance): [`src/eval/MUTATION.md`](src/eval/MUTATION.md).
 
 ## API Documentation
 

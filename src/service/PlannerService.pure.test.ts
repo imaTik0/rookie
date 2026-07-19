@@ -4,8 +4,8 @@
  * `as any` to pin behaviour before any extraction. No infra.
  * Run with: deno test src/service/PlannerService.pure.test.ts
  */
-import { assert, assertEquals } from "@std/assert";
-import { PlannerService } from "./PlannerService.ts";
+import { assert, assertEquals, assertThrows } from "@std/assert";
+import { PlannerService, selectGoals } from "./PlannerService.ts";
 import { fakeLogger } from "../testing/fakes.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -158,4 +158,22 @@ Deno.test("executeGoals: a throwing goal is recorded FAILED, others still comple
     assertEquals(executionReports[0].status, "SUCCESS");
     assertEquals(executionReports[1].status, "FAILED");
     assertEquals(reportIds.length, 1); // only the successful goal produced a report
+});
+
+// ── selectGoals (rerun goalIndices subset) ───────────────────────────────────────
+
+Deno.test("selectGoals returns all goals when no subset is given", () => {
+    assertEquals(selectGoals(["a", "b", "c"]), ["a", "b", "c"]);
+});
+
+Deno.test("selectGoals picks the subset in saved order, deduped", () => {
+    assertEquals(selectGoals(["a", "b", "c"], [2, 0, 2]), ["a", "c"]);
+});
+
+Deno.test("selectGoals drops out-of-range indices but keeps valid ones", () => {
+    assertEquals(selectGoals(["a", "b"], [1, 5, -1]), ["b"]);
+});
+
+Deno.test("selectGoals throws when the subset selects nothing", () => {
+    assertThrows(() => selectGoals(["a", "b"], [7]), Error, "selects none");
 });

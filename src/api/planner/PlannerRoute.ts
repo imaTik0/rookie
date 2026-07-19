@@ -37,6 +37,16 @@ measuring natural variance across executions).`,
                                 example:
                                     '{"apiBase":"http://host.docker.internal:14000/api/v1","token":"<token>"}',
                             }),
+                            goalIndices: z.array(z.number().int().min(0)).optional().describe(
+                                "0-based indices into the original plan's saved goals; only the " +
+                                    "selected goals are re-run. Omit to re-run all goals. Used by " +
+                                    "harnesses that exercise a single documentation fragment (e.g. " +
+                                    "mutation testing) to avoid paying for unrelated goals.",
+                            ).openapi({ example: [0, 2] }),
+                            skipDocExamples: z.boolean().optional().describe(
+                                "Skip the doc-example smoke phase (up to 10 sandbox executions). " +
+                                    "Useful when the caller only consumes goal-level results.",
+                            ),
                         }),
                     },
                 },

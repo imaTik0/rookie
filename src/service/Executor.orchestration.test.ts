@@ -22,24 +22,26 @@ const cfg = {
             pidsLimit: 256,
             networkName: "rookie-network",
             autoInstallDeps: false,
+            requireGroundedSuccess: true,
         },
     },
 } as unknown as ConfigService;
 
-const testSuite = {
-    _id: "ts-1",
-    mode: "CODE_GENERATION",
-    projectId: "proj-1",
-    initialContext: "{}",
-    userGoal: "list the users",
-    minimalStoryLength: 1,
-    maximalStoryLength: 3,
-};
-
 function build(opts: {
     examples: { title: string; explanation: string; fullProgram: string }[];
     docker: ReturnType<typeof fakeDockerExecutor>;
+    /** JSON string for the suite's execution context (default: no declared API). */
+    initialContext?: string;
 }) {
+    const testSuite = {
+        _id: "ts-1",
+        mode: "CODE_GENERATION",
+        projectId: "proj-1",
+        initialContext: opts.initialContext ?? "{}",
+        userGoal: "list the users",
+        minimalStoryLength: 1,
+        maximalStoryLength: 3,
+    };
     const created: Record<string, unknown>[] = [];
     const promptService = {
         promptForCodeGenerationWithAgenticRAG: () =>
@@ -105,4 +107,79 @@ Deno.test("a failing step is classified and the report is FAILED", async () => {
     // No project docs mention dayjs, so it's an environment (not docs) problem.
     assertEquals(report!.steps[0].failureAnalysis!.documentationGap, "ENVIRONMENT");
     assert(docker.calls.length === 1);
+});
+
+// ── grounded success (anti-mock / anti-no-op) ─────────────────────────────────────
+
+const API_CTX = JSON.stringify({ apiBase: "http://host.docker.internal:14000/api/v1", token: "t" });
+
+Deno.test("an exit-0 run with NO real API call is rejected as ROOKIE_UNGROUNDED_SUCCESS", async () => {
+    // Container exits 0 and prints a result, but the traffic log is empty —
+    // e.g. the agent mocked the server. Must be a FAILED step, classified
+    // ENVIRONMENT (model misbehaviour, not a documentation gap).
+    const docker = fakeDockerExecutor([{
+        exitCode: 0,
+        stdout: `___RESULT_START___\n{"result":"ok","ctx":{}}\n___RESULT_END___`,
+        stderr: "",
+    }]);
+    const { ex } = build({
+        examples: [{
+            title: "Mocked",
+            explanation: "mocks the API",
+            fullProgram: "export default async () => ({})",
+        }],
+        docker,
+        initialContext: API_CTX,
+    });
+    // deno-lint-ignore no-explicit-any
+    const report = await ex.executeTestSuite("ts-1" as any);
+    assertEquals(report!.status, "FAILED");
+    assert(String(report!.steps[0].error).includes("ROOKIE_UNGROUNDED_SUCCESS"));
+    assertEquals(report!.steps[0].failureAnalysis!.documentationGap, "ENVIRONMENT");
+});
+
+Deno.test("an exit-0 run WITH a real call to the declared host passes", async () => {
+    const traffic = JSON.stringify([{
+        method: "GET",
+        url: "http://host.docker.internal:14000/api/v1/users",
+        responseStatus: 200,
+    }]);
+    const docker = fakeDockerExecutor([{
+        exitCode: 0,
+        stdout: `___RESULT_START___\n{"result":"ok","ctx":{}}\n___RESULT_END___\n` +
+            `___HTTP_LOG_START___\n${traffic}\n___HTTP_LOG_END___`,
+        stderr: "",
+    }]);
+    const { ex } = build({
+        examples: [{
+            title: "Real",
+            explanation: "calls the API",
+            fullProgram: "export default async () => ({})",
+        }],
+        docker,
+        initialContext: API_CTX,
+    });
+    // deno-lint-ignore no-explicit-any
+    const report = await ex.executeTestSuite("ts-1" as any);
+    assertEquals(report!.status, "SUCCESS");
+});
+
+Deno.test("library-style contexts (no URLs) are exempt from grounding", async () => {
+    const docker = fakeDockerExecutor([{
+        exitCode: 0,
+        stdout: `___RESULT_START___\n{"result":42,"ctx":{}}\n___RESULT_END___`,
+        stderr: "",
+    }]);
+    const { ex } = build({
+        examples: [{
+            title: "Lib",
+            explanation: "pure library use",
+            fullProgram: "export default async () => 42",
+        }],
+        docker,
+        initialContext: "{}",
+    });
+    // deno-lint-ignore no-explicit-any
+    const report = await ex.executeTestSuite("ts-1" as any);
+    assertEquals(report!.status, "SUCCESS");
 });

@@ -25,7 +25,6 @@ import {
     CodeGenerationResponse,
     PromptOptions,
     RouterPlanResponse,
-    SearchToolArgs,
     SmokeTestCallback,
     SmokeTestToolArgs,
     StructuredResponse,
@@ -35,6 +34,7 @@ import { runAgenticLoop } from "./prompt/agenticLoop.ts";
 import { coerceJson } from "../llm/StructuredLlm.ts";
 import * as schemas from "../llm/schemas.ts";
 import { llmParams, loopParams, makeStructured, type StructuredFn } from "./prompt/llm.ts";
+import { createSearchSession } from "./prompt/SearchSession.ts";
 import { VfsTools } from "./prompt/VfsTools.ts";
 import { FailureClassifier } from "./prompt/FailureClassifier.ts";
 import { RagSearch } from "./prompt/RagSearch.ts";
@@ -83,6 +83,30 @@ export class PromptService {
         return loopParams(this.configService);
     }
 
+    /**
+     * Guarded `search_knowledge_base` handler with per-phase session memory:
+     * chunks already returned are stubbed instead of re-serialised, and repeated
+     * queries yielding nothing new steer the agent toward the file tools or
+     * concluding. One session per agent phase (the KB is immutable within a run).
+     */
+    private createSearchHandler(
+        vectorCollectionName: string,
+        logLabel: string,
+        onProgress?: ProgressCallback,
+    ) {
+        return createSearchSession({
+            search: (q) =>
+                this.ragSearch.search(
+                    vectorCollectionName,
+                    q,
+                    this.configService.values.limits.defaultSearchLimit,
+                ),
+            maxResultChars: this.configService.values.limits.maxResultChars,
+            logLabel,
+            onProgress,
+        }).handler;
+    }
+
     public async promptForApiUsageScenario(
         vectorCollectionName: string,
         files: DocFile[],
@@ -118,28 +142,11 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         ];
 
         const toolHandlers = {
-            search_knowledge_base: async (_id: string, rawArgs: any) => {
-                const args = rawArgs as SearchToolArgs;
-                emitLog(onProgress, `Agent searching: "${args.query}"`);
-                const results = await this.ragSearch.search(
-                    vectorCollectionName,
-                    args.query,
-                    this.configService.values.limits.defaultSearchLimit,
-                );
-                const truncated = results.map((r) => ({
-                    ...r,
-                    payload: r.payload
-                        ? {
-                            ...r.payload,
-                            content: (r.payload.content || "").substring(
-                                0,
-                                this.configService.values.limits.maxResultChars,
-                            ),
-                        }
-                        : r.payload,
-                }));
-                return JSON.stringify(truncated);
-            },
+            search_knowledge_base: this.createSearchHandler(
+                vectorCollectionName,
+                "Agent searching",
+                onProgress,
+            ),
             ...this.vfsTools.createHandlers(files, onProgress),
         };
 
@@ -474,28 +481,11 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                 GET_ENDPOINT_TOOL,
             ],
             toolHandlers: {
-                search_knowledge_base: async (_id, rawArgs) => {
-                    const args = rawArgs as SearchToolArgs;
-                    emitLog(onProgress, `Agent RAG searching knowledge base for: "${args.query}"`);
-                    const results = await this.ragSearch.search(
-                        vectorCollectionName,
-                        args.query,
-                        this.configService.values.limits.defaultSearchLimit,
-                    );
-                    const truncated = results.map((r) => ({
-                        ...r,
-                        payload: r.payload
-                            ? {
-                                ...r.payload,
-                                content: (r.payload.content || "").substring(
-                                    0,
-                                    this.configService.values.limits.maxResultChars,
-                                ),
-                            }
-                            : r.payload,
-                    }));
-                    return JSON.stringify(truncated);
-                },
+                search_knowledge_base: this.createSearchHandler(
+                    vectorCollectionName,
+                    "Agent RAG searching knowledge base for",
+                    onProgress,
+                ),
                 ...this.vfsTools.createHandlers(files, onProgress),
             },
             modelName: this.configService.values.openAI.modelName,
@@ -564,31 +554,11 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             messages,
             tools: [SMOKE_TEST_TOOL, SEARCH_TOOL],
             toolHandlers: {
-                search_knowledge_base: async (_id, rawArgs) => {
-                    const args = rawArgs as SearchToolArgs;
-                    emitLog(
-                        onProgress,
-                        `Agent RAG searching knowledge base (Verification phase) for: "${args.query}"`,
-                    );
-                    const results = await this.ragSearch.search(
-                        vectorCollectionName,
-                        args.query,
-                        this.configService.values.limits.defaultSearchLimit,
-                    );
-                    const truncated = results.map((r) => ({
-                        ...r,
-                        payload: r.payload
-                            ? {
-                                ...r.payload,
-                                content: (r.payload.content || "").substring(
-                                    0,
-                                    this.configService.values.limits.maxResultChars,
-                                ),
-                            }
-                            : r.payload,
-                    }));
-                    return JSON.stringify(truncated);
-                },
+                search_knowledge_base: this.createSearchHandler(
+                    vectorCollectionName,
+                    "Agent RAG searching knowledge base (Verification phase) for",
+                    onProgress,
+                ),
                 smoke_test_code: async (_id, rawArgs) => {
                     const args = rawArgs as SmokeTestToolArgs;
                     emitLog(
@@ -797,28 +767,11 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
         ];
 
         const toolHandlers = {
-            search_knowledge_base: async (_id: string, rawArgs: any) => {
-                const args = rawArgs as SearchToolArgs;
-                emitLog(onProgress, `Agent searching: "${args.query}"`);
-                const results = await this.ragSearch.search(
-                    vectorCollectionName,
-                    args.query,
-                    this.configService.values.limits.defaultSearchLimit,
-                );
-                const truncated = results.map((r) => ({
-                    ...r,
-                    payload: r.payload
-                        ? {
-                            ...r.payload,
-                            content: (r.payload.content || "").substring(
-                                0,
-                                this.configService.values.limits.maxResultChars,
-                            ),
-                        }
-                        : r.payload,
-                }));
-                return JSON.stringify(truncated);
-            },
+            search_knowledge_base: this.createSearchHandler(
+                vectorCollectionName,
+                "Agent searching",
+                onProgress,
+            ),
             ...this.vfsTools.createHandlers(files, onProgress),
         };
 

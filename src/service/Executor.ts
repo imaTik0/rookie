@@ -19,6 +19,7 @@ import {
     RESULT_END,
     RESULT_START,
 } from "../sandbox/harness.ts";
+import { extractApiHosts, isGrounded, ungroundedSuccessError } from "../sandbox/grounding.ts";
 import { JobCancelledError } from "../types/job.ts";
 import {
     CorpusFile,
@@ -583,6 +584,7 @@ export class Executor {
     private async runStepInDocker(
         userCode: string,
         currentCtx: unknown,
+        opts: { requireDefaultExport?: boolean } = {},
     ): Promise<{
         success: boolean;
         result?: { ctx: unknown; result: unknown };
@@ -599,7 +601,9 @@ export class Executor {
             this.logger.log(`Sandbox installing packages: ${packages.join(", ")}`);
         }
 
-        const script = buildSandboxHarness(userCode, currentCtx);
+        const script = buildSandboxHarness(userCode, currentCtx, {
+            requireDefaultExport: opts.requireDefaultExport,
+        });
 
         try {
             const execResult = await this.dockerExecutor.execute(
@@ -618,6 +622,22 @@ export class Executor {
                     // Ignore JSON parse errors
                 }
                 return { success: false, error: parsedError, logs: fullLogs, httpTrafficLog };
+            }
+
+            // Grounded success: an exit-0 run that never touched the documented API
+            // (declared via URLs in the execution context) proves nothing about the
+            // docs — the code may be mocked or a no-op. Reject it so neither the
+            // verification smoke test nor the final report counts it as a pass.
+            if (this.configService.values.sandbox.requireGroundedSuccess) {
+                const declaredHosts = extractApiHosts(currentCtx);
+                if (!isGrounded(declaredHosts, httpTrafficLog)) {
+                    return {
+                        success: false,
+                        error: ungroundedSuccessError(declaredHosts),
+                        logs: fullLogs,
+                        httpTrafficLog,
+                    };
+                }
             }
 
             const stdout = execResult.stdout;
@@ -672,7 +692,9 @@ export class Executor {
         error?: unknown;
         httpTrafficLog?: types.report.HttpTrafficEntry[];
     }> {
-        const result = await this.runStepInDocker(code, {});
+        // Doc examples are top-level scripts, not export-default modules — the
+        // import in the harness executes them; do not enforce the module contract.
+        const result = await this.runStepInDocker(code, {}, { requireDefaultExport: false });
         return {
             success: result.success,
             logs: result.logs,
