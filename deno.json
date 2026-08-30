@@ -1,4 +1,5 @@
 {
+    "license": "MIT",
     "imports": {
         "@openai/openai": "jsr:@openai/openai@^5.16.0",
         "@qdrant/js-client-rest": "npm:@qdrant/js-client-rest@^1.15.1",

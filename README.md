@@ -10,6 +10,8 @@ The system combines an agentic RAG pipeline with code execution in isolated Dock
 
 This inverts traditional API testing: instead of checking whether software meets its specification, Rookie checks whether the specification is sufficient to use the software.
 
+Rookie is the reference implementation for a master's thesis at the Faculty of Mathematics and Computer Science, Nicolaus Copernicus University in Toruń.
+
 ## Key Features
 
 - **Empirical documentation evaluation**: Quality is measured by whether an LLM can write working code from the docs — not by static linting or schema validation.
