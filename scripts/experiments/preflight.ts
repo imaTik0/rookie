@@ -2,16 +2,17 @@
 /**
  * preflight.ts — technical validation of experiment targets BEFORE any run.
  *
- * Per target: (1) both image tags resolvable, (2) OLD container starts and
- * becomes healthy, (3) docs source reachable (and parseable for swagger-json),
- * (4) credential setup hook succeeds. Teardown afterwards.
+ * Per target: (1) the npm version pair is resolvable, (2) for http/db targets
+ * the container image resolves, starts and becomes healthy, (3) every OLD-tag
+ * docs file is reachable. Pure targets skip all container checks. Teardown
+ * afterwards.
  *
  * A target failing preflight is replaced via the pre-registered replacement
- * rule (SELECTION.md §6) and the failure is logged in SELECTION.md §8 —
+ * rule (SELECTION.md §6) and the failure is logged in SELECTION.md §11 —
  * never silently swapped.
  *
  * Usage:
- *   deno run --allow-all scripts/experiments/preflight.ts --config memos
+ *   deno run --allow-all scripts/experiments/preflight.ts --config execa
  *   deno run --allow-all scripts/experiments/preflight.ts --all
  *   deno run --allow-all scripts/experiments/preflight.ts --all --skip-pilots
  */
@@ -43,29 +44,67 @@ interface StepResult {
     detail: string;
 }
 
-async function preflightTarget(key: string, cfg: ExperimentConfig): Promise<StepResult[]> {
+async function fetchDoc(url: string): Promise<{ ok: boolean; bytes: number; status: number }> {
+    const r = await fetch(url, {
+        signal: AbortSignal.timeout(20_000),
+        headers: { "User-Agent": "rookie-preflight/1.0" },
+    });
+    const body = await r.text();
+    return { ok: r.ok, bytes: body.length, status: r.status };
+}
+
+async function preflightTarget(_key: string, cfg: ExperimentConfig): Promise<StepResult[]> {
     const steps: StepResult[] = [];
     const push = (step: string, ok: boolean, detail = "") => {
         steps.push({ step, ok, detail });
         console.log(`   ${ok ? "✓" : "✗"} ${step}${detail ? ` — ${detail}` : ""}`);
     };
 
-    const imageVersion = cfg.oldImage.split(":")[1] ?? "";
-    const vars = {
-        hostPort: cfg.container.hostPort,
-        docsVersion: imageVersion.split(".").slice(0, 2).join("."),
-        oldTag: imageVersion,
-        docsMajor: imageVersion.replace(/^v/, "").split(/[.-]/)[0],
-    };
+    const vars = { hostPort: cfg.container?.hostPort ?? "" };
 
-    // 1) image tags resolvable
-    for (const image of [cfg.oldImage, cfg.newImage]) {
-        const m = await docker(["manifest", "inspect", image]);
-        push(`image tag ${image}`, m.code === 0, m.code === 0 ? "" : m.out.trim().slice(0, 80));
+    // 0) library version pair resolvable on npm (drift axis)
+    for (const v of [cfg.library.oldVersion, cfg.library.newVersion]) {
+        const spec = `${cfg.library.pkg}@${v}`;
+        let ok = false;
+        try {
+            const u = `https://registry.npmjs.org/${cfg.library.pkg.replace("/", "%2f")}/${v}`;
+            const r = await fetch(u, { signal: AbortSignal.timeout(15_000) });
+            await r.body?.cancel();
+            ok = r.ok;
+        } catch { /* network */ }
+        push(`npm ${spec}`, ok, ok ? "" : "not resolvable");
     }
     if (steps.some((s) => !s.ok)) return steps;
 
-    // 2) start OLD container + health
+    // 1) docs source — every OLD-tag file must resolve (raw markdown).
+    const docUrls = [cfg.docs.url, ...(cfg.docs.extraFiles ?? [])].map((u) => fill(u, vars));
+    for (const [i, url] of docUrls.entries()) {
+        try {
+            const { ok, bytes, status } = await fetchDoc(url);
+            const min = i === 0 ? 200 : 100; // primary must be substantial
+            push(
+                `${i === 0 ? "docs" : "  extra doc"} ${url.split("/").pop()}`,
+                ok && bytes > min,
+                `HTTP ${status}, ${bytes} bytes`,
+            );
+        } catch (e) {
+            push(`docs ${url}`, false, (e as Error).message.slice(0, 100));
+        }
+    }
+    if (steps.some((s) => !s.ok)) return steps;
+
+    // 2) pure targets need no container — done.
+    if (cfg.runtime === "pure" || !cfg.container || !cfg.image) {
+        push("container", true, "not required (pure)");
+        return steps;
+    }
+
+    // 3) container image resolvable
+    const m = await docker(["manifest", "inspect", cfg.image]);
+    push(`image tag ${cfg.image}`, m.code === 0, m.code === 0 ? "" : m.out.trim().slice(0, 80));
+    if (m.code !== 0) return steps;
+
+    // 4) start container + health
     await docker(["rm", "-f", cfg.container.name]);
     const envArgs = Object.entries(cfg.container.env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
     const run = await docker([
@@ -76,74 +115,39 @@ async function preflightTarget(key: string, cfg: ExperimentConfig): Promise<Step
         "-p",
         `${cfg.container.hostPort}:${cfg.container.port}`,
         ...envArgs,
-        cfg.oldImage,
+        cfg.image,
         ...(cfg.container.cmd ?? []),
     ]);
     push("container start", run.code === 0, run.code === 0 ? "" : run.out.trim().slice(0, 120));
     if (run.code !== 0) return steps;
 
     try {
-        const healthUrl = fill(cfg.health.url, vars);
+        const health = cfg.health!;
+        const healthTarget = fill(health.url, vars);
         let healthy = false;
-        for (let i = 0; i < cfg.health.retries && !healthy; i++) {
+        for (let i = 0; i < health.retries && !healthy; i++) {
             try {
-                const r = await fetch(healthUrl, { signal: AbortSignal.timeout(3000) });
-                await r.body?.cancel();
-                healthy = r.ok;
+                if (health.mode === "tcp") {
+                    const [host, portStr] = healthTarget.split(":");
+                    const conn = await Deno.connect({
+                        hostname: host || "localhost",
+                        port: Number(portStr),
+                    });
+                    conn.close();
+                    healthy = true;
+                } else {
+                    const r = await fetch(healthTarget, { signal: AbortSignal.timeout(3000) });
+                    await r.body?.cancel();
+                    healthy = r.ok;
+                }
             } catch { /* not ready */ }
-            if (!healthy) await sleep(cfg.health.intervalMs);
+            if (!healthy) await sleep(health.intervalMs);
         }
         push(
-            `health ${healthUrl}`,
+            `health (${health.mode}) ${healthTarget}`,
             healthy,
-            healthy ? "" : `not healthy after ${cfg.health.retries} tries`,
+            healthy ? "" : `not healthy after ${health.retries} tries`,
         );
-        if (!healthy) return steps;
-
-        // 3) docs source
-        const docsUrl = fill(cfg.docs.url, vars);
-        try {
-            const r = await fetch(docsUrl, {
-                signal: AbortSignal.timeout(20_000),
-                headers: { "User-Agent": "rookie-preflight/1.0" },
-            });
-            const body = await r.text();
-            if (cfg.docs.mode === "swagger-json") {
-                let parsed = false;
-                let paths = 0;
-                try {
-                    const spec = JSON.parse(body);
-                    parsed = typeof spec === "object" && spec !== null;
-                    paths = spec?.paths ? Object.keys(spec.paths).length : 0;
-                } catch { /* not JSON */ }
-                push(
-                    `docs (swagger-json) ${docsUrl}`,
-                    r.ok && parsed && paths > 0,
-                    `HTTP ${r.status}, ${paths} paths`,
-                );
-            } else {
-                const bytes = body.length;
-                push(
-                    `docs (url-crawl) ${docsUrl}`,
-                    r.ok && bytes > 2000,
-                    `HTTP ${r.status}, ${bytes} bytes`,
-                );
-            }
-        } catch (e) {
-            push(`docs ${docsUrl}`, false, (e as Error).message.slice(0, 100));
-        }
-
-        // 4) setup hook
-        if (cfg.setup) {
-            try {
-                const varsOut = await cfg.setup(cfg.container.name);
-                push("setup hook", true, Object.keys(varsOut).join(", ") || "no vars");
-            } catch (e) {
-                push("setup hook", false, (e as Error).message.slice(0, 140));
-            }
-        } else {
-            push("setup hook", true, "not required");
-        }
     } finally {
         await docker(["rm", "-f", cfg.container.name]);
     }
@@ -155,11 +159,16 @@ async function preflightTarget(key: string, cfg: ExperimentConfig): Promise<Step
 const single = arg("--config");
 const all = flag("--all");
 const skipPilots = flag("--skip-pilots");
+const includeExcluded = flag("--include-excluded");
 
+// `--all` skips targets already excluded after a preflight failure
+// (SELECTION.md §11); use --include-excluded (or --config <name>) to retry one.
 const selected: [string, ExperimentConfig][] = single
     ? [[single, EXPERIMENTS[single]]]
     : all
-    ? Object.entries(EXPERIMENTS).filter(([, c]) => !(skipPilots && c.pilot))
+    ? Object.entries(EXPERIMENTS).filter(([, c]) =>
+        !(skipPilots && c.pilot) && (includeExcluded || !c.excluded)
+    )
     : [];
 
 if (selected.length === 0 || selected.some(([, c]) => !c)) {
@@ -172,7 +181,11 @@ if (selected.length === 0 || selected.some(([, c]) => !c)) {
 
 const summary: Record<string, { ok: boolean; failed: string[] }> = {};
 for (const [key, cfg] of selected) {
-    console.log(`\n■ ${key} (${cfg.name})  ${cfg.oldImage} -> ${cfg.newImage}`);
+    const backing = cfg.runtime === "pure" ? "pure" : `${cfg.runtime} · ${cfg.image}`;
+    console.log(
+        `\n■ ${key} (${cfg.name})  ${cfg.library.pkg} ` +
+            `${cfg.library.oldVersion} -> ${cfg.library.newVersion}  [${backing}]`,
+    );
     const steps = await preflightTarget(key, cfg);
     const failed = steps.filter((s) => !s.ok).map((s) => s.step);
     summary[key] = { ok: failed.length === 0, failed };
@@ -189,7 +202,7 @@ for (const [key, s] of Object.entries(summary)) {
 if (anyFail) {
     console.log(
         "\nFailures are technical preflight failures: apply the replacement rule " +
-            "(SELECTION.md §6) and log the substitution in §8.",
+            "(SELECTION.md §6) and log the substitution in §11.",
     );
 }
 Deno.exit(anyFail ? 1 : 0);

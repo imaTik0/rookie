@@ -11,7 +11,11 @@ import { TestSuiteRepository } from "../db/mongo/TestSuiteRepository.ts";
 import { DockerExecutor } from "./DockerExecutor.ts";
 import { ReportRepository } from "../db/mongo/ReportRepository.ts";
 import { ConfigService } from "./ConfigService.ts";
-import { isEnvironmentError, parseImportedPackages } from "../sandbox/depDetect.ts";
+import {
+    applyPackageOverrides,
+    isEnvironmentError,
+    parseImportedPackages,
+} from "../sandbox/depDetect.ts";
 import {
     buildSandboxHarness,
     HTTP_LOG_END,
@@ -20,6 +24,8 @@ import {
     RESULT_START,
 } from "../sandbox/harness.ts";
 import { extractApiHosts, isGrounded, ungroundedSuccessError } from "../sandbox/grounding.ts";
+import { checkFaithfulness } from "../sandbox/faithfulness.ts";
+import type { CodeGenerationResponse } from "./PromptService.ts";
 import { JobCancelledError } from "../types/job.ts";
 import {
     CorpusFile,
@@ -54,7 +60,9 @@ export class Executor {
         const offline = sb.networkMode === "none";
         this.dockerExecutor = new DockerExecutor({
             timeoutMs: sb.stepTimeoutMs,
-            memoryLimit: "2048m",
+            installTimeoutMs: sb.installTimeoutMs,
+            maxConcurrent: sb.maxConcurrentContainers,
+            memoryLimit: sb.memoryLimit,
             networkAccess: !offline,
             networkName: offline
                 ? undefined
@@ -140,39 +148,65 @@ export class Executor {
         onProgress?: (msg: string) => void,
         signal?: AbortSignal,
     ) {
-        onProgress?.(
-            JSON.stringify({ type: "log", content: "Starting Agentic RAG for CODE_GENERATION..." }),
-        );
-        const {
-            response: codeGenResponse,
-            history: conversationHistory,
-            contextFound: usedDocsContext,
-            coverageReport,
-            frictionEvents,
-        } = await this.promptService.promptForCodeGenerationWithAgenticRAG(
-            testSuite.projectId,
-            testSuite.userGoal || "No goal specified",
-            files,
-            onProgress,
-            async (code) => {
-                const execResult = await this.runStepInDocker(
-                    code,
-                    this.parseInitialContext(testSuite.initialContext),
-                );
+        let codeGenResponse: CodeGenerationResponse;
+        let conversationHistory: unknown[] = [];
+        let usedDocsContext: string | undefined;
+        let coverageReport: types.report.CoverageItem[] | undefined;
+        let frictionEvents: types.report.FrictionEvent[] = [];
 
-                if (execResult.success) {
-                    return `SUCCESS.\nOutput: ${JSON.stringify(execResult.result)}`;
-                } else {
-                    return `FAILED.\nError: ${execResult.error}\nLogs: ${execResult.logs}`;
-                }
-            },
-        );
-        onProgress?.(
-            JSON.stringify({
+        if (testSuite.frozenPrograms && testSuite.frozenPrograms.length > 0) {
+            // Frozen re-execution: run the baseline's programs VERBATIM against the
+            // (new) library version. Drift is measured on identical code, and the
+            // agent gets no chance to regenerate around the change (§ freeze fix).
+            onProgress?.(JSON.stringify({
+                type: "log",
+                content:
+                    `Frozen re-execution: running ${testSuite.frozenPrograms.length} baseline ` +
+                    `program(s) verbatim (no regeneration).`,
+            }));
+            codeGenResponse = {
+                examples: testSuite.frozenPrograms.map((p, i) => ({
+                    title: `Frozen program ${i + 1}`,
+                    explanation: "Re-executed baseline program (frozen; no regeneration).",
+                    fullProgram: p,
+                })),
+                finalMarkdownSummary: "Frozen re-execution of baseline programs.",
+            } as CodeGenerationResponse;
+        } else {
+            onProgress?.(JSON.stringify({
+                type: "log",
+                content: testSuite.withoutDocs
+                    ? "Starting CODE_GENERATION WITHOUT documentation (parametric-knowledge ablation)..."
+                    : "Starting Agentic RAG for CODE_GENERATION...",
+            }));
+            const gen = await this.promptService.promptForCodeGenerationWithAgenticRAG(
+                testSuite.projectId,
+                testSuite.userGoal || "No goal specified",
+                files,
+                onProgress,
+                async (code) => {
+                    const execResult = await this.runStepInDocker(
+                        code,
+                        this.parseInitialContext(testSuite.initialContext),
+                        { packageOverrides: testSuite.packageOverrides },
+                    );
+                    return execResult.success
+                        ? `SUCCESS.\nOutput: ${JSON.stringify(execResult.result)}`
+                        : `FAILED.\nError: ${execResult.error}\nLogs: ${execResult.logs}`;
+                },
+                testSuite.initialContext,
+                testSuite.withoutDocs,
+            );
+            codeGenResponse = gen.response;
+            conversationHistory = gen.history;
+            usedDocsContext = gen.contextFound;
+            coverageReport = gen.coverageReport;
+            frictionEvents = gen.frictionEvents;
+            onProgress?.(JSON.stringify({
                 type: "log",
                 content: "Code Generation completed. Executing in Docker environment...",
-            }),
-        );
+            }));
+        }
 
         const corpus = corpusFromFiles(files);
         const ctx = this.parseInitialContext(testSuite.initialContext);
@@ -188,7 +222,9 @@ export class Executor {
         const execResults = await Promise.all(
             codeGenResponse.examples.map((example, idx) => {
                 this.logger.log(`Executing generated example ${idx + 1}: ${example.title}`);
-                return this.runStepInDocker(example.fullProgram, ctx);
+                return this.runStepInDocker(example.fullProgram, ctx, {
+                    packageOverrides: testSuite.packageOverrides,
+                });
             }),
         );
 
@@ -204,6 +240,14 @@ export class Executor {
                 contextAfter: execResult.result?.ctx || null,
                 httpTrafficLog: execResult.httpTrafficLog,
             };
+            // Docs-faithfulness: did the code use a documented API it was expected
+            // to, or dodge it with a substitute? Only meaningful when the caller
+            // supplied expected symbols (drift experiment).
+            const faith = checkFaithfulness(example.fullProgram, testSuite.expectedApis ?? []);
+            if (faith.checked) {
+                stepReport.docsFaithful = faith.faithful;
+                if (!faith.faithful) stepReport.docsUnfaithfulMissing = faith.missing;
+            }
             if (!execResult.success) {
                 stepReport.error = typeof execResult.error === "object"
                     ? JSON.stringify(execResult.error)
@@ -531,6 +575,26 @@ export class Executor {
             };
         }
 
+        // Wall-clock exhaustion is a machine property (slow registry, saturated
+        // Docker VM, heavy parallelism) — call it out explicitly so it is never
+        // read as evidence about the documentation.
+        if (error.includes("ROOKIE_SANDBOX_TIMEOUT") || error.includes("Execution timed out")) {
+            return {
+                errorMessage: error.substring(0, 200),
+                failedFunction: "n/a (sandbox timeout)",
+                documentationGap: "ENVIRONMENT",
+                reasoning:
+                    "The sandbox exceeded its time budget. This reflects machine/infrastructure " +
+                    "load (dependency install, container contention), not a documentation defect, " +
+                    "and is excluded from documentation-gap analysis.",
+                suggestedDocsFix:
+                    "No documentation change required. Re-run with lower concurrency or a longer " +
+                    "sandbox budget (ROOKIE_SANDBOX_STEP_TIMEOUT_MS).",
+                confidence: 1,
+                votes: 0,
+            };
+        }
+
         return {
             errorMessage: error.substring(0, 200),
             failedFunction: "n/a (environment)",
@@ -584,7 +648,7 @@ export class Executor {
     private async runStepInDocker(
         userCode: string,
         currentCtx: unknown,
-        opts: { requireDefaultExport?: boolean } = {},
+        opts: { requireDefaultExport?: boolean; packageOverrides?: Record<string, string> } = {},
     ): Promise<{
         success: boolean;
         result?: { ctx: unknown; result: unknown };
@@ -594,9 +658,12 @@ export class Executor {
     }> {
         // Install any third-party packages the generated code imports, so library
         // examples actually run instead of failing with MODULE_NOT_FOUND.
-        const packages = this.configService.values.sandbox.autoInstallDeps
+        const parsed = this.configService.values.sandbox.autoInstallDeps
             ? parseImportedPackages(userCode)
             : [];
+        // Apply package overrides: pin a parsed package to a specific version and
+        // force-install any extra packages the caller requires (drift experiment).
+        const packages = applyPackageOverrides(parsed, opts.packageOverrides);
         if (packages.length > 0) {
             this.logger.log(`Sandbox installing packages: ${packages.join(", ")}`);
         }
@@ -686,7 +753,13 @@ export class Executor {
      * Execute a raw JS code snippet (e.g. a documentation code example) without
      * wrapping it in a full test-suite execution. Used by the master-plan doc-examples phase.
      */
-    public async runDocExample(code: string): Promise<{
+    public async runDocExample(
+        code: string,
+        /** Version pins for this phase — the smoke phase must exercise the SAME
+         *  version as the graded code (e.g. `<pkg>@<oldVersion>` on the baseline),
+         *  not whatever npm resolves as latest. */
+        packageOverrides?: Record<string, string>,
+    ): Promise<{
         success: boolean;
         logs: string;
         error?: unknown;
@@ -694,7 +767,10 @@ export class Executor {
     }> {
         // Doc examples are top-level scripts, not export-default modules — the
         // import in the harness executes them; do not enforce the module contract.
-        const result = await this.runStepInDocker(code, {}, { requireDefaultExport: false });
+        const result = await this.runStepInDocker(code, {}, {
+            requireDefaultExport: false,
+            packageOverrides,
+        });
         return {
             success: result.success,
             logs: result.logs,

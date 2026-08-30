@@ -155,3 +155,137 @@ Deno.test("chatStructured throws after exhausting repair attempts", async () => 
         "failed validation",
     );
 });
+
+// ── empty completions (overloaded server under high concurrency) ───────────────
+
+Deno.test("an EMPTY completion is retried as transient, not 'repaired'", async () => {
+    // Regression: an overloaded model server answers HTTP 200 with an empty body.
+    // JSON.parse("") throws "Unexpected end of JSON input", which used to look
+    // like a schema violation and burned repair calls — adding load to an already
+    // overloaded backend. It must be retried with backoff instead.
+    const { openai, calls } = fakeOpenAI([{ content: "" }, { content: '{"name":"ok"}' }]);
+    const out = await chatStructured({
+        openai,
+        model: "m",
+        system: "s",
+        user: "u",
+        schema,
+        mode: "json_object",
+        maxRetries: 2,
+        retryBaseMs: 1,
+        logger: fakeLogger(),
+    });
+    assertEquals(out.name, "ok");
+    assertEquals(calls.length, 2);
+    // Crucially it RETRIED the same request: no repair turns were appended
+    // (a repair would make the 2nd call carry 4 messages: system,user,assistant,user).
+    assertEquals((calls[1].messages as unknown[]).length, 2);
+});
+
+Deno.test("a whitespace-only completion is also treated as empty", async () => {
+    const { openai, calls } = fakeOpenAI([{ content: "   \n  " }, { content: '{"name":"ok"}' }]);
+    const out = await chatStructured({
+        openai,
+        model: "m",
+        system: "s",
+        user: "u",
+        schema,
+        mode: "json_object",
+        maxRetries: 2,
+        retryBaseMs: 1,
+        logger: fakeLogger(),
+    });
+    assertEquals(out.name, "ok");
+    assertEquals((calls[1].messages as unknown[]).length, 2);
+});
+
+Deno.test("persistent empty completions surface as an empty-completion error", async () => {
+    const { openai } = fakeOpenAI([{ content: "" }]);
+    await assertRejects(
+        () =>
+            chatStructured({
+                openai,
+                model: "m",
+                system: "s",
+                user: "u",
+                schema,
+                mode: "json_object",
+                maxRetries: 1,
+                retryBaseMs: 1,
+                logger: fakeLogger(),
+            }),
+        Error,
+        "empty completion",
+    );
+});
+
+Deno.test("empty + finish_reason=length DOUBLES the token budget on retry", async () => {
+    // Reasoning models ("thinking" models) spend the output budget internally and
+    // can return an empty body with finish_reason=length. Retrying with the SAME
+    // cap fails identically, so the budget must grow.
+    const { openai, calls } = fakeOpenAI([
+        { content: "", finish_reason: "length" },
+        { content: '{"name":"ok"}' },
+    ]);
+    const out = await chatStructured({
+        openai,
+        model: "m",
+        system: "s",
+        user: "u",
+        schema,
+        mode: "json_object",
+        maxTokens: 1000,
+        maxRetries: 2,
+        retryBaseMs: 1,
+        logger: fakeLogger(),
+    });
+    assertEquals(out.name, "ok");
+    assertEquals(calls[0].max_tokens, 1000);
+    assertEquals(calls[1].max_tokens, 2000); // escalated
+});
+
+Deno.test("truncated (non-empty) JSON also escalates instead of 'repairing'", async () => {
+    const { openai, calls } = fakeOpenAI([
+        { content: '{"name":"tru', finish_reason: "length" },
+        { content: '{"name":"ok"}' },
+    ]);
+    const out = await chatStructured({
+        openai,
+        model: "m",
+        system: "s",
+        user: "u",
+        schema,
+        mode: "json_object",
+        maxTokens: 500,
+        maxRetries: 2,
+        retryBaseMs: 1,
+        logger: fakeLogger(),
+    });
+    assertEquals(out.name, "ok");
+    assertEquals(calls[1].max_tokens, 1000);
+    // Retried as a fresh request, not a repair turn.
+    assertEquals((calls[1].messages as unknown[]).length, 2);
+});
+
+Deno.test("the escalated budget is capped", async () => {
+    const { openai, calls } = fakeOpenAI([
+        { content: "", finish_reason: "length" },
+        { content: "", finish_reason: "length" },
+        { content: '{"name":"ok"}' },
+    ]);
+    await chatStructured({
+        openai,
+        model: "m",
+        system: "s",
+        user: "u",
+        schema,
+        mode: "json_object",
+        maxTokens: 1000,
+        maxTokensCap: 1500,
+        maxRetries: 3,
+        retryBaseMs: 1,
+        logger: fakeLogger(),
+    });
+    assertEquals(calls[1].max_tokens, 1500);
+    assertEquals(calls[2].max_tokens, 1500); // clamped, not 3000
+});

@@ -2,17 +2,39 @@
 /**
  * experiment-runner.ts
  *
- * Documentation-drift experiment for Dockerized projects.
+ * Documentation-drift experiment. The unit under test is an npm library and the
+ * drift axis is its VERSION. Depending on the target's runtime (SELECTION.md §7)
+ * a throwaway container may back the run, held constant across both phases:
+ *   • "pure" — no container (CLI/parser/build libraries);
+ *   • "http" — an httpbin container (HTTP clients; ctx.baseUrl);
+ *   • "db"   — a Postgres container (ORMs; ctx.connectionString).
  *
- *  Phase 1 — Index:      Start OLD container → crawl swagger URL → Rookie project
- *  Phase 2 — Baseline:   OLD docs + OLD API  → Master Planner (generates & runs goals)
- *  Phase 3 — Experiment: OLD docs + NEW API  → Master Planner (same project, new container)
- *  Phase 4 — Report:     diff structured summaries, save JSON
+ *  Phase 1 — Index:      fetch OLD-version docs → Rookie project
+ *  Phase 2 — Baseline:   OLD docs × <pkg>@oldVersion → Master Planner (gen + run goals)
+ *  Phase 3 — Experiment: same goals × <pkg>@newVersion (planner/rerun)
+ *  Phase 4 — Report:     diff structured summaries, save JSON + full report bundle
+ *
+ * Crash resilience: after each phase a checkpoint
+ * (`experiment-<config>-checkpoint.json`) records the ids produced so far
+ * (projectId, baseline/experiment master-plan ids). On the next invocation the
+ * runner AUTOMATICALLY resumes from the checkpoint — completed phases are
+ * skipped and their results re-fetched from Rookie's database. The checkpoint
+ * is deleted on success. `--fresh` discards it and starts over.
+ *
+ * The experiment phase re-executes the baseline's generated programs VERBATIM
+ * (freeze) against the new version, so drift is measured on identical code and
+ * the agent cannot regenerate around the change. `--no-freeze` restores the old
+ * regenerate-per-version behaviour. `--ablation` adds a no-docs arm (rerun the
+ * goals without documentation) to measure the documentation's value.
  *
  * Usage:
- *   deno run --allow-all scripts/experiment-runner.ts
- *   deno run --allow-all scripts/experiment-runner.ts --config gitea
- *   deno run --allow-all scripts/experiment-runner.ts --config gitea --verbose
+ *   deno run --allow-all scripts/experiment-runner.ts --config execa
+ *   deno run --allow-all scripts/experiment-runner.ts --config typeorm --verbose
+ *   deno run --allow-all scripts/experiment-runner.ts --config execa --ablation
+ *   deno run --allow-all scripts/experiment-runner.ts --config execa --no-freeze
+ *   deno run --allow-all scripts/experiment-runner.ts --config execa --fresh
+ *   deno run --allow-all scripts/experiment-runner.ts --config execa \
+ *       --project-id <id> --baseline-id <masterPlanId>   # manual recovery
  *   ROOKIE_URL=http://localhost:3000 deno run --allow-all scripts/experiment-runner.ts
  */
 
@@ -26,6 +48,14 @@ import {
     type HealthConfig,
     type PlannerConfig,
 } from "./experiments/targets.ts";
+import {
+    CHANGELOG_SEEDS,
+    driftEvidenceSignals,
+    expectedApiSymbols,
+    renderChangelogSeed,
+    scoreBreakingChanges,
+} from "../src/eval/changelogSeed.ts";
+import { analyzeStepDrift, type GoalSteps } from "../src/eval/stepDrift.ts";
 
 const isTTY = Deno.stdout.isTerminal();
 const c = isTTY
@@ -79,8 +109,17 @@ const arg = (k: string): string | null => {
 };
 const flag = (k: string): boolean => Deno.args.includes(k);
 
-const configName = arg("--config") ?? "gitea";
+const configName = arg("--config") ?? "execa";
 const VERBOSE = flag("--verbose") || flag("-v");
+/** Discard any checkpoint and start the experiment from scratch. */
+const FRESH = flag("--fresh");
+/** Manual-recovery overrides (seed the checkpoint with known-good ids). */
+const OVERRIDE_PROJECT_ID = arg("--project-id");
+const OVERRIDE_BASELINE_ID = arg("--baseline-id");
+/** Regenerate the experiment phase instead of freezing baseline code (old behaviour). */
+const NO_FREEZE = flag("--no-freeze");
+/** Add a docs-ablation arm: rerun the baseline goals WITHOUT docs to measure doc value. */
+const ABLATION = flag("--ablation");
 
 if (flag("--list")) {
     console.log("Available experiment targets:\n");
@@ -90,7 +129,11 @@ if (flag("--list")) {
             : t.selectionRank
             ? ` [sample, rank ${t.selectionRank}]`
             : "";
-        console.log(`  ${key.padEnd(14)} ${t.oldImage} -> ${t.newImage}${mark}`);
+        const excl = t.excluded ? ` [EXCLUDED — ${t.excluded}]` : "";
+        const backing = t.runtime === "pure" ? "pure" : `${t.runtime} · ${t.image}`;
+        const drift =
+            `${t.library.pkg} ${t.library.oldVersion} -> ${t.library.newVersion} (${backing})`;
+        console.log(`  ${key.padEnd(14)} ${drift}${mark}${excl}`);
     }
     Deno.exit(0);
 }
@@ -101,6 +144,12 @@ if (!cfg) {
         `Unknown config "${configName}". Available: ${Object.keys(EXPERIMENTS).join(", ")}`,
     );
     Deno.exit(1);
+}
+if (cfg.excluded) {
+    console.error(
+        `⚠ "${configName}" is excluded from the sample (${cfg.excluded}) — ` +
+            `running it manually for investigation only; its results are NOT part of the study.`,
+    );
 }
 
 const ROOKIE_URL = (Deno.env.get("ROOKIE_URL") ?? "http://localhost:3000").replace(/\/$/, "");
@@ -129,22 +178,51 @@ function fill(value: unknown, vars: Record<string, unknown>): unknown {
     return value;
 }
 
-function banner(title: string, width = 66): void {
-    const line = "═".repeat(width);
-    const pad = Math.max(0, Math.floor((width - title.length - 2) / 2));
-    console.log(`\n${bold(line)}`);
-    console.log(
-        bold(
-            `${"═".repeat(pad)} ${title} ${
-                "═".repeat(Math.max(0, width - pad - title.length - 2))
-            }`,
-        ),
-    );
-    console.log(bold(line));
+// Visual kit — calm, stream-friendly presentation: a rounded header card,
+// numbered phase brackets (┌─ … ╰─) with elapsed times, and a results card.
+const W = 64;
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
+const visLen = (s: string) => stripAnsi(s).length;
+const padVis = (s: string, w: number) => s + " ".repeat(Math.max(0, w - visLen(s)));
+
+function fmtDur(ms: number): string {
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+    return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 }
 
-function section(title: string): void {
-    console.log(`\n${bold(cyan("┌─ " + title))}`);
+/** Rounded card with a title and aligned label/value rows. */
+function card(title: string, rows: [string, string][], width = W): void {
+    const inner = width - 2;
+    console.log(`\n${gray("╭" + "─".repeat(inner) + "╮")}`);
+    console.log(`${gray("│")} ${padVis(bold(title), inner - 2)} ${gray("│")}`);
+    if (rows.length > 0) {
+        console.log(`${gray("│")}${" ".repeat(inner)}${gray("│")}`);
+        const lw = Math.max(...rows.map(([l]) => l.length));
+        for (const [label, value] of rows) {
+            const line = `${dim(label.padEnd(lw))}  ${value}`;
+            console.log(`${gray("│")} ${padVis(line, inner - 2)} ${gray("│")}`);
+        }
+    }
+    console.log(`${gray("╰" + "─".repeat(inner) + "╯")}`);
+}
+
+let phaseStartedAt = 0;
+
+/** Open a numbered phase bracket; content lines keep the `│` gutter. */
+function phase(n: number, total: number, title: string, note?: string): void {
+    phaseStartedAt = Date.now();
+    const label = ` ${bold(cyan(`Phase ${n}/${total}`))} ${gray("·")} ${bold(title)}` +
+        (note ? `  ${dim(note)}` : "") + " ";
+    console.log(`\n${gray("┌─")}${label}${gray("─".repeat(Math.max(2, W - visLen(label) - 2)))}`);
+}
+
+/** Close the current phase bracket with a status note and elapsed time. */
+function phaseEnd(note = "done", ok = true): void {
+    const icon = ok ? green("✓") : yell("⚠");
+    console.log(`${gray("╰─")} ${icon} ${note} ${dim(`· ${fmtDur(Date.now() - phaseStartedAt)}`)}`);
 }
 
 function writeStdout(s: string): void {
@@ -189,12 +267,26 @@ async function dockerStart(image: string, container: ContainerConfig): Promise<v
     if (code !== 0) throw new Error(`Failed to start ${image}: ${stderr}`);
 }
 
+/** True when a TCP socket to host:port opens — the readiness probe for DB engines. */
+async function tcpOpen(hostPort: string): Promise<boolean> {
+    const [host, portStr] = hostPort.split(":");
+    try {
+        const conn = await Deno.connect({ hostname: host || "localhost", port: Number(portStr) });
+        conn.close();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 async function waitHealthy(healthCfg: HealthConfig, vars: Record<string, unknown>): Promise<void> {
-    const url = fill(healthCfg.url, vars) as string;
+    const target = fill(healthCfg.url, vars) as string;
     for (let i = 1; i <= healthCfg.retries; i++) {
         try {
-            const r = await fetch(url, { signal: AbortSignal.timeout(3000) });
-            if (r.ok) {
+            const ok = healthCfg.mode === "tcp"
+                ? await tcpOpen(target)
+                : (await fetch(target, { signal: AbortSignal.timeout(3000) })).ok;
+            if (ok) {
                 writeStdout("\r" + " ".repeat(60) + "\r");
                 console.log(`${gray("│")}  ${green("✓")} container healthy on :${vars.hostPort}`);
                 return;
@@ -222,194 +314,6 @@ async function rookieCall<T>(method: string, path: string, body?: unknown): Prom
     return res.json() as Promise<T>;
 }
 
-interface JobView {
-    id: string;
-    status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
-    result?: Record<string, unknown>;
-    error?: string;
-    progress?: string;
-}
-
-/** Poll an async job to a terminal status, returning its result payload. */
-async function pollJob(jobId: string, label: string): Promise<Record<string, unknown>> {
-    let lastProgress = "";
-    while (true) {
-        const job = await rookieCall<JobView>("GET", `/jobs/${jobId}`);
-        if (job.progress && job.progress !== lastProgress) {
-            lastProgress = job.progress;
-            console.log(`${gray("│")}       ${dim(job.progress)}`);
-        }
-        if (job.status === "SUCCEEDED") return job.result ?? {};
-        if (job.status === "FAILED" || job.status === "CANCELLED") {
-            throw new Error(
-                `${label} job ${job.status.toLowerCase()}: ${job.error ?? "(no detail)"}`,
-            );
-        }
-        await sleep(1500);
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────
-//  SWAGGER JSON → MARKDOWN
-//  Converts an OpenAPI 2.x / 3.x spec into a flat Markdown document
-//  that the RAG chunker can index (HTML crawler skips JSON responses).
-//
-//  Key difference from a naive converter: Gitea ships Swagger 2.0 where
-//  every body parameter is  { "in": "body", "schema": { "$ref": "#/definitions/Foo" } }
-//  A converter that ignores $ref leaves the RAG with zero body field info,
-//  causing the agent to loop endlessly searching for schema details.
-// ─────────────────────────────────────────────────────────────────
-
-/** Walk a JSON Pointer path like "#/definitions/Foo" inside `spec`. */
-function resolveRef(spec: Record<string, unknown>, ref: string): Record<string, unknown> | null {
-    const parts = ref.replace(/^#\//, "").split("/");
-    let node: unknown = spec;
-    for (const part of parts) {
-        if (!node || typeof node !== "object") return null;
-        node = (node as Record<string, unknown>)[part];
-    }
-    return (node as Record<string, unknown>) ?? null;
-}
-
-/** Recursively expand a schema node, resolving any $ref up to `depth` levels. */
-function expandSchema(
-    spec: Record<string, unknown>,
-    schema: Record<string, unknown>,
-    depth = 2,
-): Record<string, unknown> {
-    if (schema.$ref && typeof schema.$ref === "string") {
-        const resolved = resolveRef(spec, schema.$ref);
-        if (!resolved || depth <= 0) return resolved ?? schema;
-        return expandSchema(spec, resolved, depth - 1);
-    }
-    return schema;
-}
-
-/** Emit flat `- \`field\` \`type\` — description` lines for a schema's properties. */
-function renderSchemaProps(
-    spec: Record<string, unknown>,
-    schema: Record<string, unknown>,
-    lines: string[],
-    indent = "  ",
-): void {
-    const expanded = expandSchema(spec, schema);
-    const required = new Set<string>((expanded.required ?? []) as string[]);
-    const properties = expanded.properties as Record<string, Record<string, unknown>> | undefined;
-    if (!properties) return;
-
-    for (const [field, fieldSchema] of Object.entries(properties)) {
-        const fs = expandSchema(spec, fieldSchema, 1);
-        const type = (fs.type ?? fs.format ??
-            (fs.$ref ? (fs.$ref as string).split("/").pop() : "object")) as string;
-        const req = required.has(field) ? " *(required)*" : "";
-        const desc = fs.description ? ` — ${fs.description}` : "";
-        lines.push(`${indent}- \`${field}\` \`${type}\`${req}${desc}`);
-    }
-}
-
-function swaggerToMarkdown(spec: Record<string, unknown>): string {
-    const info = (spec.info ?? {}) as Record<string, unknown>;
-    const paths = (spec.paths ?? {}) as Record<string, Record<string, unknown>>;
-    const isV2 = typeof spec.swagger === "string" && spec.swagger.startsWith("2");
-    const servers = isV2
-        ? [{ url: (spec.basePath as string | undefined) ?? "/" }]
-        : (spec.servers ?? []) as Array<{ url: string }>;
-
-    // Group operations by first tag
-    const byTag = new Map<
-        string,
-        Array<{ method: string; path: string; op: Record<string, unknown> }>
-    >();
-    for (const [path, methods] of Object.entries(paths)) {
-        for (const [method, op] of Object.entries(methods)) {
-            if (!op || typeof op !== "object") continue;
-            const operation = op as Record<string, unknown>;
-            if (!operation.operationId) continue;
-            const tag = (operation.tags as string[] | undefined)?.[0] ?? "General";
-            if (!byTag.has(tag)) byTag.set(tag, []);
-            byTag.get(tag)!.push({ method: method.toUpperCase(), path, op: operation });
-        }
-    }
-
-    const lines: string[] = [
-        `# ${info.title ?? "API Documentation"}`,
-        `**Version:** ${info.version ?? "unknown"}`,
-        "",
-    ];
-    if (info.description) lines.push(String(info.description), "");
-    if (servers.length) lines.push(`**Base URL:** \`${servers[0].url}\``, "");
-
-    for (const [tag, ops] of [...byTag.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-        lines.push(`## ${tag}`, "");
-        for (const { method, path, op } of ops) {
-            lines.push(`### \`${method} ${path}\``);
-            if (op.summary) lines.push(`**Summary:** ${op.summary}`);
-            if (op.description) lines.push(String(op.description));
-
-            const params = (op.parameters ?? []) as Array<Record<string, unknown>>;
-
-            // ── Non-body parameters (path, query, header) ──────────────
-            const nonBody = params.filter((p) => p.in !== "body");
-            if (nonBody.length) {
-                lines.push("", "**Parameters:**");
-                for (const p of nonBody) {
-                    const req = p.required ? "*(required)*" : "*(optional)*";
-                    const type = (p.schema as Record<string, unknown> | undefined)?.type ??
-                        p.type ?? "?";
-                    lines.push(
-                        `- \`${p.name}\` (${p.in}) ${req} \`${type}\` — ${p.description ?? ""}`,
-                    );
-                }
-            }
-
-            // ── Swagger 2.0 body parameter (uses $ref into definitions) ─
-            const bodyParam = params.find((p) => p.in === "body") as
-                | Record<string, unknown>
-                | undefined;
-            if (bodyParam?.schema) {
-                const schemaNode = bodyParam.schema as Record<string, unknown>;
-                const refName = typeof schemaNode.$ref === "string"
-                    ? schemaNode.$ref.split("/").pop()
-                    : undefined;
-                lines.push("", `**Request body** (${refName ?? "object"}):`);
-                renderSchemaProps(spec, schemaNode, lines);
-            }
-
-            // ── OpenAPI 3.x requestBody ─────────────────────────────────
-            const reqBody = op.requestBody as Record<string, unknown> | undefined;
-            if (reqBody?.content) {
-                lines.push("", "**Request body:**");
-                for (
-                    const [ct, media] of Object.entries(
-                        reqBody.content as Record<string, Record<string, unknown>>,
-                    )
-                ) {
-                    lines.push(`- Content-Type: \`${ct}\``);
-                    if (media.schema) {
-                        renderSchemaProps(
-                            spec,
-                            media.schema as Record<string, unknown>,
-                            lines,
-                            "    ",
-                        );
-                    }
-                }
-            }
-
-            lines.push("", "**Responses:**");
-            for (
-                const [code, resp] of Object.entries(
-                    (op.responses ?? {}) as Record<string, Record<string, unknown>>,
-                )
-            ) {
-                lines.push(`- **${code}** — ${resp.description ?? ""}`);
-            }
-            lines.push("");
-        }
-    }
-    return lines.join("\n");
-}
-
 async function uploadFileToRookie(filename: string, content: string): Promise<{ id: string }> {
     const form = new FormData();
     form.append("file", new Blob([content], { type: "text/markdown" }), filename);
@@ -420,56 +324,46 @@ async function uploadFileToRookie(filename: string, content: string): Promise<{ 
 
 async function ingestDocs(
     docsCfg: DocsConfig,
-    image: string,
     vars: Record<string, unknown>,
 ): Promise<{ id: string; files?: unknown[] }> {
+    // The OLD-tag README + in-repo docs, fetched verbatim and uploaded as one
+    // file each — the FULL version-pinned doc set for the old library version.
     const url = fill(docsCfg.url, vars) as string;
-    const version = image.split(":")[1] ?? image;
-
-    if (docsCfg.mode === "swagger-json") {
-        console.log(`${gray("│")}  ${yell("▸")} fetching swagger JSON: ${bold(url)}`);
-        const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-        if (!res.ok) throw new Error(`Cannot fetch swagger JSON: HTTP ${res.status}`);
-
-        const spec = await res.json() as Record<string, unknown>;
-        const markdown = swaggerToMarkdown(spec);
-        const chars = markdown.length;
-        console.log(
-            `${gray("│")}  ${yell("▸")} converted to Markdown (${chars} chars, ~${
-                Math.round(chars / 4)
-            } tokens)`,
-        );
-
-        const file = await uploadFileToRookie(`${configName}-api-${version}.md`, markdown);
-        console.log(`${gray("│")}  ${yell("▸")} uploaded: ${gray(file.id)}`);
-
-        const project = await rookieCall<{ id: string; files?: unknown[] }>("POST", "/projects", {
-            projectName: `${cfg.name} API – ${version}`,
-            fileIds: [file.id],
+    const urls = [url, ...((docsCfg.extraFiles ?? []).map((u) => fill(u, vars) as string))];
+    console.log(
+        `${gray("│")}  ${yell("▸")} fetching docs (raw markdown): ${urls.length} file(s)`,
+    );
+    const pkgSlug = cfg.library.pkg.replace(/[^\w.-]/g, "_");
+    const fileIds: string[] = [];
+    let totalChars = 0;
+    for (const fileUrl of urls) {
+        const res = await fetch(fileUrl, {
+            signal: AbortSignal.timeout(20_000),
+            headers: { "User-Agent": "rookie-experiment/1.0" },
         });
-        console.log(`${gray("│")}  ${green("✓")} project created: ${bold(project.id)}`);
-        return project;
-    } else {
-        // url-crawl: delegate to Rookie's built-in HTML crawler, now an async job.
-        console.log(`${gray("│")}  ${yell("▸")} crawling (async job): ${bold(url)}`);
-        const job = await rookieCall<JobView>("POST", "/projects/from-url", {
-            projectName: `${cfg.name} API – ${version}`,
-            url,
-            maxPages: docsCfg.maxPages,
-        });
-        const result = await pollJob(job.id, "Crawl");
-        const projectId = String(result.projectId);
-        const project = await rookieCall<{ id: string; files?: unknown[] }>(
-            "GET",
-            `/projects/${projectId}`,
-        );
-        console.log(
-            `${gray("│")}  ${green("✓")} project created: ${bold(project.id)} (${
-                project.files?.length ?? "?"
-            } pages)`,
-        );
-        return project;
+        if (!res.ok) throw new Error(`Cannot fetch ${fileUrl}: HTTP ${res.status}`);
+        const markdown = await res.text();
+        if (markdown.length < 100) {
+            throw new Error(`Docs file too small (${markdown.length} B): ${fileUrl}`);
+        }
+        totalChars += markdown.length;
+        const base = fileUrl.split("/").pop()?.replace(/[^\w.-]/g, "_") || "doc.md";
+        const fname = `${configName}-${pkgSlug}-${base}`;
+        const file = await uploadFileToRookie(fname, markdown);
+        fileIds.push(file.id);
+        console.log(`${gray("│")}    ${dim(`${base} — ${markdown.length} B`)}`);
     }
+    console.log(
+        `${gray("│")}  ${yell("▸")} uploaded ${fileIds.length} file(s), ${totalChars} chars (~${
+            Math.round(totalChars / 4)
+        } tokens)`,
+    );
+    const project = await rookieCall<{ id: string; files?: unknown[] }>("POST", "/projects", {
+        projectName: `${cfg.name} docs – ${cfg.library.oldVersion}`,
+        fileIds,
+    });
+    console.log(`${gray("│")}  ${green("✓")} project created: ${bold(project.id)}`);
+    return project;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -624,6 +518,13 @@ async function runMasterPlanner(
     vars: Record<string, unknown>,
     /** When set, calls /planner/rerun instead of /planner/run — reuses goals from this master plan. */
     rerunFromMasterPlanId?: string,
+    /** npm install pins for this phase (library drift: `<pkg>@<version>`). */
+    packageOverrides?: Record<string, string>,
+    /** Changelog-drift seed — steers goal generation on the baseline run only. */
+    changelogSeed?: string,
+    /** Methodology levers (see THREATS): freeze re-execution, docs ablation, and
+     *  the documented API symbols goals should exercise (faithfulness). */
+    extra?: { freeze?: boolean; withoutDocs?: boolean; expectedApis?: string[] },
 ): Promise<MasterPlanRun> {
     const context = fill(plannerCfg.initialContext, vars) as string;
 
@@ -634,8 +535,28 @@ async function runMasterPlanner(
     const agent = createAgentRenderer();
 
     const streamBody = rerunFromMasterPlanId
-        ? { masterPlanId: rerunFromMasterPlanId, projectId, initialContext: context }
-        : { projectId, maxGoals: plannerCfg.maxGoals, initialContext: context };
+        ? {
+            masterPlanId: rerunFromMasterPlanId,
+            projectId,
+            initialContext: context,
+            packageOverrides,
+            freeze: extra?.freeze,
+            withoutDocs: extra?.withoutDocs,
+            expectedApis: extra?.expectedApis,
+            // A frozen rerun scores ONLY the baseline's verbatim programs, so the
+            // doc-example smoke phase carries no signal there — skipping it saves
+            // up to 10 containers + installs per target.
+            skipDocExamples: extra?.freeze === true,
+        }
+        : {
+            projectId,
+            maxGoals: plannerCfg.maxGoals,
+            initialContext: context,
+            packageOverrides,
+            changelogSeed,
+            withoutDocs: extra?.withoutDocs,
+            expectedApis: extra?.expectedApis,
+        };
     const streamPath = rerunFromMasterPlanId ? "/planner/rerun" : "/planner/run";
 
     for await (const event of ndJsonStream(`${ROOKIE_URL}${streamPath}`, streamBody)) {
@@ -708,15 +629,14 @@ async function runMasterPlanner(
                 break;
 
             case "COMPLETE":
-                masterPlan = event.result as Record<string, unknown>;
-                console.log(`${gray("│")}`);
-                console.log(
-                    `${gray("│")}  ${green("✓")} master plan complete  ${
-                        (event.result as Record<string, unknown>)?._id
-                            ? gray(String((event.result as Record<string, unknown>)._id))
-                            : ""
-                    }`,
-                );
+                {
+                    masterPlan = event.result as Record<string, unknown>;
+                    const id = planId(masterPlan);
+                    console.log(`${gray("│")}`);
+                    console.log(
+                        `${gray("│")}  ${green("✓")} master plan complete  ${id ? gray(id) : ""}`,
+                    );
+                }
                 break;
 
             case "ERROR":
@@ -726,6 +646,188 @@ async function runMasterPlanner(
     }
 
     return { masterPlan, goals, breakdown };
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  CHECKPOINT / RESUME
+//  Written after every completed phase so a crash mid-experiment loses at
+//  most the phase that was in flight. Auto-loaded on the next run; --fresh
+//  discards it. Deleted after the final report is written.
+// ─────────────────────────────────────────────────────────────────
+interface Checkpoint {
+    config: string;
+    /** Container image (constant across phases); undefined for pure targets. */
+    image?: string;
+    updatedAt: string;
+    projectId?: string;
+    baselineMasterPlanId?: string;
+    experimentMasterPlanId?: string;
+}
+
+const CHECKPOINT_FILE = `${Deno.cwd()}/experiment-${configName}-checkpoint.json`;
+
+let warnedCheckpointMismatch = false;
+
+function loadCheckpoint(): Checkpoint | null {
+    try {
+        const ckpt = JSON.parse(Deno.readTextFileSync(CHECKPOINT_FILE)) as Checkpoint;
+        if (ckpt.image !== cfg.image) {
+            if (!warnedCheckpointMismatch) {
+                warnedCheckpointMismatch = true;
+                console.log(
+                    `${yell("⚠")} checkpoint ${CHECKPOINT_FILE} was made for image ` +
+                        `${ckpt.image ?? "(pure)"}, but the config now says ` +
+                        `${cfg.image ?? "(pure)"} — ignoring it (starting fresh).`,
+                );
+            }
+            return null;
+        }
+        return ckpt;
+    } catch {
+        return null;
+    }
+}
+
+function saveCheckpoint(patch: Partial<Checkpoint>): void {
+    const base: Checkpoint = loadCheckpoint() ?? {
+        config: configName,
+        image: cfg.image,
+        updatedAt: "",
+    };
+    const next = { ...base, ...patch, updatedAt: new Date().toISOString() };
+    Deno.writeTextFileSync(CHECKPOINT_FILE, JSON.stringify(next, null, 2));
+}
+
+function clearCheckpoint(): void {
+    try {
+        Deno.removeSync(CHECKPOINT_FILE);
+    } catch { /* nothing to clear */ }
+}
+
+/** True when the checkpointed project still exists server-side. */
+async function projectExists(id: string): Promise<boolean> {
+    try {
+        await rookieCall("GET", `/projects/${id}`);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Rebuild a MasterPlanRun from a saved MASTER_PLAN report so a completed
+ * phase can be skipped on resume. Returns null when the report is missing
+ * or not a master plan (the phase then re-runs normally).
+ */
+/**
+ * Master-plan id, tolerant of the two shapes it arrives in: the streamed
+ * COMPLETE result carries Mongo's `_id`, but a report fetched from the
+ * `/reports` API is serialised with `id`. Reading only `_id` silently loses the
+ * id on the resume path — which drops Phase 3 into generating FRESH goals
+ * instead of re-running the baseline's, making the two phases incomparable.
+ */
+const planId = (p: Record<string, unknown> | null | undefined): string | undefined =>
+    (p?._id ?? p?.id) as string | undefined;
+
+async function fetchMasterPlanRun(masterPlanId: string): Promise<MasterPlanRun | null> {
+    try {
+        const plan = await rookieCall<Record<string, unknown>>("GET", `/reports/${masterPlanId}`);
+        if (plan.type !== "MASTER_PLAN") return null;
+        const summary = plan.structuredSummary as Record<string, unknown> | undefined;
+        const breakdown = ((summary?.goalsBreakdown ?? []) as Record<string, unknown>[])
+            .map((g) => ({
+                goal: String(g.goal ?? ""),
+                status: String(g.status ?? "FAILED"),
+                reportId: (g.reportId as string | null) ?? null,
+            }));
+        return {
+            masterPlan: plan,
+            goals: (plan.masterPlanGoals ?? []) as string[],
+            breakdown,
+        };
+    } catch {
+        return null;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  FULL REPORT DOWNLOAD
+//  Persists the complete master-plan documents AND every per-goal report
+//  (masterPlanReports) to disk, so the experiment artefacts survive
+//  independently of the Rookie database.
+// ─────────────────────────────────────────────────────────────────
+async function downloadFullReports(
+    baselineId: string | null,
+    experimentId: string | null,
+    outBase: string,
+): Promise<{
+    file: string | null;
+    goalReports: number;
+    /** Fetched plans + per-goal reports, reused for step-level drift analysis. */
+    plans: Record<string, Record<string, unknown>>;
+    reports: Record<string, unknown>;
+}> {
+    const bundle: Record<string, unknown> = {};
+    const goalReports: Record<string, unknown> = {};
+    const plans: Record<string, Record<string, unknown>> = {};
+    let fetched = 0;
+
+    for (const [key, id] of [["baseline", baselineId], ["experiment", experimentId]] as const) {
+        if (!id) continue;
+        try {
+            const plan = await rookieCall<Record<string, unknown>>("GET", `/reports/${id}`);
+            bundle[key] = plan;
+            plans[key] = plan;
+            for (const rid of (plan.masterPlanReports ?? []) as string[]) {
+                if (rid in goalReports) continue;
+                try {
+                    goalReports[rid] = await rookieCall("GET", `/reports/${rid}`);
+                    fetched++;
+                } catch {
+                    goalReports[rid] = { error: "failed to fetch" };
+                }
+            }
+        } catch {
+            console.log(`${gray("│")}  ${yell("⚠")} could not fetch full report ${id}`);
+        }
+    }
+    if (Object.keys(bundle).length === 0) {
+        return { file: null, goalReports: 0, plans, reports: goalReports };
+    }
+
+    bundle.goalReports = goalReports;
+    const file = `${outBase}-full-reports.json`;
+    Deno.writeTextFileSync(file, JSON.stringify(bundle, null, 2));
+    return { file, goalReports: fetched, plans, reports: goalReports };
+}
+
+/**
+ * Reshape a master plan + its per-goal reports into the goal→steps structure the
+ * step-level drift analysis consumes. Each step is one generated program.
+ */
+function toGoalSteps(
+    plan: Record<string, unknown> | undefined,
+    reports: Record<string, unknown>,
+): GoalSteps[] {
+    const summary = plan?.structuredSummary as Record<string, unknown> | undefined;
+    const breakdown = (summary?.goalsBreakdown ?? []) as Record<string, unknown>[];
+    return breakdown.map((g) => {
+        const rep = reports[String(g.reportId)] as Record<string, unknown> | undefined;
+        const steps = (rep?.steps ?? []) as Record<string, unknown>[];
+        return {
+            goal: String(g.goal ?? ""),
+            steps: steps.map((s) => {
+                const fa = s.failureAnalysis as Record<string, unknown> | undefined;
+                return {
+                    stepIndex: Number(s.stepIndex ?? 0),
+                    status: String(s.status ?? "FAILED"),
+                    description: String(s.stepDescription ?? ""),
+                    evidence: [s.error, fa?.failedFunction, fa?.reasoning, fa?.suggestedDocsFix]
+                        .filter(Boolean).join(" ").slice(0, 1500),
+                };
+            }),
+        };
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -815,14 +917,18 @@ async function fetchDocsPatch(
 // ─────────────────────────────────────────────────────────────────
 //  FINAL REPORT PRINT
 // ─────────────────────────────────────────────────────────────────
-function printFinalSummary(report: Record<string, unknown>): void {
+function printFinalSummary(report: Record<string, unknown>, totalMs?: number): void {
     const { meta, baseline, experiment, drift, docsPatch } = report as {
         meta: {
             project: string;
-            oldImage: string;
-            newImage: string;
+            library: string;
+            oldVersion: string;
+            newVersion: string;
+            runtime: string;
+            image?: string | null;
             projectId: string;
             outputFile: string;
+            fullReportsFile?: string | null;
         };
         baseline: { breakdown: GoalResult[]; structuredSummary: Record<string, unknown> | null };
         experiment: { breakdown: GoalResult[]; structuredSummary: Record<string, unknown> | null };
@@ -838,7 +944,6 @@ function printFinalSummary(report: Record<string, unknown>): void {
         };
     };
 
-    const W = 66;
     const passOf = (b: GoalResult[]) => b.filter((r) => r.status === "SUCCESS").length;
     const partialOf = (b: GoalResult[]) => b.filter((r) => r.status === "PARTIAL_FAILURE").length;
     const passB = passOf(baseline.breakdown);
@@ -846,42 +951,50 @@ function printFinalSummary(report: Record<string, unknown>): void {
     const partB = partialOf(baseline.breakdown);
     const partE = partialOf(experiment.breakdown);
     const n = Math.max(baseline.breakdown.length, experiment.breakdown.length);
+    const bar = (pass: number, total: number, width = 12) => {
+        const filled = total === 0 ? 0 : Math.round((pass / total) * width);
+        return green("█".repeat(filled)) + gray("░".repeat(width - filled));
+    };
 
-    banner(`EXPERIMENT RESULTS — ${meta.project}`, W);
-    console.log(`  ${bold("Old image:")} ${meta.oldImage}`);
-    console.log(`  ${bold("New image:")} ${meta.newImage}`);
-    console.log(`  ${bold("Project: ")} ${meta.projectId}`);
-    console.log(`  ${bold("Saved:   ")} ${meta.outputFile}`);
-    console.log(`\n${bold("─".repeat(W))}`);
+    card(`Results · ${meta.project}`, [
+        [
+            "Library",
+            `${meta.library} ${meta.oldVersion} ${gray("→")} ${meta.newVersion}` +
+            (meta.image ? gray(`  (${meta.runtime} · ${meta.image})`) : gray("  (pure)")),
+        ],
+        ["Report", meta.outputFile],
+        ...(meta.fullReportsFile ? [["Bundle", meta.fullReportsFile] as [string, string]] : []),
+        ...(totalMs !== undefined ? [["Duration", fmtDur(totalMs)] as [string, string]] : []),
+    ]);
+
+    console.log(`\n  ${bold("Goal pass rate")}`);
     console.log(
-        `  Baseline   (old docs + old API):  ${bold(green(`${passB}/${n}`))} passed${
-            partB ? yell(`  (+${partB} partial)`) : ""
-        }`,
+        `    ${dim("baseline  ")}  ${bar(passB, n)}  ${bold(green(`${passB}/${n}`))}` +
+            (partB ? yell(`  +${partB} partial`) : ""),
     );
     console.log(
-        `  Experiment (old docs + new API):  ${
+        `    ${dim("experiment")}  ${bar(passE, n)}  ${
             bold(passE >= passB ? green(`${passE}/${n}`) : red(`${passE}/${n}`))
-        } passed${partE ? yell(`  (+${partE} partial)`) : ""}`,
+        }` + (partE ? yell(`  +${partE} partial`) : ""),
     );
-    console.log(bold("─".repeat(W)));
 
     if (drift.regressions.length === 0) {
-        console.log(`\n  ${green("✓")}  No regressions — documentation stable across versions.`);
+        console.log(`\n  ${green("✓")} No regressions — documentation stable across versions.`);
     } else {
         console.log(
-            `\n  ${red("⚠")}  ${
+            `\n  ${red("⚠")} ${
                 bold(red(`${drift.regressions.length} regression(s)`))
-            } — documentation drift detected:`,
+            } — documentation drift detected`,
         );
         for (const r of drift.regressions) {
-            console.log(`\n    ${red("•")} ${bold(r.goal)}`);
-            console.log(`      baseline → ${green("SUCCESS")}   experiment → ${red(r.experiment)}`);
+            console.log(`    ${red("•")} ${bold(r.goal)}`);
+            console.log(`      ${green("SUCCESS")} ${gray("→")} ${red(r.experiment)}`);
         }
     }
 
     if (drift.improvements.length > 0) {
         console.log(
-            `\n  ${cyan("↑")}  ${drift.improvements.length} improvement(s) in new version:`,
+            `\n  ${cyan("↑")} ${drift.improvements.length} improvement(s) in new version`,
         );
         drift.improvements.forEach((r) => console.log(`    ${cyan("•")} ${r.goal}`));
     }
@@ -939,90 +1052,244 @@ function printFinalSummary(report: Record<string, unknown>): void {
         }
     }
 
-    console.log(`\n${bold("═".repeat(W))}\n`);
+    console.log(`\n${gray("─".repeat(W))}`);
 }
-
-// ─────────────────────────────────────────────────────────────────
-//  GITEA SETUP HELPER  (creates admin user + API token via docker exec)
-// ─────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────
 //  MAIN
 // ─────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
-    // docsVersion = "major.minor" extracted from the old image tag
-    const imageVersion = cfg.oldImage.split(":")[1] ?? "";
-    const docsVersion = imageVersion.split(".").slice(0, 2).join(".");
-    // {oldTag} = full old image tag (e.g. "2.9.3", "v2.11");
-    // {docsMajor} = leading version segment (e.g. "29" for nextcloud:29-apache).
-    const oldTag = imageVersion;
-    const docsMajor = imageVersion.replace(/^v/, "").split(/[.-]/)[0];
+    // The only template var is the container's host port (used by http/db ctx).
+    // Pure targets have no container, so {hostPort} is simply unused.
     const vars: Record<string, unknown> = {
-        hostPort: cfg.container.hostPort,
-        docsVersion,
-        oldTag,
-        docsMajor,
+        hostPort: cfg.container?.hostPort ?? "",
     };
 
-    banner(`Experiment: ${cfg.name}  (${configName})`);
-    console.log(`  ${bold("Old:")}    ${cfg.oldImage}`);
-    console.log(`  ${bold("New:")}    ${cfg.newImage}`);
-    console.log(`  ${bold("Rookie:")} ${ROOKIE_URL}`);
-    console.log(`  ${bold("Verbose:")} ${VERBOSE}`);
+    const t0 = Date.now();
+
+    // ── Resume state ────────────────────────────────────────────────
+    if (FRESH) clearCheckpoint();
+    if (OVERRIDE_PROJECT_ID) saveCheckpoint({ projectId: OVERRIDE_PROJECT_ID });
+    if (OVERRIDE_BASELINE_ID) saveCheckpoint({ baselineMasterPlanId: OVERRIDE_BASELINE_ID });
+    const ckpt = loadCheckpoint();
+    const ckptDone = ckpt
+        ? [
+            ckpt.projectId && "index",
+            ckpt.baselineMasterPlanId && "baseline",
+            ckpt.experimentMasterPlanId && "experiment",
+        ].filter(Boolean).join(", ")
+        : "";
+
+    card(`Rookie · Documentation Drift — ${cfg.name}`, [
+        ["Config", configName],
+        [
+            "Library",
+            `${cfg.library.pkg} ${cfg.library.oldVersion} ${gray("→")} ${cfg.library.newVersion}`,
+        ],
+        ["Runtime", cfg.image ? `${cfg.runtime} · ${cfg.image}` : "pure (no container)"],
+        ["Rookie", ROOKIE_URL],
+        ...(VERBOSE ? [["Verbose", "on"] as [string, string]] : []),
+        ...(ckpt
+            ? [[
+                "Resume",
+                `${green("✓")} checkpoint ${dim(`(${ckptDone || "empty"} · --fresh to discard)`)}`,
+            ] as [string, string]]
+            : []),
+    ]);
 
     // ── Phase 1: index docs ─────────────────────────────────────────
-    // If the docs URL is external (not localhost) we skip starting the container —
-    // the external docs site is independent of which Docker image we test against.
-    const resolvedDocsUrl = fill(cfg.docs.url, vars) as string;
-    const externalDocs = !resolvedDocsUrl.includes("localhost") &&
-        !resolvedDocsUrl.includes("127.0.0.1");
-
-    section(`Phase 1/3 — Indexing documentation  (${externalDocs ? "external" : "container"})`);
-    if (!externalDocs) {
-        await dockerStart(cfg.oldImage, cfg.container);
-        await waitHealthy(cfg.health, vars);
+    // Docs are version-pinned raw markdown fetched from GitHub, independent of
+    // the runtime container — no container is needed to index them.
+    phase(1, 4, "Indexing documentation", "version-pinned raw markdown");
+    let project: { id: string; files?: unknown[] };
+    let indexResumed = false;
+    if (ckpt?.projectId && await projectExists(ckpt.projectId)) {
+        project = { id: ckpt.projectId };
+        indexResumed = true;
+        console.log(`${gray("│")}  ${green("✓")} resumed — reusing project ${bold(project.id)}`);
+    } else {
+        if (ckpt?.projectId) {
+            console.log(
+                `${gray("│")}  ${
+                    yell("⚠")
+                } checkpointed project ${ckpt.projectId} no longer exists — re-indexing`,
+            );
+        }
+        project = await ingestDocs(cfg.docs, vars);
+        saveCheckpoint({ projectId: project.id });
     }
-    const project = await ingestDocs(cfg.docs, cfg.oldImage, vars);
-    if (!externalDocs) await dockerStop(cfg.container.name);
+    phaseEnd(indexResumed ? "resumed from checkpoint" : `project ${project.id}`);
 
-    // ── Phase 2: baseline — OLD docs + OLD API ──────────────────────
-    section("Phase 2/3 — Baseline: OLD docs × OLD API");
-    await dockerStart(cfg.oldImage, cfg.container);
-    await waitHealthy(cfg.health, vars);
-    if (cfg.setup) Object.assign(vars, await cfg.setup(cfg.container.name));
-    const { masterPlan: bPlan, goals: bGoals, breakdown: bBreakdown } = await runMasterPlanner(
-        project.id,
-        cfg.planner,
-        vars,
+    // Start/stop the runtime container (http/db) around a phase; pure targets
+    // have no container, so these are no-ops.
+    const startBacking = async (): Promise<void> => {
+        if (!cfg.container || !cfg.image) return;
+        await dockerStart(cfg.image, cfg.container);
+        await waitHealthy(cfg.health!, vars);
+    };
+    const stopBacking = async (): Promise<void> => {
+        if (cfg.container) await dockerStop(cfg.container.name);
+    };
+    // Library drift: pin `<pkg>@<version>` for the phase; force-install peer
+    // packages at latest in both phases so only the library version varies.
+    const libOverrides = (version: string): Record<string, string> => {
+        const o: Record<string, string> = { [cfg.library.pkg]: version };
+        for (const p of cfg.library.extraPackages ?? []) o[p] = "latest";
+        // Family peers must move WITH the library (see LibraryConfig.versionedExtras).
+        for (const p of cfg.library.versionedExtras ?? []) o[p] = version;
+        return o;
+    };
+
+    // ── Phase 2: baseline — OLD docs × OLD library ──────────────────
+    phase(2, 4, "Baseline", "old docs × old library");
+    console.log(
+        `${gray("│")}  ${
+            dim(
+                `library under test: ${cfg.library.pkg} ` +
+                    `${cfg.library.oldVersion} → ${cfg.library.newVersion}`,
+            )
+        }`,
     );
-    await dockerStop(cfg.container.name);
+    // Changelog-drift seed: steers goal generation toward documented breaking
+    // changes (baseline run only); also the golden dataset for scoring detection.
+    const seed = CHANGELOG_SEEDS[configName];
+    // Documented API symbols goals should exercise — drives the docs-faithfulness
+    // (dodge) check so an agent that routes around the documented API is flagged.
+    const expectedApis = seed ? expectedApiSymbols(seed) : undefined;
+    if (seed) {
+        console.log(
+            `${gray("│")}  ${
+                dim(`changelog seed: ${seed.breakingChanges.length} breaking changes`)
+            }`,
+        );
+        if (expectedApis && expectedApis.length > 0) {
+            console.log(
+                `${gray("│")}  ${dim(`expected documented APIs: ${expectedApis.join(", ")}`)}`,
+            );
+        }
+    }
+
+    let baselineRun: MasterPlanRun | null = null;
+    if (ckpt?.baselineMasterPlanId) {
+        baselineRun = await fetchMasterPlanRun(ckpt.baselineMasterPlanId);
+        if (baselineRun) {
+            console.log(
+                `${gray("│")}  ${green("✓")} resumed — reusing baseline master plan ` +
+                    `${bold(ckpt.baselineMasterPlanId)} (${baselineRun.goals.length} goals)`,
+            );
+        } else {
+            console.log(
+                `${gray("│")}  ${
+                    yell("⚠")
+                } checkpointed baseline ${ckpt.baselineMasterPlanId} not found — re-running`,
+            );
+        }
+    }
+
+    if (!baselineRun) {
+        await startBacking();
+        baselineRun = await runMasterPlanner(
+            project.id,
+            cfg.planner,
+            vars,
+            undefined,
+            libOverrides(cfg.library.oldVersion),
+            renderChangelogSeed(seed),
+            { expectedApis },
+        );
+        await stopBacking();
+        const bId = planId(baselineRun.masterPlan) ?? null;
+        if (bId) saveCheckpoint({ baselineMasterPlanId: bId });
+    }
+    const { masterPlan: bPlan, goals: bGoals, breakdown: bBreakdown } = baselineRun;
+    const passCount = (b: GoalResult[]) => b.filter((r) => r.status === "SUCCESS").length;
+    phaseEnd(`${passCount(bBreakdown)}/${bBreakdown.length} goals passed`);
 
     // ── Phase 3: experiment — OLD docs + NEW API ────────────────────
-    // Reuses the goals generated in Phase 2 via /planner/rerun so the two runs
-    // are directly comparable (same goals, same project, different API version).
-    const baselineMasterPlanId = (bPlan?._id as string | undefined) ?? null;
-    section("Phase 3/3 — Experiment: OLD docs × NEW API");
-    if (baselineMasterPlanId) {
-        console.log(
-            `${gray("│")}  ${dim(`reusing goals from master plan ${baselineMasterPlanId}`)}`,
-        );
-    } else {
-        console.log(
-            `${gray("│")}  ${yell("⚠")} baseline master plan ID not found — generating fresh goals`,
-        );
+    // By default the baseline's generated programs are re-executed VERBATIM
+    // (freeze) against the new version — drift is measured on identical code and
+    // the agent cannot regenerate around the change. `--no-freeze` restores the
+    // old behaviour (regenerate code for the new version).
+    const freeze = !NO_FREEZE;
+    const baselineMasterPlanId = planId(bPlan) ?? null;
+    phase(3, 4, "Experiment", freeze ? "frozen code × new library" : "old docs × new library");
+    let experimentRun: MasterPlanRun | null = null;
+    if (ckpt?.experimentMasterPlanId) {
+        experimentRun = await fetchMasterPlanRun(ckpt.experimentMasterPlanId);
+        if (experimentRun) {
+            console.log(
+                `${gray("│")}  ${green("✓")} resumed — reusing experiment master plan ` +
+                    `${bold(ckpt.experimentMasterPlanId)}`,
+            );
+        } else {
+            console.log(
+                `${gray("│")}  ${
+                    yell("⚠")
+                } checkpointed experiment run ${ckpt.experimentMasterPlanId} not found — re-running`,
+            );
+        }
     }
-    await dockerStart(cfg.newImage, cfg.container);
-    await waitHealthy(cfg.health, vars);
-    if (cfg.setup) Object.assign(vars, await cfg.setup(cfg.container.name));
-    const { masterPlan: ePlan, goals: eGoals, breakdown: eBreakdown } = await runMasterPlanner(
-        project.id,
-        cfg.planner,
-        vars,
-        baselineMasterPlanId ?? undefined,
-    );
-    await dockerStop(cfg.container.name);
+    if (!experimentRun) {
+        if (baselineMasterPlanId) {
+            console.log(
+                `${gray("│")}  ${dim(`reusing goals from master plan ${baselineMasterPlanId}`)}`,
+            );
+        } else {
+            console.log(
+                `${gray("│")}  ${
+                    yell("⚠")
+                } baseline master plan ID not found — generating fresh goals`,
+            );
+        }
+        if (freeze && baselineMasterPlanId) {
+            console.log(
+                `${gray("│")}  ${
+                    dim("freeze: re-executing baseline programs verbatim (no regeneration)")
+                }`,
+            );
+        }
+        await startBacking();
+        experimentRun = await runMasterPlanner(
+            project.id,
+            cfg.planner,
+            vars,
+            baselineMasterPlanId ?? undefined,
+            libOverrides(cfg.library.newVersion),
+            undefined,
+            { freeze: freeze && !!baselineMasterPlanId, expectedApis },
+        );
+        await stopBacking();
+        const eId = planId(experimentRun.masterPlan) ?? null;
+        if (eId) saveCheckpoint({ experimentMasterPlanId: eId });
+    }
+    const { masterPlan: ePlan, goals: eGoals, breakdown: eBreakdown } = experimentRun;
+    phaseEnd(`${passCount(eBreakdown)}/${eBreakdown.length} goals passed`);
+
+    // ── Phase 3b (optional): docs-ablation arm ──────────────────────
+    // Re-run the baseline goals on the OLD library but WITHOUT documentation
+    // (no RAG). Documentation value = baseline pass rate − no-docs pass rate.
+    let ablation: { passRate: number; passed: number; total: number } | null = null;
+    if (ABLATION && baselineMasterPlanId) {
+        phase(3, 4, "Ablation", "no-docs (parametric knowledge only)");
+        await startBacking();
+        const ablationRun = await runMasterPlanner(
+            project.id,
+            cfg.planner,
+            vars,
+            baselineMasterPlanId,
+            libOverrides(cfg.library.oldVersion),
+            undefined,
+            { withoutDocs: true, expectedApis },
+        );
+        await stopBacking();
+        const passed = passCount(ablationRun.breakdown);
+        const total = ablationRun.breakdown.length;
+        ablation = { passed, total, passRate: total === 0 ? 0 : passed / total };
+        phaseEnd(`no-docs: ${passed}/${total} goals passed`);
+    }
 
     // ── Phase 4: diff + docs patch + save ───────────────────────────
+    phase(4, 4, "Report & artifacts");
     const drift = analyzeDrift(bBreakdown, eBreakdown);
 
     const stamp = Date.now();
@@ -1032,22 +1299,106 @@ async function main(): Promise<void> {
     // Pull the aggregated, verified documentation fix proposal for the
     // experiment run (old docs × new API — where the drift shows up).
     const docsPatch = await fetchDocsPatch(
-        (ePlan?._id as string | undefined) ?? null,
+        planId(ePlan) ?? null,
         outBase,
     );
+    // Persist the complete report documents (master plans + every per-goal
+    // report) so the run's evidence lives on disk, not only in Mongo.
+    const fullReports = await downloadFullReports(
+        baselineMasterPlanId,
+        planId(ePlan) ?? null,
+        outBase,
+    );
+    if (fullReports.file) {
+        console.log(
+            `${gray("│")}  ${green("✓")} full reports saved: ${bold(fullReports.file)} ` +
+                `(${fullReports.goalReports} per-goal reports)`,
+        );
+    }
+
+    // ── Step-level (paired) drift ────────────────────────────────────────
+    // Each step is an independent generated program, and the frozen experiment
+    // re-runs the SAME programs — so step i is directly comparable across
+    // versions. This is finer-grained than goal status, which cannot move when a
+    // goal is PARTIAL_FAILURE in both phases even though steps regressed.
+    const stepDrift = analyzeStepDrift(
+        toGoalSteps(fullReports.plans.baseline, fullReports.reports),
+        toGoalSteps(fullReports.plans.experiment, fullReports.reports),
+    );
+    if (stepDrift.paired > 0) {
+        const pct = (s: { passRate: number }) => `${(s.passRate * 100).toFixed(0)}%`;
+        console.log(
+            `${gray("│")}  ${
+                stepDrift.regressions.length > 0 ? red("⚠") : green("✓")
+            } steps: ${stepDrift.baseline.passed}/${stepDrift.baseline.total} (${
+                pct(stepDrift.baseline)
+            })` +
+                ` → ${stepDrift.experiment.passed}/${stepDrift.experiment.total} (${
+                    pct(stepDrift.experiment)
+                })` +
+                `  ${red(`-${stepDrift.regressions.length}`)} / ${
+                    cyan(`+${stepDrift.improvements.length}`)
+                }`,
+        );
+    }
+
+    // Golden-dataset scoring: which documented breaking changes did the pipeline
+    // surface? Evidence is restricted to DRIFT — regressed steps and gaps that are
+    // new in the experiment. Scoring every experiment finding inflates recall,
+    // because goals are seeded from the changelog and therefore mention those APIs
+    // by construction (observed: 3/3 recall on a target with zero drift).
+    let breakingChangeDetection: ReturnType<typeof scoreBreakingChanges> | null = null;
+    if (seed) {
+        const summaryGaps = (plan: Record<string, unknown> | null | undefined) =>
+            ((plan?.structuredSummary as Record<string, unknown> | undefined)
+                ?.documentationGapDetails ?? []) as Record<string, unknown>[];
+        const signals = driftEvidenceSignals({
+            stepRegressions: stepDrift.regressions,
+            experimentGaps: summaryGaps(ePlan as Record<string, unknown> | null),
+            baselineGaps: summaryGaps(bPlan as Record<string, unknown> | null),
+        });
+        breakingChangeDetection = scoreBreakingChanges(seed, signals);
+        console.log(
+            `${gray("│")}  ${
+                breakingChangeDetection.detected > 0 ? green("✓") : yell("○")
+            } breaking-change recall: ${breakingChangeDetection.detected}/${breakingChangeDetection.total}` +
+                ` (${(breakingChangeDetection.recall * 100).toFixed(0)}%)` +
+                dim(` — from ${signals.length} drift-tied signal(s)`),
+        );
+    }
+
+    // Docs-faithfulness (dodge) summary from the BASELINE generation — the frozen
+    // experiment reuses those programs, so faithfulness is a property of the
+    // baseline. `docValue` (with-docs minus no-docs pass rate) needs --ablation.
+    const faithfulness =
+        ((bPlan as Record<string, unknown> | null)?.executionPlan as Record<string, unknown>)
+            ?.faithfulness ?? null;
+    const baselinePassRate = bBreakdown.length === 0
+        ? 0
+        : passCount(bBreakdown) / bBreakdown.length;
+
     const report = {
         meta: {
             project: cfg.name,
             configKey: configName,
-            oldImage: cfg.oldImage,
-            newImage: cfg.newImage,
+            library: cfg.library.pkg,
+            oldVersion: cfg.library.oldVersion,
+            newVersion: cfg.library.newVersion,
+            runtime: cfg.runtime,
+            image: cfg.image ?? null,
+            frozen: freeze,
             projectId: project.id,
             timestamp: new Date().toISOString(),
             rookieUrl: ROOKIE_URL,
             outputFile: outFile,
+            fullReportsFile: fullReports.file,
         },
+        faithfulness,
+        ablation: ablation
+            ? { ...ablation, baselinePassRate, docValue: baselinePassRate - ablation.passRate }
+            : null,
         baseline: {
-            masterPlanId: bPlan?._id ?? null,
+            masterPlanId: planId(bPlan) ?? null,
             goals: bGoals,
             breakdown: bBreakdown,
             structuredSummary: (bPlan as Record<string, unknown> | null)?.structuredSummary ?? null,
@@ -1056,7 +1407,7 @@ async function main(): Promise<void> {
                 | undefined)?.finalOutput ?? null,
         },
         experiment: {
-            masterPlanId: ePlan?._id ?? null,
+            masterPlanId: planId(ePlan) ?? null,
             goals: eGoals,
             breakdown: eBreakdown,
             structuredSummary: (ePlan as Record<string, unknown> | null)?.structuredSummary ?? null,
@@ -1065,20 +1416,86 @@ async function main(): Promise<void> {
                 | undefined)?.finalOutput ?? null,
         },
         drift,
+        stepDrift,
         docsPatch,
+        changelog: seed
+            ? {
+                changelogUrl: seed.changelogUrl,
+                oldVersion: seed.oldVersion,
+                newVersion: seed.newVersion,
+                goldenBreakingChanges: seed.breakingChanges,
+                detection: breakingChangeDetection,
+            }
+            : null,
     };
 
     Deno.writeTextFileSync(outFile, JSON.stringify(report, null, 2));
-    printFinalSummary(report as unknown as Record<string, unknown>);
+    clearCheckpoint();
+    phaseEnd(`report ${outFile}`);
+    printFinalSummary(report as unknown as Record<string, unknown>, Date.now() - t0);
+
+    // Methodology signals (freeze / faithfulness / ablation).
+    if (freeze) {
+        console.log(
+            `  ${dim("Experiment ran on FROZEN baseline code (same programs, new version).")}`,
+        );
+    }
+    const f = faithfulness as
+        | { checkedSteps: number; faithfulSteps: number; dodgedGoals: string[] }
+        | null;
+    if (f) {
+        const dodged = f.dodgedGoals.length;
+        console.log(
+            `  ${dodged > 0 ? yell("⚠") : green("✓")} Docs-faithfulness: ` +
+                `${f.faithfulSteps}/${f.checkedSteps} steps used a documented API` +
+                (dodged > 0 ? `, ${bold(red(`${dodged} goal(s) dodged`))}` : ""),
+        );
+    }
+    if (report.ablation) {
+        const a = report.ablation;
+        console.log(
+            `  ${bold("Documentation value")} (docs vs no-docs): ` +
+                `${(a.baselinePassRate * 100).toFixed(0)}% → ${(a.passRate * 100).toFixed(0)}% ` +
+                `= ${bold(`${(a.docValue * 100).toFixed(0)} pts`)}`,
+        );
+    }
     console.log(
-        `  Run ${
-            bold(cyan(`deno run --allow-all scripts/print-report.ts ${outFile}`))
-        } for a detailed view.\n`,
+        `  ${dim("Detailed view:")} ${
+            cyan(`deno run --allow-all scripts/print-report.ts ${outFile}`)
+        }\n`,
     );
 }
+
+// Never leave the target container running: an interrupted or crashed run used
+// to leak it (holding its published port), so a later run could silently talk to
+// a stale server.
+function cleanupTargetContainer(): void {
+    if (!cfg?.container) return;
+    try {
+        new Deno.Command("docker", {
+            args: ["rm", "-f", cfg.container.name],
+            stdout: "null",
+            stderr: "null",
+        }).outputSync();
+    } catch { /* docker gone or already removed */ }
+}
+
+Deno.addSignalListener("SIGINT", () => {
+    console.log(`\n${yell("⚠")} interrupted — removing target container…`);
+    cleanupTargetContainer();
+    Deno.exit(130);
+});
 
 main().catch((err) => {
     console.error(`\n${red("[fatal]")} ${err.message}`);
     if (VERBOSE) console.error(err.stack);
+    cleanupTargetContainer();
+    try {
+        Deno.statSync(CHECKPOINT_FILE);
+        console.error(
+            `${yell("⚠")} checkpoint kept: ${CHECKPOINT_FILE} — ` +
+                `rerun the same command to resume from the last completed phase.`,
+        );
+    } catch { /* no checkpoint — nothing was completed */ }
     Deno.exit(1);
 });

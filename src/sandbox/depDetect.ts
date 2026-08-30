@@ -86,6 +86,51 @@ export function parseImportedPackages(code: string): string[] {
     return [...found];
 }
 
+/**
+ * Merge npm install specifiers with an override map (name → version | "latest"):
+ *  - a parsed package that has an override is pinned to `name@version`
+ *    (a `"latest"` override is left bare — npm installs latest by default);
+ *  - override entries not present in the parsed set are force-added, so an ORM's
+ *    peer driver installs even if the generated code never imported it directly.
+ *
+ * Used by the documentation-drift experiment to install a specific
+ * `<pkg>@<version>` per phase while keeping the rest of the imports intact.
+ */
+export function applyPackageOverrides(
+    parsed: string[],
+    overrides?: Record<string, string>,
+): string[] {
+    if (!overrides || Object.keys(overrides).length === 0) return parsed;
+
+    // A key ending in `*` is a PREFIX rule: it pins every package in a family
+    // without being installed itself. Monorepo-versioned families (MikroORM,
+    // TypeORM plugins…) require all their packages at the SAME version — mixing
+    // `@mikro-orm/core@6.6.16` with `@mikro-orm/postgresql@latest` makes npm
+    // abort on ERESOLVE and install NOTHING, which surfaced as a misleading
+    // "Cannot find package" at runtime. A prefix rule also covers packages the
+    // generated code imports that no config could have predicted.
+    const exact: Record<string, string> = {};
+    const prefixes: Array<[string, string]> = [];
+    for (const [key, version] of Object.entries(overrides)) {
+        if (key.endsWith("*")) prefixes.push([key.slice(0, -1), version]);
+        else exact[key] = version;
+    }
+
+    const versionFor = (name: string): string | undefined =>
+        name in exact ? exact[name] : prefixes.find(([p]) => name.startsWith(p))?.[1];
+
+    const spec = (name: string): string => {
+        const v = versionFor(name);
+        return v && v !== "latest" ? `${name}@${v}` : name;
+    };
+
+    const out = new Map<string, string>();
+    for (const name of parsed) out.set(name, spec(name));
+    // Force-install explicitly named overrides; prefix rules only pin.
+    for (const name of Object.keys(exact)) out.set(name, spec(name));
+    return [...out.values()];
+}
+
 const ENV_ERROR_SIGNATURES = [
     "ERR_MODULE_NOT_FOUND",
     "Cannot find module",
@@ -98,6 +143,12 @@ const ENV_ERROR_SIGNATURES = [
     // not be attributed to the docs.
     "ROOKIE_NO_DEFAULT_EXPORT",
     "ROOKIE_UNGROUNDED_SUCCESS",
+    // Sandbox ran out of wall-clock time. This is a property of the MACHINE
+    // (slow registry, oversubscribed Docker VM, heavy parallelism) — never of the
+    // documentation. Without this the LLM classifier happily labels it
+    // MISSING/INCORRECT/AMBIGUOUS and it pollutes the gap taxonomy.
+    "ROOKIE_SANDBOX_TIMEOUT",
+    "Execution timed out",
     "npm ERR!",
     "ERR_DLOPEN_FAILED",
     "command not found",

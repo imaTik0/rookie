@@ -6,7 +6,13 @@
  */
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { DockerExecutor } from "../service/DockerExecutor.ts";
-import { buildSandboxHarness, RESULT_END, RESULT_START } from "./harness.ts";
+import {
+    buildSandboxHarness,
+    HTTP_LOG_END,
+    HTTP_LOG_START,
+    RESULT_END,
+    RESULT_START,
+} from "./harness.ts";
 import { dockerAvailable } from "../testing/infra.ts";
 
 const HAS_DOCKER = await dockerAvailable();
@@ -54,6 +60,45 @@ Deno.test({
 });
 
 Deno.test({
+    // Regression guard: non-fetch clients (got, axios, …) issue requests via
+    // node:http, not globalThis.fetch. If the harness only patched fetch, their
+    // traffic would be invisible to grounding and every real API call wrongly
+    // treated as "no call" (the got-experiment 0/0 bug).
+    name: "[docker] harness captures node:http traffic (not just fetch)",
+    ignore: !HAS_DOCKER,
+}, async () => {
+    const userCode = `
+import http from 'node:http';
+export default async () => {
+    const server = http.createServer((req, res) => res.end('ok'));
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const port = server.address().port;
+    const body = await new Promise((resolve, reject) => {
+        http.get('http://127.0.0.1:' + port + '/ping', (res) => {
+            let d = '';
+            res.on('data', (c) => d += c);
+            res.on('end', () => resolve(d));
+        }).on('error', reject);
+    });
+    server.close();
+    return { result: body };
+};`;
+    const script = buildSandboxHarness(userCode, {});
+    const r = await new DockerExecutor({ timeoutMs: 20000 }).execute("node", script);
+    assertStringIncludes(r.stdout, HTTP_LOG_START);
+    const log = JSON.parse(
+        r.stdout.substring(
+            r.stdout.indexOf(HTTP_LOG_START) + HTTP_LOG_START.length,
+            r.stdout.indexOf(HTTP_LOG_END),
+        ).trim(),
+    ) as Array<{ url: string; method: string }>;
+    assert(
+        log.some((e) => e.url.includes("/ping")),
+        `expected node:http request to be captured, got ${JSON.stringify(log)}`,
+    );
+});
+
+Deno.test({
     name: "[docker] lenient mode (doc examples) still runs top-level code as a no-op module",
     ignore: !HAS_DOCKER,
 }, async () => {
@@ -65,4 +110,41 @@ Deno.test({
     const r = await new DockerExecutor({ timeoutMs: 20000 }).execute("node", script);
     assertEquals(r.exitCode, 0);
     assertStringIncludes(r.stdout, "doc example executed");
+});
+
+Deno.test({
+    // Regression: undici drives its own socket stack, bypassing BOTH
+    // globalThis.fetch and node:http. Its traffic was invisible to grounding, so
+    // every undici run was rejected as "never called the API" (39/74 failing
+    // steps on that target). node:diagnostics_channel is the supported hook.
+    name: "[docker] harness captures undici traffic via diagnostics_channel",
+    ignore: !HAS_DOCKER,
+}, async () => {
+    const userCode = `
+import { request } from 'undici';
+export default async () => {
+    // Deliberately unreachable: an ATTEMPTED call must still be captured, since
+    // a failed request is a real interaction with the API.
+    try { await request('http://127.0.0.1:9/undici-probe'); } catch { /* expected */ }
+    return { result: 'done' };
+};`;
+    const script = buildSandboxHarness(userCode, {});
+    // networkAccess is required only to reach the npm registry for the install;
+    // the probe itself targets an unreachable local port.
+    const r = await new DockerExecutor({
+        timeoutMs: 30000,
+        installTimeoutMs: 180000,
+        networkAccess: true,
+    }).execute("node", script, { packages: ["undici@7.29.0"] });
+    assertStringIncludes(r.stdout, HTTP_LOG_START);
+    const log = JSON.parse(
+        r.stdout.substring(
+            r.stdout.indexOf(HTTP_LOG_START) + HTTP_LOG_START.length,
+            r.stdout.indexOf(HTTP_LOG_END),
+        ).trim(),
+    ) as Array<{ url: string }>;
+    assert(
+        log.some((e) => e.url.includes("/undici-probe")),
+        `expected undici request captured, got ${JSON.stringify(log)}`,
+    );
 });

@@ -282,6 +282,30 @@ You are a Senior Software Engineer specializing in creating high-quality, execut
 Now that you have gathered all necessary information in this thread, create 3-5 high-quality, executable example programs based on the previous context and the user's goal.
 Each program MUST be a standalone JavaScript file that follows the execution contract. DO NOT write code in any language other than JavaScript under any circumstances.
 
+### REALIZE THE FULL GOAL — DO NOT SIMPLIFY (CRITICAL)
+The goal is a multi-step scenario. Each program MUST carry out the goal's **complete** workflow — every documented operation it names — end to end. Do NOT collapse it to the easiest sub-case or a single call.
+- A program should perform **several distinct documented operations** in sequence (setup → the core multi-step work → verification of the outcome), typically 4+ real API calls, not one.
+- Exercise the ADVANCED features the goal calls for (transactions, relations/joins, batch ops, advanced query options, configuration, error/edge handling) rather than the trivial happy path.
+- After performing the work, **verify** it (read the data back, assert the shape/count) so the program actually proves the documented behaviour.
+- A one-liner or a program that ignores most of the goal is a FAILURE, even if it runs.
+
+### ASSERT THE DOCUMENTED OUTCOME — EXIT 0 MUST MEAN THE DOCS WERE RIGHT (CRITICAL)
+A program that merely runs without crashing proves nothing: a changed default,
+a different return shape, or a renamed field can leave the program exiting 0 while
+silently doing the wrong thing. So each program MUST assert the SPECIFIC outcome
+the documentation promises and \`throw\` when reality differs:
+- Check concrete, documented facts — the exact return type/shape, field names,
+  values, counts, status codes, or error messages the docs state — not just "no
+  exception was thrown".
+- Use \`node:assert\` (\`import assert from 'node:assert/strict'\`) or an explicit
+  \`if (!condition) throw new Error('documented X was Y, got Z')\`.
+- Assert against what the DOCS say, exactly as documented. Do NOT relax an
+  assertion to make the program pass — if the observed behaviour contradicts the
+  docs, the program MUST throw. That contradiction is the finding.
+- Do NOT substitute a different function for the one the goal/docs name to make
+  it work: if the documented API is unavailable or misbehaves, let it fail
+  visibly rather than routing around it with an equivalent call.
+
 ### EXECUTION CONTRACT (CRITICAL)
 1. **Universal Code:** Your code must be written for the Node.js environment.
 2. **NO MOCKING ALLOWED:** 
@@ -296,6 +320,15 @@ Each program MUST be a standalone JavaScript file that follows the execution con
 5. **Return Signature:** Return an object: \`{ result: <api_response>, ctx: <updated_context> }\`.
 6. **Structure:** Export a default async function that accepts \`ctx\`.
 7. **LANGUAGE:** Write EXCLUSIVELY in JavaScript (Node.js). Code generated in ANY other language will be REJECTED.
+   The file is loaded as a plain ES module — there is NO TypeScript compiler and NO
+   Babel. Any TypeScript-only syntax fails at PARSE time with
+   \`SyntaxError: Invalid or unexpected token\`, so the program never runs and scores
+   zero. That means **no type annotations, no interfaces, and no decorators**
+   (\`@Entity()\`, \`@Property()\`, \`@Column()\`, …).
+   When the docs present a decorator-based API, use the **decorator-free
+   alternative that the same documentation describes** (for example an
+   \`EntitySchema\`/schema-object form, or a plain options object). Only fall back to
+   reporting a gap if the documentation genuinely offers no JavaScript-compatible way.
 8. **HTTP CALLS — PREFER fetch OVER axios:**
    Node.js 20 has \`fetch\` built-in. Always prefer \`fetch\` unless the library under test is axios itself or the docs show axios-only usage.
    \`fetch\` resolves on 4xx/5xx (check \`response.ok\`) and never throws circular-reference errors.
@@ -318,6 +351,34 @@ export default async (ctx) => {
     return { result: response, ctx };
 }
 \`\`\`
+
+### THE DEFAULT EXPORT IS MANDATORY — INCLUDING FOR CLI / BUILD / SCRIPT LIBRARIES
+A program without \`export default\` is REJECTED before it runs and scores zero,
+no matter how correct the code is. This is the single most common way a good
+program is thrown away, and it happens most with CLI parsers, build tools and
+script runners, where the natural instinct is to write top-level statements.
+Put that logic INSIDE the exported function instead — never at module top level.
+
+WRONG (top-level script — rejected):
+\`\`\`javascript
+import { program } from 'commander';
+program.option('--color').parse(['node', 'cli', '--color']);
+console.log(program.opts());
+\`\`\`
+
+RIGHT (identical behaviour, inside the contract):
+\`\`\`javascript
+import { program } from 'commander';
+export default async (ctx) => {
+    program.option('--color').parse(['node', 'cli', '--color']);
+    const opts = program.opts();
+    if (opts.color !== true) throw new Error(\`expected color=true, got \${opts.color}\`);
+    return { result: opts, ctx };
+};
+\`\`\`
+Drive CLIs by passing an explicit argv array to the parser (as above) — do NOT
+rely on \`process.argv\`, and do NOT spawn the CLI as a subprocess unless the goal
+is specifically about subprocess execution.
 
 ### OUTPUT FORMAT
 You MUST respond with a valid JSON object.
@@ -379,21 +440,49 @@ Extract the coverage report as JSON.`;
 
 export const PLANNER_GOALS_SYSTEM_PROMPT = `
 ### ROLE
-You are a Principal Architect. Your goal is to analyze the complete technical documentation of a project and propose a set of "user goals" - concrete, varied use cases or problems that can be solved using this specific library or API.
+You are a Principal Architect designing a battery of scenarios to STRESS-TEST a project's documentation. Your goal is to analyze the complete technical documentation and propose "user goals" — concrete, realistic tasks that push well beyond the "hello world" happy path.
 
 ### TASK
-Read the provided documentation and generate practical scenarios. Each scenario should represent a real-world task a developer might want to accomplish using the documented tools. Do not invent features that aren't mentioned in the documentation.
+Read the provided documentation and generate demanding, real-world scenarios. Each goal must represent a substantial task a professional developer would actually perform, and must be achievable using ONLY features described in the documentation. Do not invent features that aren't in the docs.
 
-### STRICT CONSTRAINT: AVOID EXTERNAL INTEGRATIONS
-You MUST NOT generate ANY goals that require external integrations, third-party services, external databases, or APIs that are not covered in the provided documentation. All goals MUST be 100% achievable using ONLY the provided library features and standard Node.js environment. Examples of forbidden goals: "Connect to a remote MySQL database" (unless the library IS a MySQL driver), "Send an email via SendGrid", "Upload to AWS S3".
+### DEPTH & COMPLEXITY (THE MOST IMPORTANT REQUIREMENT)
+Trivial, single-call goals are useless — they only ever exercise the simplest, most stable part of the API. Each goal MUST:
+- **Combine SEVERAL documented features** into one coherent workflow (aim for 4–8 distinct operations per goal, not one).
+- **Go deeper into the CORE data/API surface**, not just the basics. Prefer, wherever the docs cover them: transactions, relations / joins / associations / eager loading, batch or bulk operations, advanced query options (filtering, ordering, pagination, grouping, aggregation), data modeling / schema definition, options objects (connection-pool size, timeouts, serialization, custom types), hooks / middleware / plugins, prepared statements, cursors, and documented error / edge-case handling.
+- **Read like a task, not a function call.** Chain steps ("do X, then using the result do Y, then verify Z"), so the generated program is a multi-step scenario rather than a one-liner.
+
+Depth means richer *usage of the core API*, NOT operational/infrastructure features (see the environment constraint below).
+
+### SINGLE STANDARD INSTANCE (ENVIRONMENT CONSTRAINT — MANDATORY)
+Every goal runs against ONE standard, freshly-started single instance of the datastore/runtime, reachable via the execution context. Goals MUST be fully achievable against that single instance. You MUST NOT generate goals that need more than it provides — such goals are impossible here and hang or fail spuriously, teaching nothing about the documentation. In particular, DO NOT require:
+- clustering, sharding, replica sets, sentinels, or any primary/replica (master/slave) topology, failover, or cluster-only behaviour/errors (e.g. \`MOVED\`/\`ASK\`, \`.nodes('slave')\`);
+- server administrative/streaming modes that need special setup (e.g. \`MONITOR\`, change streams that require a replica set, replication slots);
+- additional servers, brokers, or a second database instance;
+- swapping in third-party libraries (e.g. a custom Promise implementation, an alternate DNS resolver) or other external services/integrations (no SendGrid, S3, etc.).
+Assume defaults: one host/port (or connection string) from the context, standard auth from the context, nothing more.
+
+### EXERCISE THE REAL THING — NEVER ASK FOR MOCKS (MANDATORY)
+The point is to test the library against the REAL service in the execution context.
+A goal that asks for simulated behaviour proves nothing about the documentation and
+is rejected by the runner as an ungrounded run. NEVER write a goal that asks to:
+- return a fake/mock/stub \`Response\` (or any canned payload) from a hook,
+  interceptor, or a custom \`fetch\`/adapter implementation "to avoid network calls";
+- monkey-patch, spy on, or replace the transport, the clock, or any library internal;
+- simulate an error/status instead of provoking it for real.
+To exercise an error path, make a REAL call that genuinely produces it (e.g. request
+a URL that really returns that status, use a real unreachable port for a connection
+error, or set a real timeout so short the real request exceeds it).
+
+### DIFFICULTY DISTRIBUTION
+Across the set: span the WHOLE documented *single-instance* API surface and avoid two goals that test the same feature. Skew toward intermediate-and-advanced goals; include AT MOST ONE basic-level goal. Explicitly BANNED as standalone goals: "connect and ping", "insert one record and read it back", "print the version", or any goal solvable in a single documented call.
 
 ### OUTPUT FORMAT
-You MUST respond with a valid JSON object containing a "goals" array, where each string is a user goal. Example:
+Respond with a valid JSON object containing a "goals" array of strings. Each goal is one rich, multi-step sentence. Example of the EXPECTED depth (adapt to the actual documented features — do not copy verbatim):
 {
   "goals": [
-    "Create a new user account and authenticate via OAuth",
-    "Query the database for active users and export results to CSV",
-    "Set up a WebSocket connection and handle incoming chat messages"
+    "Define two related record types with a one-to-many association, insert a parent together with several children inside a single transaction, then read them back with the relation eager-loaded, ordered and paginated — and roll the transaction back when a documented validation error is triggered.",
+    "Build an advanced query that combines multiple filter conditions, a join/lookup across two tables, grouping and an aggregate count, iterate over the results, and compare the total against a separately issued count query.",
+    "Configure the client with non-default options (connection pool size, timeout and a custom type/serializer as documented), run several operations concurrently, and handle a duplicate-key/conflict error exactly as the documentation prescribes."
   ]
 }
 `;
@@ -403,7 +492,11 @@ export function createPlannerGoalsUserPrompt(docs: string, maxGoals: number): st
 ### DOCUMENTATION
 ${docs}
 
-Generate up to ${maxGoals} distinct user goals based on the documentation above. Return ONLY a JSON object with a "goals" array.
+Generate up to ${maxGoals} distinct user goals based on the documentation above.
+
+Requirements (see the system rules): each goal must chain **4–8 documented operations**, exercise the **advanced** parts of the API (not just the basics), and no two goals may cover the same feature. Skew intermediate-to-advanced; at most one basic goal. Reject any goal that a single documented call would satisfy.
+
+Return ONLY a JSON object with a "goals" array.
 `;
 }
 
@@ -555,4 +648,50 @@ ${error}
 ${context}
 
 Generate ONLY the search query string, no explanation.`;
+}
+
+// ─── Execution environment (ctx) injection ────────────────────────────────────
+
+/** Context keys whose values must never be shown to the model verbatim. */
+const SECRET_KEY_RE = /token|key|secret|password|credential/i;
+
+/**
+ * Render the runtime execution context as a CRITICAL prompt block so generated
+ * code targets `ctx.apiBase` (etc.) instead of the literal hosts/ports that
+ * documentation examples use (localhost:2019, 127.0.0.1:8080, …). Without this
+ * block every network call in a containerised run dies with ECONNREFUSED and
+ * the whole experiment degenerates to ENVIRONMENT failures.
+ *
+ * Returns "" for an empty/invalid context (library-only corpora) so prompts
+ * are unchanged when there is no environment to describe. Secret-looking
+ * values are masked — the model must reference them via `ctx`, never inline.
+ */
+export function executionEnvironmentBlock(initialContext?: string): string {
+    let ctx: unknown;
+    try {
+        ctx = JSON.parse(initialContext ?? "{}");
+    } catch {
+        return "";
+    }
+    if (!ctx || typeof ctx !== "object" || Object.keys(ctx as object).length === 0) return "";
+    const masked = Object.fromEntries(
+        Object.entries(ctx as Record<string, unknown>).map(([k, v]) => [
+            k,
+            SECRET_KEY_RE.test(k) ? "<provided at runtime — reference it via ctx>" : v,
+        ]),
+    );
+    return `
+### EXECUTION ENVIRONMENT (CRITICAL — OVERRIDES ADDRESSES IN THE DOCS)
+Your code runs inside an isolated container. The services under test are NOT reachable at the addresses shown in the documentation. At runtime your default export receives this exact context object as \`ctx\`:
+
+\`\`\`json
+${JSON.stringify(masked, null, 2)}
+\`\`\`
+
+Rules:
+1. Build EVERY network URL from \`ctx\` (e.g. \`\${ctx.apiBase}/some/path\`). NEVER hard-code hosts or ports.
+2. Hosts/ports in documentation examples (localhost, 127.0.0.1, 0.0.0.0, example.com, :2019, :8080, …) describe the DOC AUTHOR'S environment — replace the host:port part with the matching \`ctx\` value, but keep the documented path, method, headers and payload EXACTLY as documented.
+3. Where the docs require credentials, read them from \`ctx\` (e.g. \`ctx.token\`, \`ctx.apiKey\`) — never invent or inline literal secrets.
+4. A connection error against a hard-coded documented address is a bug in YOUR code, not evidence about the product or its documentation.
+`;
 }

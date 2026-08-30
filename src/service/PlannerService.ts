@@ -27,6 +27,9 @@ interface StepSummary {
     status: string;
     error?: string;
     failureAnalysis?: types.report.FailureAnalysis;
+    /** Docs-faithfulness: did the code use a documented API it was expected to? */
+    docsFaithful?: boolean;
+    docsUnfaithfulMissing?: string[];
 }
 
 interface ExecutionReport {
@@ -84,11 +87,25 @@ export class PlannerService {
         maxGoals: number = 5,
         initialContext: string = "{}",
         onProgress?: (msg: string) => void,
+        /** Sandbox npm install pins (name → version|"latest"), e.g. the library
+         *  drift experiment pinning `<pkg>@<oldVersion>` for the baseline. */
+        packageOverrides?: Record<string, string>,
+        /** Changelog-drift steering block for goal generation only (see
+         *  PromptService.promptForUserGoals). */
+        changelogSeed?: string,
+        /** Docs-ablation arm: generate code WITHOUT documentation (no RAG). */
+        withoutDocs?: boolean,
+        /** Documented API symbols goals should exercise (docs-faithfulness check). */
+        expectedApis?: string[],
     ) {
         onProgress?.(JSON.stringify({ type: "INIT", projectId }));
 
         const validFiles = await this.loadProjectFiles(projectId);
-        const docExampleResults = await this.runDocExamples(validFiles, onProgress);
+        const docExampleResults = await this.runDocExamples(
+            validFiles,
+            onProgress,
+            packageOverrides,
+        );
 
         // ── Coverage-driven goal generation ──────────────────────────────────
         const endpointInventory = this.extractEndpointInventory(validFiles);
@@ -107,6 +124,7 @@ export class PlannerService {
                 onProgress?.(JSON.stringify({ type: "log", content: msg }));
             },
             endpointInventory,
+            changelogSeed,
         );
 
         onProgress?.(JSON.stringify({ type: "GOALS_GENERATED", goals }));
@@ -116,6 +134,8 @@ export class PlannerService {
             projectId,
             initialContext,
             onProgress,
+            packageOverrides,
+            { withoutDocs, expectedApis },
         );
 
         return this.aggregateAndSave({
@@ -152,6 +172,17 @@ export class PlannerService {
             initialContext?: string;
             goalIndices?: number[];
             skipDocExamples?: boolean;
+            /** Sandbox npm install pins for this run (e.g. `<pkg>@<newVersion>`
+             *  for the drift experiment's experiment phase). */
+            packageOverrides?: Record<string, string>;
+            /** Freeze: re-execute the ORIGINAL run's generated programs VERBATIM
+             *  (no regeneration) so drift is measured on identical code and the
+             *  agent cannot route around the change. */
+            freeze?: boolean;
+            /** Docs-ablation arm: regenerate WITHOUT documentation (no RAG). */
+            withoutDocs?: boolean;
+            /** Documented API symbols goals should exercise (faithfulness check). */
+            expectedApis?: string[];
         } = {},
         onProgress?: (msg: string) => void,
     ) {
@@ -177,7 +208,7 @@ export class PlannerService {
         const validFiles = await this.loadProjectFiles(projectId);
         const docExampleResults = overrides.skipDocExamples
             ? []
-            : await this.runDocExamples(validFiles, onProgress);
+            : await this.runDocExamples(validFiles, onProgress, overrides.packageOverrides);
 
         onProgress?.(JSON.stringify({
             type: "GOALS_GENERATED",
@@ -188,11 +219,23 @@ export class PlannerService {
                     `from master plan ${originalMasterPlanId}`,
         }));
 
+        // Freeze: load the ORIGINAL run's generated programs per goal so they are
+        // re-executed verbatim (no regeneration) against the new library version.
+        const frozenByGoal = overrides.freeze
+            ? await this.loadFrozenPrograms(original, goals, onProgress)
+            : undefined;
+
         const { reportIds, executionReports } = await this.executeGoals(
             goals,
             projectId,
             initialContext,
             onProgress,
+            overrides.packageOverrides,
+            {
+                withoutDocs: overrides.withoutDocs,
+                expectedApis: overrides.expectedApis,
+                frozenByGoal,
+            },
         );
 
         // Use the original plan's gap details as regression baseline so reruns
@@ -213,6 +256,41 @@ export class PlannerService {
         });
     }
 
+    // ── Private: frozen re-execution ────────────────────────────────────────
+
+    /**
+     * Load the ORIGINAL run's generated programs, keyed by goal text, so the
+     * experiment phase can re-execute identical code against the new library
+     * version. Programs come from each goal's CODE_GENERATION report
+     * (`steps[].scriptContent`), located via the master plan's goalsBreakdown.
+     */
+    private async loadFrozenPrograms(
+        original: { structuredSummary?: types.planner.StructuredMasterSummary },
+        goals: string[],
+        onProgress?: (msg: string) => void,
+    ): Promise<Map<string, string[]>> {
+        const map = new Map<string, string[]>();
+        const byGoal = new Map(
+            (original.structuredSummary?.goalsBreakdown ?? []).map((g) => [g.goal, g.reportId]),
+        );
+        for (const goal of goals) {
+            const rid = byGoal.get(goal);
+            if (!rid) continue;
+            try {
+                const rep = await this.reportRepository.get(rid as types.report.ReportId);
+                const programs = (rep?.steps ?? [])
+                    .map((s) => s.scriptContent)
+                    .filter((c): c is string => typeof c === "string" && c.length > 0);
+                if (programs.length > 0) map.set(goal, programs);
+            } catch { /* missing report → that goal regenerates normally */ }
+        }
+        onProgress?.(JSON.stringify({
+            type: "log",
+            content: `Freeze: loaded baseline programs for ${map.size}/${goals.length} goals.`,
+        }));
+        return map;
+    }
+
     // ── Private: file loading ───────────────────────────────────────────────
 
     private async loadProjectFiles(projectId: types.project.ProjectId): Promise<DocFile[]> {
@@ -231,10 +309,13 @@ export class PlannerService {
 
     // ── Private: doc-example smoke test ────────────────────────────────────
 
-    /** Run up to 10 fenced code examples from the docs in parallel. */
+    /** Run up to 10 fenced code examples from the docs in parallel, pinned to the
+     *  phase's package versions so the smoke test exercises the SAME version as
+     *  the graded code (not npm's latest). */
     private async runDocExamples(
         files: DocFile[],
         onProgress?: (msg: string) => void,
+        packageOverrides?: Record<string, string>,
     ): Promise<DocExampleResult[]> {
         const docExamples = extractDocExamples(files);
         if (docExamples.length === 0) return [];
@@ -251,7 +332,7 @@ export class PlannerService {
             capped.map(async (ex): Promise<DocExampleResult> => {
                 const label = docExampleLabel(ex);
                 try {
-                    const result = await this.executor.runDocExample(ex.code);
+                    const result = await this.executor.runDocExample(ex.code, packageOverrides);
                     onProgress?.(JSON.stringify({
                         type: "log",
                         content: `Doc example [${label}]: ${result.success ? "PASS" : "FAIL"}`,
@@ -287,6 +368,15 @@ export class PlannerService {
         projectId: types.project.ProjectId,
         initialContext: string,
         onProgress?: (msg: string) => void,
+        packageOverrides?: Record<string, string>,
+        opts: {
+            /** Docs-ablation arm: generate without documentation (no RAG). */
+            withoutDocs?: boolean;
+            /** Documented API symbols each goal is expected to exercise (faithfulness). */
+            expectedApis?: string[];
+            /** Frozen re-execution: goal text → the baseline's verbatim programs. */
+            frozenByGoal?: Map<string, string[]>;
+        } = {},
     ): Promise<{ reportIds: types.report.ReportId[]; executionReports: ExecutionReport[] }> {
         const kbLines: string[] = ["# Shared Knowledge Base (prior goal findings)\n"];
         const reportIds: types.report.ReportId[] = [];
@@ -311,6 +401,10 @@ export class PlannerService {
                 maximalStoryLength: 3,
                 mode: "CODE_GENERATION",
                 userGoal: goalWithKb,
+                packageOverrides,
+                withoutDocs: opts.withoutDocs,
+                expectedApis: opts.expectedApis,
+                frozenPrograms: opts.frozenByGoal?.get(goal),
             });
 
             // Isolate per-goal failures: a malformed LLM generation (e.g. structured
@@ -337,6 +431,8 @@ export class PlannerService {
                     status: s.status,
                     error: s.error?.substring(0, 400),
                     failureAnalysis: s.failureAnalysis,
+                    docsFaithful: s.docsFaithful,
+                    docsUnfaithfulMissing: s.docsUnfaithfulMissing,
                 }));
                 executionReports.push({
                     goal,
@@ -462,6 +558,18 @@ export class PlannerService {
 
         onProgress?.(JSON.stringify({ type: "SUMMARY_GENERATED", summary: markdown, structured }));
 
+        // Docs-faithfulness (dodge) summary: goals that "passed" while never using
+        // any documented API they were expected to are dodges, not clean passes.
+        const faithfulness = this.summariseFaithfulness(executionReports);
+        if (faithfulness) {
+            onProgress?.(JSON.stringify({
+                type: "log",
+                content:
+                    `Docs-faithfulness: ${faithfulness.faithfulSteps}/${faithfulness.checkedSteps}` +
+                    ` steps used a documented API; ${faithfulness.dodgedGoals.length} goal(s) dodged.`,
+            }));
+        }
+
         const masterPlan = await this.reportRepository.create({
             projectId,
             status: "SUCCESS",
@@ -469,6 +577,7 @@ export class PlannerService {
             initialContext,
             executionPlan: {
                 docExampleResults: docExampleResults.length > 0 ? docExampleResults : undefined,
+                faithfulness,
             },
             steps: [],
             detailedResults: { finalOutput: markdown },
@@ -487,6 +596,41 @@ export class PlannerService {
         const label = rerunFromMasterPlanId ? "re-run" : "execution";
         onProgress?.(JSON.stringify({ type: "log", content: `Master Plan ${label} completed.` }));
         return masterPlan;
+    }
+
+    // ── Private: docs-faithfulness summary ─────────────────────────────────
+
+    /**
+     * Aggregate per-step docs-faithfulness into a run-level summary. A goal is
+     * "dodged" when it succeeded but none of its checked steps used a documented
+     * API it was expected to — the agent routed around the docs. Returns
+     * undefined when no step was checked (no expected symbols supplied).
+     */
+    private summariseFaithfulness(executionReports: ExecutionReport[]): {
+        checkedSteps: number;
+        faithfulSteps: number;
+        dodgedSteps: number;
+        dodgedGoals: string[];
+    } | undefined {
+        let checkedSteps = 0;
+        let faithfulSteps = 0;
+        const dodgedGoals: string[] = [];
+        for (const r of executionReports) {
+            const checked = r.steps.filter((s) => s.docsFaithful !== undefined);
+            if (checked.length === 0) continue;
+            checkedSteps += checked.length;
+            faithfulSteps += checked.filter((s) => s.docsFaithful).length;
+            if (r.status === "SUCCESS" && !checked.some((s) => s.docsFaithful)) {
+                dodgedGoals.push(r.goal);
+            }
+        }
+        if (checkedSteps === 0) return undefined;
+        return {
+            checkedSteps,
+            faithfulSteps,
+            dodgedSteps: checkedSteps - faithfulSteps,
+            dodgedGoals,
+        };
     }
 
     // ── Private: regression tracking ───────────────────────────────────────

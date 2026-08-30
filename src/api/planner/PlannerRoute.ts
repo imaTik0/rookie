@@ -47,6 +47,25 @@ measuring natural variance across executions).`,
                                 "Skip the doc-example smoke phase (up to 10 sandbox executions). " +
                                     "Useful when the caller only consumes goal-level results.",
                             ),
+                            packageOverrides: z.record(z.string(), z.string()).optional().describe(
+                                'npm install pins (name → version|"latest") applied on top of the ' +
+                                    "packages parsed from generated code. The library drift experiment " +
+                                    "pins `<pkg>@<newVersion>` here for the experiment phase.",
+                            ).openapi({ example: { execa: "10.0.0" } }),
+                            freeze: z.boolean().optional().describe(
+                                "Re-execute the ORIGINAL run's generated programs VERBATIM instead of " +
+                                    "regenerating code. Drift is then measured on identical code and the " +
+                                    "agent cannot route around the change (recommended for the experiment phase).",
+                            ),
+                            withoutDocs: z.boolean().optional().describe(
+                                "Docs-ablation arm: regenerate WITHOUT documentation (no RAG), so the " +
+                                    "agent relies on parametric knowledge. `pass_with − pass_without` " +
+                                    "measures the documentation's value.",
+                            ),
+                            expectedApis: z.array(z.string()).optional().describe(
+                                "Documented API symbols the goals should exercise; code using none of " +
+                                    "them is flagged as a docs-faithfulness dodge.",
+                            ),
                         }),
                     },
                 },
@@ -110,6 +129,24 @@ This is long-running — duration scales with \`maxGoals\` and model/sandbox lat
                                 example:
                                     '{"apiBase":"http://host.docker.internal:14000/api/v1","token":"<token>"}',
                             }),
+                            packageOverrides: z.record(z.string(), z.string()).optional().describe(
+                                'npm install pins (name → version|"latest") applied on top of the ' +
+                                    "packages parsed from generated code. The library drift experiment " +
+                                    "pins `<pkg>@<oldVersion>` here for the baseline phase.",
+                            ).openapi({ example: { sequelize: "5.22.5" } }),
+                            changelogSeed: z.string().optional().describe(
+                                "Changelog-drift steering block injected ONLY into goal generation, " +
+                                    "so goals target documented breaking-change areas (valid on the old " +
+                                    "version, broken on the new). Not passed to the code-writing phase.",
+                            ),
+                            withoutDocs: z.boolean().optional().describe(
+                                "Docs-ablation arm: generate code WITHOUT documentation (no RAG), so " +
+                                    "the agent relies on parametric knowledge only.",
+                            ),
+                            expectedApis: z.array(z.string()).optional().describe(
+                                "Documented API symbols the goals should exercise; code using none of " +
+                                    "them is flagged as a docs-faithfulness dodge.",
+                            ),
                         }),
                     },
                 },

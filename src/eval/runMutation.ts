@@ -13,19 +13,25 @@
  *     - detection (MDS = detected/total, per operator),
  *     - classification of detected mutants (confusion, accuracy, Cohen's κ).
  *
+ * The gold corpus is the FULL, version-pinned documentation of a library
+ * released AFTER the model's knowledge cutoff (default: marked@18), so the model
+ * cannot fall back on memorised knowledge and a mutated doc actually misleads it
+ * (mutants become detectable). The library is pinned in the sandbox via
+ * `packageOverrides`. Use `--library <key>` to select another corpus.
+ *
  * Requires the full stack (Rookie + Mongo + Qdrant + Docker + LLM backend).
  * `--dry-run` only generates and prints the mutant set (no infra needed).
  *
  * Usage:
  *   deno task eval:mutation -- --dry-run
- *   deno task eval:mutation -- --fixture rookie-eval-dayjs-missing-plugin
  *   deno task eval:mutation -- --seed 42 --per-operator 2
  *   deno task eval:mutation -- --concurrency 4                  # parallel mutants
- *   deno task eval:mutation -- --corpus gold-multilib --gold <masterPlanId>
- *                                                    # reuse a prior gold baseline
+ *   deno task eval:mutation -- --per-operator all               # full run
+ *   deno task eval:mutation -- --gold <masterPlanId>            # reuse a prior gold baseline
+ *   deno task eval:mutation -- --library execa                  # alternative corpus
  */
-import { FIXTURES } from "./fixtures.ts";
-import { GOLD_CORPORA, type GoldCorpus } from "./goldCorpus.ts";
+import { type GoldCorpus } from "./goldCorpus.ts";
+import { fetchMutationCorpus } from "./mutationCorpus.ts";
 import {
     gapMatchesMutant,
     generateMutants,
@@ -47,13 +53,18 @@ const flag = (k: string) => Deno.args.includes(k);
 const SEED = Number(argOf("--seed") ?? 1);
 const perOpArg = argOf("--per-operator") ?? "2";
 const PER_OPERATOR: number | "all" = perOpArg === "all" ? "all" : Number(perOpArg);
-const ONLY_CORPUS = argOf("--corpus") ?? argOf("--fixture");
 const DRY_RUN = flag("--dry-run");
 /** Reuse an existing gold-baseline MASTER_PLAN report instead of re-running it. */
 const GOLD_ID = argOf("--gold");
 /** How many mutants run in parallel (each is an independent project). */
 const CONCURRENCY = Math.max(1, Number(argOf("--concurrency") ?? "1") || 1);
+/** The post-cutoff mutation corpus (see mutationCorpus.ts). Overridable so an
+ *  alternative corpus can be evaluated without editing code. */
+const LIBRARY = argOf("--library") ?? "marked";
 const GOLD_PASS_THRESHOLD = 0.9;
+
+/** npm install pins for the whole run (pins the corpus library to its version). */
+let PACKAGE_OVERRIDES: Record<string, string> | undefined;
 
 // ── Rookie HTTP client (mirrors runEval.ts conventions) ──────────────────────
 
@@ -174,33 +185,16 @@ function scoreMutant(mutant: Mutant, outcome: PlannerOutcome): MutantResult {
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-// Gold corpora: the dedicated multi-library corpus (large mutant pool) plus
-// every eval fixture that ships corrected (gold) docs.
-const allCorpora: GoldCorpus[] = [
-    ...GOLD_CORPORA,
-    ...FIXTURES
-        .filter((f) => f.fixedFiles && f.fixedFiles.length > 0)
-        .map((f) => ({ name: f.name, files: f.fixedFiles!, goals: f.goals })),
-];
-const goldCorpora = allCorpora.filter((c) => !ONLY_CORPUS || c.name === ONLY_CORPUS);
-
-if (GOLD_ID && goldCorpora.length !== 1) {
-    console.error(
-        "--gold reuses one baseline for one corpus — combine it with --corpus/--fixture.",
-    );
-    Deno.exit(1);
-}
-
-if (goldCorpora.length === 0) {
-    console.error(
-        ONLY_CORPUS
-            ? `Corpus "${ONLY_CORPUS}" not found. Available: ${
-                allCorpora.map((c) => c.name).join(", ")
-            }`
-            : "No gold corpora available.",
-    );
-    Deno.exit(1);
-}
+// Gold corpus = the FULL, version-pinned docs of execa@10 (post-cutoff). The
+// library is pinned in the sandbox via packageOverrides, so correct docs →
+// working code (gold passes) and mutated docs → broken code (mutant detected).
+const fetched = await fetchMutationCorpus(LIBRARY);
+const goldCorpora: GoldCorpus[] = [fetched.corpus];
+PACKAGE_OVERRIDES = { [fetched.pkg]: fetched.version };
+console.log(
+    `Post-cutoff mutation corpus: ${fetched.corpus.name} ` +
+        `(${fetched.corpus.files.length} doc files, pinned ${fetched.pkg}@${fetched.version})`,
+);
 
 const report: Record<string, unknown> = {
     startedAt: new Date().toISOString(),
@@ -244,6 +238,7 @@ for (const corpus of goldCorpora) {
             projectId: goldProject,
             maxGoals: corpus.goals.length,
             initialContext: "{}",
+            packageOverrides: PACKAGE_OVERRIDES,
         });
     }
     const goldOk = goldRun.passRate >= GOLD_PASS_THRESHOLD;
@@ -289,6 +284,7 @@ for (const corpus of goldCorpora) {
                 masterPlanId: goldRun.masterPlanId,
                 projectId,
                 skipDocExamples: true,
+                packageOverrides: PACKAGE_OVERRIDES,
                 ...(goalIdx ? { goalIndices: goalIdx } : {}),
             });
             const r: MutantResult = {
@@ -355,7 +351,14 @@ for (const corpus of goldCorpora) {
 
     (report.corpora as unknown[]).push({
         fixture: corpus.name,
-        gold: { passRate: goldRun.passRate, falseAlarms: goldRun.gaps.length, met: goldOk },
+        // Persist the baseline id: it is the handle for `--gold` on later runs,
+        // and printing it only to the console made it unrecoverable once scrolled away.
+        gold: {
+            masterPlanId: goldRun.masterPlanId,
+            passRate: goldRun.passRate,
+            falseAlarms: goldRun.gaps.length,
+            met: goldOk,
+        },
         mutants: results,
         erroredRuns: errored,
         perOperator,

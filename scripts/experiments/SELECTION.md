@@ -1,182 +1,181 @@
-# Target Selection Protocol — Documentation-Drift Experiment
+# Experiment target selection — 2026 npm libraries (changelog-driven drift)
 
-> **Status:** pre-registered selection. All criteria, the ranking rule, and the
-> replacement queue below were fixed **before** any experiment run on the
-> selected targets. Deviations are only permitted through the pre-registered
-> replacement rule (§6) and must be logged in §8.
+_Pre-registered target-selection protocol for the documentation-drift experiment.
+Written before the experiment is run so the choice of targets cannot be tuned to
+outcomes._
+
+## 0. Why this revision (rationale for the pivot)
+
+Two earlier attempts failed on **construct validity**, not mechanics:
+
+1. **Self-hosted service APIs** — fragile infra (9/20 preflight failures: image
+   tags, moved docs, auth/health).
+2. **Mature ORM / DB libraries** — the model writes correct code from memory,
+   ignoring the provided docs, so baseline ≈ experiment (no drift signal);
+   confirmed on a live `drizzle` run (baseline 7/8, experiment 8/8, zero
+   regressions) because 0.30→0.44 has no runtime-breaking change for the
+   exercised API and the model knows drizzle anyway.
+
+This revision fixes the root cause with three levers:
+
+- **2026-only version pairs.** The **NEW** version is released **after the
+  model's January-2026 knowledge cutoff**, so its breaking changes cannot be
+  memorised — the model MUST rely on the OLD documentation. (The model may know
+  the OLD version; that is fine — the baseline should pass.)
+- **Changelog-driven goals + golden dataset.** Goals are seeded from the real
+  upstream changelog of each pair so they exercise the documented **breaking
+  changes** (valid on old, broken on new); the same breaking changes are the
+  ground truth for detection recall. See §7 and
+  [`src/eval/changelogSeed.ts`](../../src/eval/changelogSeed.ts).
+- **npm packages, Docker optional.** Targets are ordinary npm packages; a target
+  uses a database container only if it needs one (Postgres for the ORMs). Most
+  are pure libraries that run in the sandbox with no container.
 
 ## 1. Population (sampling frame)
 
-The population is the [awesome-selfhosted](https://github.com/awesome-selfhosted/awesome-selfhosted)
-list — a widely used, externally curated catalogue of self-hostable software
-with an explicit inclusion policy (working, actively maintained, OSI-licensed
-projects). Using an external, community-maintained frame removes author
-discretion from the population definition.
-
-- **Snapshot (pinned):** commit `334eaa016ba6b93a4ce486d16ffd4050593c7b66`
-  (2026-07-05).
-- **Population size:** 1 246 entries (lines matching `- [Name](url)` in the
-  pinned `README.md`).
-- **Metadata source:** the machine-readable sibling repository
-  `awesome-selfhosted-data` (per-entry YAML: `stargazers_count`, `platforms`,
-  `tags`, `archived`), joined by entry name; 1 238 of 1 246 entries joined.
-  Entries present only in the data repository but absent from the pinned README
-  (e.g. _n8n_, licensed Apache-2.0 **with Commons-Clause**, hence excluded from
-  the main list by its maintainers) are **not** part of the population.
+Frame = npm packages that (a) published a **new major whose `x.0.0` release date
+is ≥ 2026-01-15** (safely after the model cutoff) and (b) are widely used
+JavaScript/TypeScript libraries indexed under the npm keywords `cli`,
+`http`, `orm`, `validation`, `build`, `database`, or listed in _awesome-nodejs_.
+Version timelines were read from the npm registry `time` map (snapshot
+2026-07-26).
 
 ## 2. Pilot exclusion
 
-Two systems were used while developing and tuning the pipeline and are
-therefore **excluded from the evaluation sample** to avoid overfitting bias:
-
-- **Gitea** (in population, rank 22) — development pilot;
-- **InfluxDB** (not in population) — development pilot.
-
-Both remain available in the runner configuration as pilots; their results are
-reported separately and never pooled with the sample.
+Harness bring-up used the earlier (non-2026) libraries; none of them appears in
+this sample, so no target is both tuned against and measured.
 
 ## 3. Eligibility criteria (method-imposed)
 
-Each criterion follows from a technical constraint of the measurement
-instrument, not from expected outcomes:
+A frame member is eligible iff it satisfies **all** of E1–E6:
 
-| ID | Criterion                                                                                                                                                | Imposed by                                                                 |
-| -- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| E1 | The project itself publishes documentation of an HTTP API (REST/JSON-RPC/admin API) intended for programmatic use                                        | the measured artifact is the project's own API documentation               |
-| E2 | Project-endorsed container image on a public registry with version tags                                                                                  | the runner deploys targets via a single `docker run` of official images    |
-| E3 | Single-container operation (embedded storage or project-endorsed all-in-one image); no mandatory external services                                       | the runner starts exactly one container                                    |
-| E4 | ≥ 2 distinct stable versions published as image tags                                                                                                     | drift needs an old→new pair                                                |
-| E5 | Documentation ingestible by the system (server-rendered HTML, repository documents, or OpenAPI served by the instance) — not exclusively client-rendered | crawler capability; per-target fidelity strategy is recorded in the config |
-| E6 | Non-interactive credential provisioning (env vars, default credentials, in-container CLI, or scriptable HTTP setup)                                      | unattended experiment execution                                            |
-| E7 | HTTP-determinable readiness                                                                                                                              | the runner's health gate                                                   |
-| E8 | Not a fork/ancestor/sibling of an already-selected or pilot project (higher-ranked family member kept)                                                   | prevents pseudo-replication                                                |
-
-**Diversity cap:** at most **2 targets per category** (the entry's first tag in
-the list's own taxonomy), so the sample cannot concentrate in one domain.
+- **E1 — post-cutoff breaking release.** The NEW version's major `x.0.0` was
+  released in 2026 (≥ 2026-01-15), and its upstream changelog / migration guide
+  **enumerates developer-visible breaking changes** (not only internal/build
+  changes).
+- **E2 — runtime-observable breaking change.** At least one breaking change is
+  observable at runtime in plain Node.js (a removed/renamed export or option, a
+  changed signature or return/behaviour) — not a TypeScript-only type change,
+  which a JS sandbox cannot see (threat noted in §10).
+- **E3 — full prose docs for the OLD version.** The OLD version's narrative
+  documentation is ingestible as versioned in-repo markdown at the tag, or a live
+  versioned docs site (documentation conditions unchanged from the prior
+  protocol).
+- **E4 — installable & runnable in the sandbox.** Installs from npm into
+  `node:24-slim`; runnable either as a pure library or against a single
+  containerised database engine (no multi-node topology — see the single-instance
+  rule in the goal prompt).
+- **E5 — real-world use.** Widely used (established package with a version
+  history), so its docs are substantial and the drift is representative.
+- **E6 — diversity.** Spread across library **types** (CLI parser, HTTP client,
+  ORM, build tool, process/exec, markdown, low-level HTTP) so results are not an
+  artefact of one ecosystem.
 
 ## 4. Selection rule
 
-Walk the population in **descending order of `stargazers_count`** (snapshot
-values) and assess each entry against E1–E8 and the category cap. The first
-**20 eligible** entries form the sample; the next **5 eligible** entries form
-the ordered replacement queue. Stars are an objective, externally recorded
-popularity proxy: the sample is "the most-used eligible projects", which is the
-population practitioners care about — and leaves zero room for cherry-picking.
+From the eligible frame, admit targets spanning the type/diversity axis (E6),
+preferring pure libraries (no container) and the clearest runtime-breaking
+changelogs, until **10** are chosen. Version pairs: OLD = last stable of the
+major **before** the 2026 major; NEW = latest stable of the 2026 major.
 
-## 5. Screening log (ranks 1–73 of the joined population)
+## 5. Chosen sample (n = 10)
 
-Verdicts: **S** = selected, **R** = reserve, `E*` = excluded by criterion,
-`CAP` = category cap reached, `PILOT` = pilot exclusion.
+| #  | package           | type           | old → new       | runtime¹ | new released |
+| -- | ----------------- | -------------- | --------------- | -------- | ------------ |
+| 1  | `commander`       | CLI parser     | 14.0.3 → 15.0.0 | pure     | 2026-05      |
+| 2  | `execa`           | process exec   | 9.6.1 → 10.0.0  | pure     | 2026-07      |
+| 3  | `got`             | HTTP client    | 14.6.6 → 15.1.0 | http     | 2026-07      |
+| 4  | `ky`              | HTTP client    | 1.14.3 → 2.0.2  | http     | 2026-04      |
+| 5  | `eslint`          | linter (API)   | 9.39.5 → 10.8.0 | pure     | 2026-07      |
+| 6  | `vite`            | build tool     | 7.3.6 → 8.1.5   | pure     | 2026-07      |
+| 7  | `typeorm`         | ORM            | 0.3.31 → 1.1.0  | db       | 2026-05      |
+| 8  | `@mikro-orm/core` | ORM            | 6.6.16 → 7.1.7  | db       | 2026-03      |
+| 9  | `undici`          | HTTP (low-lvl) | 7.29.0 → 8.9.0  | http     | 2026-04      |
+| 10 | `marked`          | markdown       | 17.0.6 → 18.0.7 | pure     | 2026-07      |
 
-| Rank |   Stars | Entry               | Category (first tag) | Verdict                                                                              |
-| ---: | ------: | ------------------- | -------------------- | ------------------------------------------------------------------------------------ |
-|    1 | 175 462 | Ollama              | GenAI                | **S1** (docs = repo `docs/api.md` at old tag)                                        |
-|    2 | 144 210 | Open-WebUI          | GenAI                | **S2**                                                                               |
-|    3 | 105 610 | Immich              | Photo Galleries      | E3 (Postgres + Redis + ML services)                                                  |
-|    4 |  88 192 | Home Assistant      | IoT                  | **S3** (E6 via scriptable onboarding — flagged)                                      |
-|    5 |  86 077 | Stirling-PDF        | Document Mgmt        | **S4** (self-served OpenAPI)                                                         |
-|    6 |  86 045 | Syncthing           | File Transfer & Sync | **S5** (API key via in-container config)                                             |
-|    7 |  79 731 | Hoppscotch CE       | API Management       | E3 (Postgres)                                                                        |
-|    8 |  78 184 | code-server         | IDE & Tools          | E1 (no product HTTP API)                                                             |
-|    9 |  73 737 | Caddy               | Web Servers          | **S6** (admin API)                                                                   |
-|   10 |  73 656 | Superset            | Analytics            | E3 (metadata DB + Redis)                                                             |
-|   11 |  73 290 | AppFlowy            | Task Mgmt            | E3 (Cloud stack: gotrue+Postgres+MinIO)                                              |
-|   12 |  72 593 | Strapi              | CMS                  | E2 (no endorsed runtime image)                                                       |
-|   13 |  71 876 | revealjs            | Misc                 | E1 (not a service)                                                                   |
-|   14 |  70 072 | AFFiNE CE           | Knowledge Mgmt       | E3 (Postgres + Redis)                                                                |
-|   15 |  63 851 | Traefik             | Web Servers          | **S7** (versioned docs v2/v3)                                                        |
-|   16 |  63 281 | Vaultwarden         | Password Mgrs        | E1 (client API documented upstream by Bitwarden; project docs cover deployment only) |
-|   17 |  62 579 | AnythingLLM         | GenAI                | CAP (GenAI = 2)                                                                      |
-|   18 |  61 290 | Memos               | Note-taking          | **S8**                                                                               |
-|   19 |  59 673 | Pi-hole             | DNS                  | **S9** (v6 REST API; adjacent v6 tags)                                               |
-|   20 |  59 417 | PocketBase          | Low Code             | E2 (binary distribution; no official image)                                          |
-|   21 |  58 407 | MeiliSearch         | Search               | **S10** (master key via env)                                                         |
-|   22 |  56 681 | Gitea               | Project Mgmt         | PILOT                                                                                |
-|   23 |  56 479 | Appwrite            | Low Code             | E3 (MariaDB + Redis)                                                                 |
-|   24 |  55 431 | Joplin              | Note-taking          | E3 (server requires Postgres)                                                        |
-|   25 |  54 972 | penpot              | Misc                 | E3 (multi-service)                                                                   |
-|   26 |  54 266 | Ghost               | Blogging             | **S11** (SQLite config; session-auth Admin API)                                      |
-|   27 |  53 951 | Jellyfin            | Media Streaming      | **S12** (self-served `openapi.json`)                                                 |
-|   28 |  53 838 | Plane               | Project Mgmt         | E3 (multi-service)                                                                   |
-|   29 |  52 818 | Odoo                | Resource Planning    | E3 (Postgres)                                                                        |
-|   30 |  52 177 | Twenty              | CRM                  | E3 (Postgres + Redis)                                                                |
-|   31 |  50 088 | Mastodon            | Social Networks      | E3 (multi-service)                                                                   |
-|   32 |  49 571 | Huginn              | Automation           | E1 (no maintained API reference)                                                     |
-|   33 |  48 043 | Metabase            | Analytics            | **S13** (embedded H2; scriptable `/api/setup`)                                       |
-|   34 |  47 652 | Gogs                | Project Mgmt         | E8 (family of pilot Gitea)                                                           |
-|   35 |  47 393 | Discourse           | Social Networks      | E3 (Postgres + Redis, custom builder)                                                |
-|   36 |  47 313 | LocalAI             | GenAI                | CAP                                                                                  |
-|   37 |  46 071 | Cal.diy             | Booking              | E3 (Postgres)                                                                        |
-|   38 |  46 029 | Apache Airflow      | Automation           | **S14** (`standalone` mode, SQLite; versioned REST docs — heavy image, flagged)      |
-|   39 |  45 751 | Rocket.Chat         | Communication        | E3 (MongoDB)                                                                         |
-|   40 |  45 476 | copyparty           | File Managers        | E1 (no dedicated API reference; HTTP parameters inline in usage README)              |
-|   41 |  45 104 | RSSHub              | Feed Readers         | **S15** (the product _is_ a documented HTTP API)                                     |
-|   42 |  44 915 | SiYuan              | Knowledge Mgmt       | **S16** (kernel `API.md` at old tag; access-auth code)                               |
-|   43 |  43 731 | Kong                | API Management       | **S17** (DB-less mode; versioned admin-API docs)                                     |
-|   44 |  43 382 | Payload CMS         | CMS                  | E2/E1 (framework; per-project API)                                                   |
-|   45 |  43 193 | HyperSwitch         | Money Mgmt           | E3 (Postgres + Redis)                                                                |
-|   46 |  42 729 | Paperless-ngx       | Document Mgmt        | E3 (Redis broker mandatory)                                                          |
-|   47 |  42 615 | Puter               | File Transfer & Sync | E1 (docs target hosted JS SDK; no self-host API reference)                           |
-|   48 |  40 283 | LibreChat           | GenAI                | CAP                                                                                  |
-|   49 |  40 240 | Appsmith            | Low Code             | E1 (internal API undocumented)                                                       |
-|   50 |  39 921 | PhotoPrism          | Photo Galleries      | E1 (API declared internal/unstable)                                                  |
-|   51 |  39 325 | Reactive Resume     | Misc                 | E3 (Postgres + MinIO)                                                                |
-|   52 |  39 244 | Novu                | Communication        | E3 (multi-service)                                                                   |
-|   53 |  39 225 | Halo                | Low Code             | **S18** (single container, H2; springdoc OpenAPI)                                    |
-|   54 |  38 941 | Sunshine            | Games                | E1                                                                                   |
-|   55 |  38 594 | qBittorrent         | P2P                  | E2 (community images only)                                                           |
-|   56 |  38 132 | ToolJet             | Low Code             | E3 (Postgres)                                                                        |
-|   57 |  37 476 | Umami               | Analytics            | E3 (Postgres/MySQL mandatory)                                                        |
-|   58 |  36 716 | TriliumNext Notes   | Note-taking          | **S19** (ETAPI; E6 first-run — flagged)                                              |
-|   59 |  36 520 | ERPNext             | Resource Planning    | E3 (MariaDB + Redis)                                                                 |
-|   60 |  36 178 | CasaOS              | Self-hosting         | E1                                                                                   |
-|   61 |  36 032 | Nextcloud           | File Transfer & Sync | **S20** (versioned docs; env admin) — **sample complete**                            |
-|   62 |  35 599 | Glance              | Dashboards           | E1 (config-driven, no API)                                                           |
-|   63 |  35 561 | Vane                | GenAI                | CAP                                                                                  |
-|   64 |  35 471 | Khoj                | GenAI                | CAP                                                                                  |
-|   65 |  35 377 | filebrowser         | Web File Managers    | **R1** (reserve)                                                                     |
-|   66 |  35 320 | PostHog             | Analytics            | E3 (multi-service)                                                                   |
-|   67 |  35 258 | CyberChef           | Misc                 | E1 (static app)                                                                      |
-|   68 |  35 258 | AdGuard Home        | DNS                  | **R2** (reserve)                                                                     |
-|   69 |  34 923 | MedusaJs            | E-commerce           | E2/E3 (framework; Postgres)                                                          |
-|   70 |  34 142 | Frigate             | Video Surveillance   | **R3** (reserve; runs without cameras — flagged)                                     |
-|   71 |  33 479 | Nginx Proxy Manager | Web Servers          | CAP (Web Servers = 2)                                                                |
-|   72 |  33 368 | SearXNG             | Search               | **R4** (reserve; thin API reference — flagged)                                       |
-|   73 |  33 298 | SeaweedFS           | Object Storage       | **R5** (reserve) — **queue complete**                                                |
+¹ Runtime (see [`targets.ts`](targets.ts)): **pure** = no container, empty `ctx`;
+**http** = a throwaway `mccutchen/go-httpbin` container, `ctx.baseUrl` points the
+code at it; **db** = a throwaway `postgres:16` container, `ctx.connectionString`
+points the code at it. Any container image is held constant across both phases.
 
-Screening stopped at rank 73, where the 20-target sample and the 5-target
-replacement queue were complete. Entries below rank 73 were not assessed
-(the rule is deterministic; anyone can extend the walk from the pinned data).
+**Type spread:** 2 HTTP clients + 1 low-level HTTP, 2 ORMs, 1 CLI parser, 1
+process-exec, 1 linter, 1 build tool, 1 markdown parser. **Container use:** 5 of
+10 (2 Postgres for the ORMs, 3 httpbin for the HTTP clients); the other 5 run
+pure in the sandbox.
 
-## 6. Replacement rule (pre-registered)
+## 6. Reserve queue
 
-If a selected target fails **technical preflight** (image tag unavailable,
-container does not become healthy, docs source not ingestible, credential
-provisioning fails) — i.e. for reasons unrelated to experiment outcomes — it is
-replaced by the next reserve in queue order (R1→R5), and the failure is logged
-in §8 with the failing criterion. Targets are **never** replaced or dropped
-after their experiment has produced results.
+Additional 2026-major libraries verified during screening, in order:
+`slonik` 48→49 (Postgres), `better-sqlite3` 12→13 (SQLite; N-API rebuild),
+`nanoid` 5→6 (thin docs), `vite`/`undici` already selected. A target failing
+technical preflight is replaced by the next reserve and logged in §11.
 
-## 7. Funnel summary
+## 7. Changelog-driven goals + golden dataset
 
-```
-Population (README @ 334eaa0) ............ 1246
-  joined with metadata ................... 1238
-  screened (ranks 1–73, desc. stars) .....   73
-    excluded E1 (no product API docs) ....   11
-    excluded E2 (no endorsed image) ......    5
-    excluded E3 (multi-container) ........   23
-    excluded E8 (family of pilot) ........    1
-    category cap (≤2 per category) .......    7
-    pilot exclusion ......................    1  (Gitea; InfluxDB outside population)
-    SELECTED .............................   20
-    RESERVE QUEUE ........................    5
-```
+For each target the documented **breaking changes** are curated once, from the
+pinned upstream changelog (`changelogUrl`), in
+[`src/eval/changelogSeed.ts`](../../src/eval/changelogSeed.ts) as items
+`{summary, oldUsageHint, kind, expectedCategory, matchKeywords}`. Each item does
+double duty:
 
-Sample properties: 20 targets across **18 distinct categories**; stars range
-36 032 – 175 462; all criteria verdicts recorded above and reproducible from
-the pinned snapshot.
+- **Seed (goal generation only).** `renderChangelogSeed()` steers the planner to
+  generate goals a developer following the OLD docs would write, exercising the
+  `oldUsageHint` areas — valid on old, broken on new. Injected **only** into goal
+  generation, never the code-writing phase, so the code is still written from the
+  OLD docs and genuinely breaks on the new version; the goal text is instructed
+  not to reveal the version/changelog framing.
+- **Golden dataset (ground truth).** `scoreBreakingChanges()` matches the drift
+  the pipeline surfaced (experiment-run gap reasoning/fragments/fixes, per-goal
+  findings, regressed goals) against the items and reports **recall** — the
+  headline metric, written to the report under `changelog.detection`.
 
-## 8. Deviation log
+Representative breaking changes (full list in the module): commander → ESM-only,
+`--no-*` default change; execa → `execaCommand()` removed; got → `.cancel()` /
+`isStream` removed, 300/304 no longer auto-followed; ky → `prefixUrl`→`prefix`,
+`error.response.json()`→`error.data`; eslint → removed `SourceCode` methods,
+`nodeType` in `LintMessage`; vite → esbuild→oxc/rolldown; typeorm →
+`Connection`→`DataSource`; mikro-orm → `getKnex()`→`getKysely()`; undici →
+legacy handler wrappers removed; marked → table/heading tokenizer change.
 
-_(empty — to be filled only via the replacement rule in §6)_
+## 8. Drift protocol (per target)
+
+1. **Index** the OLD-version full docs → Rookie project.
+2. **Baseline** — install `<pkg>@<oldVersion>`; run the master plan with goals
+   seeded from the changelog (goals pass, since docs match the old version).
+3. **Experiment** — re-run the same goals with `<pkg>@<newVersion>` installed;
+   goals hitting breaking changes fail → drift.
+4. **Report** — diff summaries, score breaking-change recall, save JSON + bundle.
+
+Only the library version differs between phases; any database engine is held
+constant. Connection/endpoint details are injected via `ctx`.
+
+## 9. Runner support
+
+The runner ([`experiment-runner.ts`](../experiment-runner.ts)) supports all three
+runtimes directly. Each target declares a `runtime` in [`targets.ts`](targets.ts);
+the runner starts a container only for `http`/`db` targets (held constant across
+both phases) and skips all Docker for `pure` targets, whose `ctx` is empty. The
+version-pinned OLD docs are fetched as raw markdown from GitHub, so indexing
+never needs a container. Run one target with `--config <key>`, the whole sample
+with `deno task experiment:all`.
+
+## 10. Threats to validity
+
+- **Type-only breaking changes are invisible.** The sandbox runs plain JS (no
+  `tsc`); TypeScript-only breaks (e.g. some drizzle/vite type changes) cannot be
+  observed. E2 restricts the golden dataset to runtime-observable items;
+  type-only drift is out of scope for this experiment.
+- **Non-throwing behavioural drift.** A changed default/return shape that does
+  not throw is only caught if the generated program asserts the OLD-documented
+  outcome — the generation prompt requires such verification, but coverage is
+  imperfect.
+- **Model still partially knows the OLD API.** Acceptable: the baseline is
+  supposed to pass; what matters is that the NEW breaking behaviour is
+  post-cutoff, so the model cannot silently write new-API code and mask drift.
+- **Curation depth.** 2–3 breaking changes per target (the clearest, runtime
+  observable). Recall is reported against this curated set, not every line of the
+  changelog.
+
+## 11. Deviation log
+
+_(empty — to be filled only via the replacement rule in §6.)_

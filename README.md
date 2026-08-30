@@ -281,66 +281,94 @@ The frontend is available at `http://localhost:5173`, the backend at `http://loc
 
 ## Experiments
 
-The repository ships two reproducible evaluation protocols: a **documentation-drift** experiment (real version pairs of self-hosted projects) and a **mutation-testing** protocol (controlled defects injected into gold-standard docs). Both require a running Rookie instance (`deno task start`, defaults to `http://localhost:3000`).
+The repository ships two reproducible evaluation protocols: a **documentation-drift** experiment (post-cutoff npm library version pairs) and a **mutation-testing** protocol (controlled defects injected into a post-cutoff library's docs). Both require a running Rookie instance (`deno task start`, defaults to `http://localhost:3000`).
 
 ### Documentation drift (`scripts/experiment-runner.ts`)
 
-Indexes the documentation of an **old** version of a Dockerized project, then runs the Master Planner against both the old and a **new** container image. Goals that passed on the old API but fail on the new one mark documentation drift.
+Indexes the **old** version's documentation of an npm library, runs the Master Planner with the old library installed (baseline), then re-runs the same goals with a **new** library version installed (experiment). Goals that passed on the old library but fail on the new one mark documentation drift. The sole independent variable is the library version; any backing container (see below) is held constant across both phases.
 
-Phases: (1) index docs from the old image → (2) baseline: old docs × old API → (3) experiment: old docs × new API → (4) diff structured summaries and write `experiment-<config>-<ts>.json`.
+The selection is the **2026 changelog-driven sample**: each library's **new** version was released **after the model's Jan-2026 knowledge cutoff**, so its breaking changes cannot be memorised — the model must rely on the old docs, and code written from them genuinely breaks on the new version. Goals are **seeded from the real upstream changelog** so they exercise the documented breaking changes, and the same breaking changes form the **golden dataset** for detection recall ([`src/eval/changelogSeed.ts`](src/eval/changelogSeed.ts)).
 
-**Target set.** Targets live in [`scripts/experiments/targets.ts`](scripts/experiments/targets.ts): a pre-registered **20-project sample** drawn from awesome-selfhosted (descending-stars screening, eligibility criteria E1–E8, ≤2 per category) plus two development **pilots** (Gitea, InfluxDB) that are excluded from the evaluation sample. The full selection protocol, screening log and replacement queue are documented in [`scripts/experiments/SELECTION.md`](scripts/experiments/SELECTION.md) — do not add/replace targets except via its replacement rule.
+Each target runs in one of three runtimes: **pure** (no container; CLI/parser/build libraries), **http** (a throwaway httpbin container; `ctx.baseUrl`), or **db** (a throwaway Postgres container; `ctx.connectionString`).
+
+Phases: (1) index the old-version docs → (2) baseline: old docs × `<pkg>@<oldVersion>` → (3) experiment: same goals × `<pkg>@<newVersion>` → (4) diff structured summaries, score breaking-change recall, and write `experiment-<config>-<ts>.json`, plus `…-full-reports.json` with the **complete** master-plan documents and every per-goal report (the run's evidence survives on disk, independently of the database).
+
+The library version is pinned per phase via the planner's `packageOverrides` (name → version); any endpoint/connection string is injected through the execution context (`ctx`). See [`src/sandbox/depDetect.ts`](src/sandbox/depDetect.ts) `applyPackageOverrides`.
+
+**Crash resilience.** After each phase the runner writes `experiment-<config>-checkpoint.json` (project id, baseline/experiment master-plan ids). If a run dies, **rerunning the same command resumes automatically** from the last completed phase — completed results are re-fetched from Rookie's database instead of being re-paid. The checkpoint is deleted on success; `--fresh` discards it and starts over; `--project-id <id>` / `--baseline-id <masterPlanId>` seed it manually. A checkpoint whose engine image no longer matches the config is ignored with a warning.
+
+**Target set.** Targets live in [`scripts/experiments/targets.ts`](scripts/experiments/targets.ts): a pre-registered **10-library sample** whose new majors were released post-cutoff (2026), spanning library types (CLI parser, process-exec, HTTP clients, ORMs, linter, build tool, markdown). Full protocol, eligibility criteria E1–E6, version pairs, runtimes and reserve queue: [`scripts/experiments/SELECTION.md`](scripts/experiments/SELECTION.md). Do not add/replace targets except via its rules.
 
 ```bash
-# list all configured targets (sample ranks + pilots)
+# list all configured targets (library pair + runtime)
 deno run --allow-all scripts/experiment-runner.ts --list
 
 # ALWAYS preflight a target before its first experiment run:
-# verifies image tags, container health, docs ingestibility and credential setup
-deno run --allow-all scripts/experiments/preflight.ts --config jellyfin
-deno run --allow-all scripts/experiments/preflight.ts --all --skip-pilots   # whole sample (pulls ~40 images)
+# verifies the npm version pair, docs ingestibility, and (http/db) container health
+deno run --allow-all scripts/experiments/preflight.ts --config execa
+deno run --allow-all scripts/experiments/preflight.ts --all   # whole sample
 
 # run the experiment for one target
-deno run --allow-all scripts/experiment-runner.ts --config jellyfin
-deno run --allow-all scripts/experiment-runner.ts --config gitea --verbose
-ROOKIE_URL=http://localhost:3000 deno run --allow-all scripts/experiment-runner.ts --config memos
+deno run --allow-all scripts/experiment-runner.ts --config execa
+deno run --allow-all scripts/experiment-runner.ts --config typeorm --verbose
+ROOKIE_URL=http://localhost:3000 deno run --allow-all scripts/experiment-runner.ts --config got
+
+# crashed mid-run? just rerun — the checkpoint resumes the last unfinished phase
+deno run --allow-all scripts/experiment-runner.ts --config execa
+deno run --allow-all scripts/experiment-runner.ts --config execa --fresh   # ignore checkpoint
+
+# run the WHOLE sample with the orchestrator (recommended) — sequential, output
+# tee'd to logs/<config>.log, per-target summary table at the end. Safe to
+# rerun any time: finished targets are skipped (final report on disk),
+# an interrupted one resumes from its checkpoint, failed ones are retried.
+deno task experiment:all
+deno task experiment:all -- --dry-run                # show the batch plan, run nothing
+deno task experiment:all -- --only execa,typeorm     # subset (e.g. retry failed targets)
+deno task experiment:all -- --skip mikroorm          # exclude targets
+deno task experiment:all -- --bail                   # stop at the first failure
 ```
 
-A target that fails preflight for technical reasons is replaced by the next reserve from the pre-registered queue (SELECTION.md §6) and the substitution is logged in §8 — never silently swapped.
+A target that fails preflight for technical reasons is replaced by the next reserve from the pre-registered queue (SELECTION.md §6) and the substitution is logged in §11 — never silently swapped.
 
-**Requirements:** running Rookie stack (MongoDB, Qdrant, LLM + embeddings backend), Docker with network access (image pulls, and sandboxed code reaches the target via `host.docker.internal`), outbound HTTPS for docs crawling.
+**Requirements:** running Rookie stack (MongoDB, Qdrant, LLM + embeddings backend); Docker only for **http**/**db** targets (pulls `mccutchen/go-httpbin` / `postgres:16`; sandboxed code reaches them via `host.docker.internal`) — **pure** targets need no Docker; and — crucially — the **sandbox must reach the npm registry** to install the pinned library versions (`ROOKIE_SANDBOX_AUTO_INSTALL_DEPS=true`, network mode other than `none`).
 
 ### `scripts/print-report.ts`
 
 Pretty-prints a saved drift report with colourised tables, pass-rate bars, drift diff, and failure taxonomy.
 
 ```bash
-deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json          # overview
-deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json --goals  # + goals comparison
-deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json --gaps   # + documentation gaps
-deno run --allow-read scripts/print-report.ts experiment-gitea-<ts>.json --full   # everything
+deno run --allow-read scripts/print-report.ts experiment-execa-<ts>.json          # overview
+deno run --allow-read scripts/print-report.ts experiment-execa-<ts>.json --goals  # + goals comparison
+deno run --allow-read scripts/print-report.ts experiment-execa-<ts>.json --gaps   # + documentation gaps
+deno run --allow-read scripts/print-report.ts experiment-execa-<ts>.json --full   # everything
 ```
 
 ### Mutation testing (`deno task eval:mutation`)
 
 MuTAP-style protocol applied to documentation: four operators inject controlled defects into gold-standard docs (`DelParam`/`DelExmpl` → MISSING, `ObfuscateType` → AMBIGUOUS, `AddFalseInfo` → INCORRECT), and the pipeline is scored on whether it detects and correctly classifies each mutant.
 
-Per gold corpus the driver runs: a **gold baseline** (fresh master plan; checks the ≥90% pass-rate requirement and counts false alarms), then **one targeted `planner/rerun` per mutant**. A rerun is cheap by construction: it re-runs **only the goal(s) that can exercise the wounded fragment** (`goalIndices`, mapped from the mutant's file + section) and skips the doc-example smoke phase (`skipDocExamples` — no signal for any operator). Results — MDS per operator, a confusion matrix and Cohen's κ — go to `mutation-<ts>.json`; errored mutant runs are recorded and excluded from MDS denominators.
+The driver runs: a **gold baseline** (fresh master plan; checks the ≥90% pass-rate requirement and counts false alarms), then **one targeted `planner/rerun` per mutant**. A rerun is cheap by construction: it re-runs **only the goal(s) that can exercise the wounded fragment** (`goalIndices`, mapped from the mutant's file + section) and skips the doc-example smoke phase (`skipDocExamples` — no signal for any operator). Results — MDS per operator, a confusion matrix and Cohen's κ — go to `mutation-<ts>.json`; errored mutant runs are recorded and excluded from MDS denominators.
 
-Gold corpora: the multi-library corpus in [`src/eval/goldCorpus.ts`](src/eval/goldCorpus.ts) (lodash, dayjs, uuid, slugify, ms — 69 potential mutants) plus every eval fixture with corrected docs (~80 potential mutants total). Mutant generation is seeded and deterministic.
+**Corpus — marked@18 (post-cutoff).** A corpus of well-known libraries is a poor
+mutation subject: the model knows those libraries so well it writes correct code
+despite the injected doc defect, so mutants survive (≈0 detection). Instead the
+gold corpus is the **full, version-pinned documentation of marked@18 — released
+after the model's Jan-2026 knowledge cutoff** ([`src/eval/mutationCorpus.ts`](src/eval/mutationCorpus.ts));
+the model must rely on the docs, so a mutated doc actually misleads it and
+mutants become detectable. marked is pinned to the documented version in the
+sandbox (`packageOverrides`). Its docs yield a pool of 73 mutants across all four
+operators (`DelParam`/`DelExmpl` → MISSING, `ObfuscateType` → AMBIGUOUS,
+`AddFalseInfo` → INCORRECT); the operators recognise both bullet-style params and
+real API-doc option headings (`#### option` + `Type:`).
 
 ```bash
-deno task eval:mutation -- --dry-run                        # inspect the mutant pool (no infra needed)
-deno task eval:mutation                                      # default: 2 mutants per operator, all corpora
-deno task eval:mutation -- --per-operator all                # exhaustive: one mutant per site (~80)
-deno task eval:mutation -- --seed 42 --per-operator 5        # reproducible subset (20 mutants)
-deno task eval:mutation -- --corpus gold-multilib            # single corpus
-deno task eval:mutation -- --concurrency 4                   # run 4 mutants in parallel
-deno task eval:mutation -- --corpus gold-multilib --gold <masterPlanId>
-                                                             # reuse a previous gold baseline
+deno task eval:mutation -- --dry-run                          # inspect the mutant pool (no infra)
+deno task eval:mutation -- --per-operator 2                   # small seeded sample while iterating
+deno task eval:mutation -- --per-operator all --concurrency 4 # full run
+deno task eval:mutation -- --gold <masterPlanId>              # reuse a prior gold baseline
 ```
 
-The driver prints `reuse this baseline next time: --gold <id>` after each fresh gold run — pass that id on subsequent invocations to skip Phase 0 entirely (requires `--corpus`/`--fixture`). While iterating, prefer a small seeded sample (`--per-operator 2`); run `--per-operator all` once for the final numbers.
+The driver prints `reuse this baseline next time: --gold <id>` after each fresh gold run — pass that id on subsequent invocations to skip Phase 0 entirely. While iterating, prefer a small seeded sample (`--per-operator 2`); run `--per-operator all` once for the final numbers.
 
 **Requirements:** the full stack as above; additionally the sandbox must reach the npm registry (`ROOKIE_SANDBOX_AUTO_INSTALL_DEPS=true`, network mode other than `none`) so the documented libraries install inside the container. `--dry-run` needs Deno only. Full technical description (operators, matching rules, corpora, cost guidance): [`src/eval/MUTATION.md`](src/eval/MUTATION.md).
 

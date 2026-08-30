@@ -55,6 +55,7 @@ export function makeStructured(
             maxRepairAttempts: llm.maxRepairAttempts,
             maxRetries: llm.maxRetries,
             retryBaseMs: llm.retryBaseMs,
+            maxTokens: llm.maxTokens,
             logger,
         });
     };

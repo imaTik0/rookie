@@ -42,7 +42,11 @@ export class ProjectService {
             fileIds: fileIds as types.file.FileId[],
         });
         if (fileIds) {
-            this.addFilesToProjectNoCheck(newProject._id, fileIds);
+            // Await indexing: (1) an embedding failure must surface as a 500 on
+            // THIS request, not a fire-and-forget unhandled rejection that crashes
+            // the whole server mid-batch; (2) the project must be fully indexed
+            // before the caller (e.g. the planner) starts searching it.
+            await this.addFilesToProjectNoCheck(newProject._id, fileIds);
         }
         const populated = await this.projectRepository.getPopulated(newProject._id);
         return populated ? this.mapDbToApi(populated) : null;

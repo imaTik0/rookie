@@ -30,7 +30,9 @@ export function fakeLogger(): Logger & { calls: { level: string; args: unknown[]
 // ── OpenAI chat client ─────────────────────────────────────────────────────────
 
 /** One scripted reply: either return `content` or throw `error`. */
-export type FakeChatStep = { content: string } | { error: unknown };
+export type FakeChatStep =
+    | { content: string; finish_reason?: string }
+    | { error: unknown };
 
 export interface FakeOpenAI {
     /** Cast to the real OpenAI type for injection. */
@@ -56,7 +58,12 @@ export function fakeOpenAI(
             : steps[Math.min(i, steps.length - 1)];
         i++;
         if ("error" in step) return Promise.reject(step.error);
-        return Promise.resolve({ choices: [{ message: { content: step.content } }] });
+        return Promise.resolve({
+            choices: [{
+                message: { content: step.content },
+                finish_reason: step.finish_reason ?? "stop",
+            }],
+        });
     };
     const openai = { chat: { completions: { create } } } as unknown as OpenAI;
     return { openai, calls };

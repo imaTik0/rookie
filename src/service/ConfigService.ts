@@ -55,6 +55,14 @@ export interface ConfigValues {
         /** Per-call timeout (ms) for a single LLM completion. Guards against hangs;
          *  set generously for slow local models doing large generations. */
         callTimeoutMs: number;
+        /**
+         * Max output tokens per completion. MUST be generous for "reasoning"
+         * models (gpt-oss, qwen3, deepseek-r1…): they spend budget on internal
+         * thinking BEFORE emitting content, so a small cap returns an EMPTY body
+         * with finish_reason=length. Structured calls escalate this automatically
+         * when they hit the cap.
+         */
+        maxTokens: number;
     };
     /** BM25 sparse-vector parameters (Qdrant applies IDF server-side). */
     sparse: {
@@ -112,8 +120,19 @@ export interface ConfigValues {
         networkName: string;
         /** Auto `npm install` of bare imports detected in generated code. */
         autoInstallDeps: boolean;
-        /** Per-step Docker execution timeout in milliseconds (default 60 000). */
+        /** Per-step Docker execution timeout in milliseconds (default 60 000).
+         *  Applies to the PROGRAM only — dependency install has its own budget. */
         stepTimeoutMs: number;
+        /** Separate budget for `npm install` so a slow registry never consumes the
+         *  program's execution time (which would look like a bogus timeout). */
+        installTimeoutMs: number;
+        /** Max sandbox containers in flight process-wide. Goals, examples and doc
+         *  examples all fan out concurrently; without a cap they oversubscribe the
+         *  Docker VM, and the resulting slowness surfaces as spurious timeouts. */
+        maxConcurrentContainers: number;
+        /** Memory cap per sandbox container. `node + npm install` needs far less
+         *  than the old 2 GB; a smaller cap lets more run safely side by side. */
+        memoryLimit: string;
         /**
          * Reject exit-0 executions that never made an HTTP request to the API
          * host(s) declared in the execution context (anti-mock / anti-no-op).
@@ -178,11 +197,11 @@ export class ConfigService {
             },
             limits: {
                 maxResearchIterations: Number.parseInt(
-                    Deno.env.get("ROOKIE_MAX_RESEARCH_ITERATIONS") || "5",
+                    Deno.env.get("ROOKIE_MAX_RESEARCH_ITERATIONS") || "3",
                     10,
                 ),
                 maxVerificationIterations: Number.parseInt(
-                    Deno.env.get("ROOKIE_MAX_VERIFICATION_ITERATIONS") || "5",
+                    Deno.env.get("ROOKIE_MAX_VERIFICATION_ITERATIONS") || "3",
                     10,
                 ),
                 defaultSearchLimit: Number.parseInt(
@@ -198,14 +217,14 @@ export class ConfigService {
                     10,
                 ),
                 maxContextChars: Number.parseInt(
-                    Deno.env.get("ROOKIE_MAX_CONTEXT_CHARS") || "50000",
+                    Deno.env.get("ROOKIE_MAX_CONTEXT_CHARS") || "30000",
                     10,
                 ),
                 maxScenarioDocsChars: Number.parseInt(
                     Deno.env.get("ROOKIE_MAX_SCENARIO_DOCS_CHARS") || "100000",
                     10,
                 ),
-                maxContextTokens: envNum("ROOKIE_MAX_CONTEXT_TOKENS", 12000),
+                maxContextTokens: envNum("ROOKIE_MAX_CONTEXT_TOKENS", 64000),
                 maxFileReadChars: envNum("ROOKIE_MAX_FILE_READ_CHARS", 16000),
             },
             llm: {
@@ -219,6 +238,7 @@ export class ConfigService {
                 maxRetries: envNum("ROOKIE_LLM_MAX_RETRIES", 3),
                 retryBaseMs: envNum("ROOKIE_LLM_RETRY_BASE_MS", 500),
                 callTimeoutMs: envNum("ROOKIE_LLM_CALL_TIMEOUT_MS", 300_000),
+                maxTokens: envNum("ROOKIE_LLM_MAX_TOKENS", 8192),
             },
             sparse: {
                 k1: envNum("ROOKIE_BM25_K1", 1.5),
@@ -234,7 +254,7 @@ export class ConfigService {
                 readabilityMinChars: envNum("ROOKIE_READABILITY_MIN_CHARS", 250),
             },
             reranker: {
-                mode: (Deno.env.get("ROOKIE_RERANKER_MODE") as "off" | "llm" | "api") || "llm",
+                mode: (Deno.env.get("ROOKIE_RERANKER_MODE") as "off" | "llm" | "api") || "off",
                 baseURL: Deno.env.get("ROOKIE_RERANKER_BASE_URL"),
                 apiKey: Deno.env.get("ROOKIE_RERANKER_API_KEY"),
                 model: Deno.env.get("ROOKIE_RERANKER_MODEL"),
@@ -244,7 +264,7 @@ export class ConfigService {
                 votes: Math.max(1, envNum("ROOKIE_CLASSIFIER_VOTES", 3)),
             },
             planner: {
-                parallelGoals: Math.max(1, envNum("ROOKIE_PARALLEL_GOALS", 1)),
+                parallelGoals: Math.max(1, envNum("ROOKIE_PARALLEL_GOALS", 4)),
             },
             sandbox: {
                 hardening: envBool("ROOKIE_SANDBOX_HARDENING", true),
@@ -254,6 +274,12 @@ export class ConfigService {
                 networkName: Deno.env.get("ROOKIE_SANDBOX_NETWORK_NAME") || "rookie-network",
                 autoInstallDeps: envBool("ROOKIE_SANDBOX_AUTO_INSTALL_DEPS", true),
                 stepTimeoutMs: envNum("ROOKIE_SANDBOX_STEP_TIMEOUT_MS", 60_000),
+                installTimeoutMs: envNum("ROOKIE_SANDBOX_INSTALL_TIMEOUT_MS", 180_000),
+                maxConcurrentContainers: Math.max(
+                    1,
+                    envNum("ROOKIE_SANDBOX_MAX_CONCURRENT", 4),
+                ),
+                memoryLimit: Deno.env.get("ROOKIE_SANDBOX_MEMORY_LIMIT") || "512m",
                 requireGroundedSuccess: envBool("ROOKIE_SANDBOX_REQUIRE_GROUNDED_SUCCESS", true),
             },
         };

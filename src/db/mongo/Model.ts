@@ -60,6 +60,15 @@ export interface TestSuite {
     maximalStoryLength: number;
     mode: "CODE_GENERATION" | "TEST_SCENARIO";
     userGoal?: string;
+    /** Sandbox npm install pins (name → version|"latest") for this suite's runs;
+     *  used by the library-drift experiment to install `<pkg>@<version>`. */
+    packageOverrides?: Record<string, string>;
+    /** Docs-ablation arm: generate code without documentation (no RAG). */
+    withoutDocs?: boolean;
+    /** Pre-generated programs to run verbatim (frozen re-execution). */
+    frozenPrograms?: string[];
+    /** Documented API symbols the run should exercise (docs-faithfulness). */
+    expectedApis?: string[];
     createdAt: Date;
     updatedAt: Date;
 }

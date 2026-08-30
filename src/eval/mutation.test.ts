@@ -223,6 +223,34 @@ Deno.test("relevantGoalIndices: file stem must match at a word start ('ms' ≠ '
     assertEquals(idx, [1]);
 });
 
+Deno.test("enumerateSites detects heading-style options (real API-doc format)", () => {
+    // sindresorhus/execa style: `#### options.timeout` then `_Type:_ \`number\``.
+    const files = [{
+        filename: "api.md",
+        content: [
+            "#### options.timeout",
+            "",
+            "_Type:_ `number`",
+            "",
+            "Abort after N milliseconds.",
+            "",
+            "#### notAnOption",
+            "",
+            "Just prose, no type line.",
+        ].join("\n"),
+    }];
+    const sites = enumerateSites(files);
+    const delParam = sites.filter((s) => s.operator === "DelParam");
+    const addFalse = sites.filter((s) => s.operator === "AddFalseInfo");
+    // options.timeout is a real option (has a Type line); notAnOption is not.
+    assert(delParam.some((s) => s.matchKeywords.includes("options.timeout")));
+    assert(delParam.some((s) => s.matchKeywords.includes("timeout")));
+    assert(!delParam.some((s) => s.matchKeywords.includes("notAnOption")));
+    assert(addFalse.length >= 1, "heading option yields an AddFalseInfo site");
+    // `number` on the Type line is still an ObfuscateType site.
+    assert(sites.some((s) => s.operator === "ObfuscateType" && s.description.includes("number")));
+});
+
 Deno.test("enumerateSites attaches section-identifier goalHints to param sites", () => {
     const files = [{
         filename: "lib.md",

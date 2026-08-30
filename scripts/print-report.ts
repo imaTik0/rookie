@@ -98,12 +98,46 @@ interface DriftData {
 interface Report {
     meta: {
         project: string;
-        oldImage: string;
-        newImage: string;
+        library?: string;
+        oldVersion?: string;
+        newVersion?: string;
+        runtime?: string;
+        image?: string | null;
+        /** Experiment ran on frozen baseline code (same programs, new version). */
+        frozen?: boolean;
+        // Legacy reports (pre-2026-selection) carried image pairs instead.
+        oldImage?: string;
+        newImage?: string;
         projectId: string;
         timestamp: string;
         outputFile?: string;
     };
+    /** Docs-faithfulness (dodge) summary from the baseline generation. */
+    faithfulness?: {
+        checkedSteps: number;
+        faithfulSteps: number;
+        dodgedSteps: number;
+        dodgedGoals: string[];
+    } | null;
+    /** Step-level (paired) drift — finer-grained than goal status. */
+    stepDrift?: {
+        baseline: { total: number; passed: number; passRate: number };
+        experiment: { total: number; passed: number; passRate: number };
+        regressions: Array<
+            { goal: string; stepIndex: number; description?: string; experiment: string }
+        >;
+        improvements: unknown[];
+        paired: number;
+        unpaired: number;
+    } | null;
+    /** Docs-ablation arm (present with --ablation): docs vs no-docs pass rate. */
+    ablation?: {
+        passed: number;
+        total: number;
+        passRate: number;
+        baselinePassRate: number;
+        docValue: number;
+    } | null;
     baseline: PhaseData;
     experiment: PhaseData;
     drift: DriftData;
@@ -209,9 +243,41 @@ function buildInlineBar(count: number, max: number, width: number, color: string
 function printMeta(r: Report): void {
     section("Metadata");
     kv("Project:", bold(r.meta.project));
-    kv("Old image:", r.meta.oldImage);
-    kv("New image:", r.meta.newImage);
+    if (r.meta.library) {
+        kv("Library:", `${r.meta.library} ${r.meta.oldVersion} → ${r.meta.newVersion}`);
+        kv(
+            "Runtime:",
+            r.meta.image ? `${r.meta.runtime} · ${r.meta.image}` : "pure (no container)",
+        );
+        if (r.meta.frozen !== undefined) {
+            kv(
+                "Experiment:",
+                r.meta.frozen ? "frozen baseline code (same programs)" : "regenerated",
+            );
+        }
+    } else {
+        // Legacy image-pair reports.
+        kv("Old image:", r.meta.oldImage ?? "?");
+        kv("New image:", r.meta.newImage ?? "?");
+    }
     kv("Project ID:", gray(r.meta.projectId));
+    if (r.faithfulness) {
+        const f = r.faithfulness;
+        kv(
+            "Faithfulness:",
+            `${f.faithfulSteps}/${f.checkedSteps} steps used a documented API` +
+                (f.dodgedGoals.length > 0 ? red(`  · ${f.dodgedGoals.length} goal(s) dodged`) : ""),
+        );
+    }
+    if (r.ablation) {
+        const a = r.ablation;
+        kv(
+            "Doc value:",
+            `${(a.baselinePassRate * 100).toFixed(0)}% (docs) → ${
+                (a.passRate * 100).toFixed(0)
+            }% (no docs) = ${(a.docValue * 100).toFixed(0)} pts`,
+        );
+    }
     kv("Timestamp:", r.meta.timestamp);
     if (r.meta.outputFile) kv("File:", dim(r.meta.outputFile));
 }
@@ -237,10 +303,43 @@ function printOverview(r: Report): void {
         }`,
     );
 
+    // Step level: each step is an independent program, and the frozen experiment
+    // re-runs the SAME programs — so this is a paired comparison, and it catches
+    // drift that goal status hides (a goal PARTIAL in both phases cannot move).
+    const sd = r.stepDrift;
+    if (sd && sd.paired > 0) {
+        const bp = Math.round(sd.baseline.passRate * 100);
+        const ep = Math.round(sd.experiment.passRate * 100);
+        console.log(`\n  ${bold("Steps")} ${gray("(individual programs — paired)")}`);
+        console.log(
+            `  ${buildBar(bp, 30)}  ${bold(`${sd.baseline.passed}/${sd.baseline.total}`)} ${
+                gray(`(${bp}%)`)
+            }  baseline`,
+        );
+        console.log(
+            `  ${buildBar(ep, 30)}  ${bold(`${sd.experiment.passed}/${sd.experiment.total}`)} ${
+                ep < bp ? red(`(${ep}%)`) : green(`(${ep}%)`)
+            }  experiment`,
+        );
+        const parts = [
+            sd.regressions.length > 0
+                ? red(`${sd.regressions.length} step regression(s)`)
+                : green("no step regressions"),
+        ];
+        if (sd.improvements.length > 0) {
+            parts.push(yellow(`${sd.improvements.length} improvement(s) — flaky, code is frozen`));
+        }
+        if (sd.unpaired > 0) parts.push(gray(`${sd.unpaired} unpaired`));
+        console.log(`  ${parts.join("  ·  ")}`);
+    }
+
     console.log();
     if (d.regressions.length === 0 && d.improvements.length === 0) {
+        const stepNote = sd && sd.regressions.length > 0
+            ? yellow(` — but ${sd.regressions.length} STEP regression(s): goal status masked it`)
+            : "";
         console.log(
-            `  ${green("✓")}  ${bold("No drift detected")} — documentation stable across versions.`,
+            `  ${green("✓")}  ${bold("No goal-level drift")}${stepNote}`,
         );
     } else {
         if (d.regressions.length > 0) {

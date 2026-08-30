@@ -43,7 +43,11 @@ export function buildSandboxHarness(
             console.error(JSON.stringify({
                 name: 'HarnessContractError',
                 message: '${NO_DEFAULT_EXPORT}: the program must export default an async function(ctx). ' +
-                    'A module without one cannot receive the execution context and would run as a no-op.',
+                    'A module without one cannot receive the execution context and would run as a no-op. ' +
+                    'FIX: keep the exact same logic but move your top-level statements inside ' +
+                    'export default async (ctx) => { ... return { result, ctx }; } — this is required ' +
+                    'for CLI/build/script libraries too (pass an explicit argv array instead of relying ' +
+                    'on process.argv).',
             }));
             process.exit(1);
         }
@@ -51,6 +55,8 @@ export function buildSandboxHarness(
         : `const runFunc = typeof userModule.default === 'function' ? userModule.default : (ctx) => { /* no-op: top-level code already ran via import */ };`;
     return `
 import fs from 'fs';
+import http from 'node:http';
+import https from 'node:https';
 const ctx = ${JSON.stringify(ctx)};
 const userCode = ${JSON.stringify(userCode)};
 
@@ -71,6 +77,7 @@ if (__origFetch) {
             responseBody: null,
             durationMs: null,
             error: null,
+            __t: __start, // for undici dedupe; stripped before emitting
         };
         if (opts?.body) {
             try { __entry.requestBody = typeof opts.body === 'string' ? opts.body.slice(0, 500) : JSON.stringify(opts.body).slice(0, 500); } catch {}
@@ -91,13 +98,101 @@ if (__origFetch) {
     };
 }
 
+// HTTP traffic interceptor (node:http / node:https) — got, node-fetch@2, axios
+// and most non-fetch clients issue requests via http.request rather than
+// globalThis.fetch; without this their traffic is invisible to grounding, so a
+// real API call (e.g. to host.docker.internal) is wrongly treated as "no call".
+// The URL is logged synchronously (an attempted call grounds the run even if it
+// errors); status/error are filled in via events on the returned request.
+const __wrapNodeHttp = (mod, defaultProto) => {
+    for (const __name of ['request', 'get']) {
+        const __orig = mod[__name];
+        if (typeof __orig !== 'function') continue;
+        mod[__name] = function (...args) {
+            const req = __orig.apply(this, args);
+            try {
+                let url = '';
+                let method = 'GET';
+                const a = args[0];
+                if (typeof a === 'string' || a instanceof URL) {
+                    url = String(a);
+                    const o = (args[1] && typeof args[1] === 'object' && !(args[1] instanceof URL))
+                        ? args[1] : {};
+                    method = String(o.method || 'GET').toUpperCase();
+                } else if (a && typeof a === 'object') {
+                    method = String(a.method || 'GET').toUpperCase();
+                    const proto = String(a.protocol || (defaultProto + ':')).replace(':', '');
+                    const host = a.hostname || a.host || 'localhost';
+                    const port = a.port ? (':' + a.port) : '';
+                    const path = a.path || '/';
+                    url = proto + '://' + host + port + path;
+                }
+                const __entry = {
+                    method, url, requestBody: null, responseStatus: null,
+                    responseBody: null, durationMs: null, error: null,
+                };
+                const __start = Date.now();
+                req.on('response', (res) => {
+                    __entry.responseStatus = res.statusCode;
+                    __entry.durationMs = Date.now() - __start;
+                });
+                req.on('error', (e) => {
+                    __entry.error = (e && e.message) || String(e);
+                    __entry.durationMs = Date.now() - __start;
+                });
+                __httpLog.push(__entry);
+            } catch {}
+            return req;
+        };
+    }
+};
+try { __wrapNodeHttp(http, 'http'); __wrapNodeHttp(https, 'https'); } catch {}
+
+// HTTP traffic interceptor (undici) — undici drives its own socket stack, so it
+// bypasses BOTH globalThis.fetch and node:http. Without this its requests are
+// invisible to grounding and every exit-0 run is rejected as "never called the
+// API". undici publishes to node's diagnostics_channel, which is the supported
+// observation point and covers all of its APIs (request/fetch/Client/Pool).
+try {
+    const dc = await import('node:diagnostics_channel');
+    dc.subscribe('undici:request:create', (msg) => {
+        try {
+            const req = msg?.request; if (!req) return;
+            const method = String(req.method || 'GET').toUpperCase();
+            const url = String(req.origin || '') + String(req.path || '');
+            // Node's global fetch is undici internally, so a patched-fetch call
+            // also lands here. Skip it if fetch already logged the same request.
+            const dup = __httpLog.some((e) =>
+                e.url === url && e.method === method && Date.now() - (e.__t || 0) < 2000);
+            if (dup) return;
+            __httpLog.push({
+                method, url, requestBody: null, responseStatus: null,
+                responseBody: null, durationMs: null, error: null, __t: Date.now(),
+            });
+        } catch {}
+    });
+} catch { /* diagnostics_channel unavailable — other interceptors still apply */ }
+
 ;(async () => {
     const __emitHttpLog = () => {
         if (__httpLog.length > 0) {
             console.log("${HTTP_LOG_START}");
-            console.log(JSON.stringify(__httpLog));
+            // Drop the internal dedupe timestamp — it is not part of the report.
+            console.log(JSON.stringify(__httpLog.map(({ __t, ...e }) => e)));
             console.log("${HTTP_LOG_END}");
         }
+    };
+    // Force process termination after emitting output. Stateful clients (ioredis,
+    // mongoose, pg/mysql2 pools, redis v4) keep open sockets and retry timers that
+    // hold the event loop alive, so a program that never calls .quit()/.end() would
+    // otherwise hang until the sandbox timeout. We flush stdout/stderr first so the
+    // result markers are not truncated, with a short hard fallback.
+    const __exit = (code) => {
+        let pending = 2;
+        const done = () => { if (--pending <= 0) process.exit(code); };
+        try { process.stdout.write('', done); } catch { done(); }
+        try { process.stderr.write('', done); } catch { done(); }
+        setTimeout(() => process.exit(code), 2000).unref();
     };
     try {
         const userModule = await import('./userStep.js');
@@ -107,6 +202,7 @@ if (__origFetch) {
         console.log(JSON.stringify(output || { result: null, ctx }));
         console.log("${RESULT_END}");
         __emitHttpLog();
+        __exit(0);
     } catch (e) {
         __emitHttpLog();
 
@@ -184,7 +280,7 @@ if (__origFetch) {
             // Last-resort fallback if even the safe serialiser fails
             console.error(JSON.stringify({ message: String(e?.message ?? e), name: String(e?.name ?? 'Error') }));
         }
-        process.exit(1);
+        __exit(1);
     }
 })();
 `;

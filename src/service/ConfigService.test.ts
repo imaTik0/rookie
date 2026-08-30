@@ -39,11 +39,17 @@ Deno.test("defaults apply when no env is set", () => {
         assertEquals(c.qdrantVectorDb.port, 6333);
         assertEquals(c.openAI.modelName, "gpt-4o-mini");
         assertEquals(c.embeddings.embeddingModel, "nomic-embed-text");
-        assertEquals(c.reranker.mode, "llm");
+        // Speed profile defaults: no LLM reranker call per search, goals run
+        // concurrently, and a generous output budget so "reasoning" models do not
+        // return an empty body with finish_reason=length.
+        assertEquals(c.reranker.mode, "off");
         assertEquals(c.sandbox.hardening, true);
         assertEquals(c.sandbox.stepTimeoutMs, 60_000);
         assertEquals(c.sandbox.requireGroundedSuccess, true);
-        assertEquals(c.planner.parallelGoals, 1);
+        assertEquals(c.planner.parallelGoals, 4);
+        assertEquals(c.llm.maxTokens, 8192);
+        assertEquals(c.limits.maxResearchIterations, 3);
+        assertEquals(c.limits.maxContextChars, 30_000);
     });
 });
 

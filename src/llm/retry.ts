@@ -17,13 +17,20 @@ export interface RetryOptions {
     logger?: RetryLogger;
 }
 
+/** Marker for a 200-OK response whose completion body was empty/truncated. */
+export const EMPTY_COMPLETION = "empty completion";
+
 export function isRetryableError(err: unknown): boolean {
     const e = err as any;
     const status = e?.status ?? e?.response?.status ?? e?.code;
     if (status === 429 || status === 408) return true;
     if (typeof status === "number" && status >= 500 && status < 600) return true;
     const msg = String(e?.message ?? e ?? "").toLowerCase();
-    return /econnreset|etimedout|econnrefused|enotfound|fetch failed|network|socket|timeout|temporarily|overloaded|rate limit/
+    // `empty completion`: an overloaded model server often answers HTTP 200 with
+    // an empty (or cut-off) body. That is a transient capacity failure, not a
+    // malformed answer — retry it with backoff rather than asking the model to
+    // "repair" nothing, which would add load and amplify the overload.
+    return /econnreset|etimedout|econnrefused|enotfound|fetch failed|network|socket|timeout|temporarily|overloaded|rate limit|empty completion/
         .test(msg);
 }
 

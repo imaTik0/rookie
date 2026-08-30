@@ -34,7 +34,15 @@
         "eval": "deno run --allow-net --allow-env src/eval/runEval.ts",
         "dev": "deno run --allow-all scripts/run-both.ts dev",
         "prod": "deno run --allow-all scripts/run-both.ts start",
-        "eval:mutation": "deno run --allow-net --allow-env --allow-write src/eval/runMutation.ts"
+        "eval:mutation": "deno run --allow-net --allow-env --allow-write src/eval/runMutation.ts",
+        "eval:mutation:awake": "caffeinate -dimsu deno run --allow-net --allow-env --allow-write src/eval/runMutation.ts",
+        "experiment": "deno run --allow-all scripts/experiment-runner.ts",
+        "experiment:all": "deno run --allow-all scripts/run-all-experiments.ts",
+        "report:all": "deno run --allow-read --allow-write scripts/report-all.ts",
+        "report:html": "deno run --allow-read --allow-write scripts/report-all.ts --html results.html",
+        "experiment:awake": "caffeinate -dimsu deno run --allow-all scripts/experiment-runner.ts",
+        "experiment:all:awake": "caffeinate -dimsu deno run --allow-all scripts/run-all-experiments.ts",
+        "report:ablation": "deno run --allow-read --allow-write scripts/report-ablation.ts --html ablation.html"
     },
     "compilerOptions": {
         "jsx": "precompile",

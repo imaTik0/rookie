@@ -246,6 +246,14 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         files: DocFile[],
         onProgress?: ProgressCallback,
         smokeTestCallback?: SmokeTestCallback,
+        /** JSON string with the runtime `ctx` (apiBase, credentials…). Rendered
+         *  into the verification+generation prompts so code targets ctx.apiBase
+         *  instead of the docs' literal localhost addresses. */
+        initialContext?: string,
+        /** Docs-ablation arm: when true, NO documentation is retrieved (no RAG,
+         *  no research/bounce). The agent must rely on its parametric knowledge —
+         *  `pass_with − pass_without` measures the documentation's value. */
+        withoutDocs?: boolean,
     ): Promise<{
         response: CodeGenerationResponse;
         history: any[];
@@ -260,18 +268,34 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         emitLog(onProgress, `Starting Agentic RAG for goal: "${userGoal}"`);
 
         const frictionEvents: types.report.FrictionEvent[] = [];
+        const envBlock = templates.executionEnvironmentBlock(initialContext);
 
-        let { initialDocsContent, contextFound, messages: researchMessages } = await this
-            .runResearchPhase(
-                vectorCollectionName,
-                userGoal,
-                files,
-                onProgress,
-            );
+        let initialDocsContent = "";
+        let contextFound = "";
+        let researchMessages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[] =
+            [];
+        if (withoutDocs) {
+            // Ablation: withhold all documentation; the agent works from its own
+            // knowledge only. No retrieval, no research/bounce loop.
+            contextFound =
+                "NO DOCUMENTATION IS PROVIDED. Rely solely on your own knowledge of the " +
+                "library. Do not assume undocumented behaviour.";
+            emitLog(onProgress, "Docs ablation: generating WITHOUT documentation (no RAG).");
+        } else {
+            ({ initialDocsContent, contextFound, messages: researchMessages } = await this
+                .runResearchPhase(
+                    vectorCollectionName,
+                    userGoal,
+                    files,
+                    onProgress,
+                ));
+        }
 
         // The research agent's explicit COVERED / NEEDS RESEARCH gap analysis is
         // documentation feedback in its own right — extract and persist it.
-        const coverageReport = await this.extractCoverageReport(researchMessages);
+        const coverageReport = withoutDocs
+            ? undefined
+            : await this.extractCoverageReport(researchMessages);
 
         let verificationMessages:
             import("@openai/openai").default.Chat.ChatCompletionMessageParam[] = [];
@@ -288,12 +312,16 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                 onProgress,
                 smokeTestCallback,
                 frictionEvents,
+                envBlock,
             );
 
             const lastMessage = verificationMessages[verificationMessages.length - 1];
             const content = lastMessage.content;
 
-            if (typeof content === "string" && content.includes("NEEDS_RESEARCH:")) {
+            // In the ablation arm there is no corpus to search — never bounce.
+            if (
+                !withoutDocs && typeof content === "string" && content.includes("NEEDS_RESEARCH:")
+            ) {
                 const queryMatch = content.match(/NEEDS_RESEARCH:\s*(.*)/);
                 if (queryMatch && queryMatch[1]) {
                     const query = queryMatch[1].trim();
@@ -341,7 +369,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             isVerified = true;
         }
 
-        const response = await this.runGenerationPhase(verificationMessages, onProgress);
+        const response = await this.runGenerationPhase(verificationMessages, onProgress, envBlock);
         const fullHistory = [...researchMessages, ...verificationMessages];
 
         return {
@@ -523,6 +551,8 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         onProgress: ProgressCallback,
         smokeTestCallback?: SmokeTestCallback,
         frictionEvents?: types.report.FrictionEvent[],
+        /** Rendered executionEnvironmentBlock() — "" when there is no runtime ctx. */
+        envBlock = "",
     ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
         // Smartly prune documentation before verification to stay within token budget
         const query = userGoal.substring(0, 2000);
@@ -536,7 +566,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         emitLog(onProgress, `Agentic RAG Verification Phase... Smoke testing examples in Docker.`);
 
         const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-            { role: "system", content: templates.VERIFICATION_SYSTEM_PROMPT },
+            { role: "system", content: templates.VERIFICATION_SYSTEM_PROMPT + envBlock },
             {
                 role: "user",
                 content: templates.createVerificationUserPrompt(
@@ -607,6 +637,8 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
     private async runGenerationPhase(
         verificationMessages: OpenAI.Chat.ChatCompletionMessageParam[],
         onProgress: ProgressCallback,
+        /** Rendered executionEnvironmentBlock() — "" when there is no runtime ctx. */
+        envBlock = "",
     ): Promise<CodeGenerationResponse> {
         this.logger.log(`Agentic RAG Generation Phase...`);
         emitLog(
@@ -661,7 +693,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         const genResponse: any = await this.openai.chat.completions.create({
             model: this.configService.values.openAI.modelName,
             messages: [
-                { role: "system", content: templates.GENERATION_SYSTEM_PROMPT },
+                { role: "system", content: templates.GENERATION_SYSTEM_PROMPT + envBlock },
                 { role: "user", content: genUserPrompt },
             ],
             ...responseFormat,
@@ -684,7 +716,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
 
         this.logger.error(`Streamed generation JSON invalid (${coerced.error}); repairing...`);
         return await this.structured(
-            templates.GENERATION_SYSTEM_PROMPT,
+            templates.GENERATION_SYSTEM_PROMPT + envBlock,
             genUserPrompt,
             schemas.CodeGenerationSchema,
         ) as CodeGenerationResponse;
@@ -736,13 +768,21 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         maxGoals: number = 5,
         onProgress?: ProgressCallback,
         endpointInventory?: string,
+        /** Changelog-drift steering block (rendered by renderChangelogSeed).
+         *  Injected ONLY into goal generation — never the code-writing phase —
+         *  so goals target breaking-change areas while code is still written
+         *  from the OLD documentation. Empty string = no steering. */
+        changelogSeed?: string,
     ): Promise<string[]> {
         this.logger.log(`Generating user goals using agentic loop...`);
         emitLog(onProgress, `Generating user goals using agentic loop...`);
 
         // 1. Router
         const goal =
-            `Explore the project and identify up to ${maxGoals} primary user goals or test scenarios for this API/library.`;
+            `Explore the project's documentation broadly and DEEPLY to identify up to ${maxGoals} ` +
+            `demanding, multi-feature test scenarios. Actively seek the advanced / less-obvious ` +
+            `surface (transactions, relations/joins, batch ops, advanced query options, ` +
+            `configuration, hooks, error handling), not just the introductory examples.`;
         const plan = await this.promptForExecutionPlan(vectorCollectionName, goal, onProgress);
         const planStepsStr = plan.steps.map((s) => `- ${s.stepExplanation} (Action: ${s.action})`)
             .join("\n");
@@ -754,12 +794,16 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             : "";
 
         // 2. Research / Exploration
-        const systemPrompt = `You are a Research Agent finding user goals.
-Your goal is to gather enough context to suggest ${maxGoals} distinct user goals.
+        const systemPrompt = `You are a Research Agent gathering context for ${maxGoals} DEMANDING,
+multi-feature user goals. Do not stop at the introductory "getting started" material — dig into
+the advanced and less-obvious features (transactions, relations/joins/associations, batch or bulk
+operations, advanced query/filter/pagination/aggregation options, configuration & option objects,
+hooks/middleware, schema/migrations, error handling). For each candidate goal, collect enough
+detail that it can chain several documented operations together, not a single call.
 Follow this plan:
 ${planStepsStr}${inventoryHint}
 
-When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
+When you have gathered enough advanced context, reply with EXACTLY "READY_FOR_GENERATION".`;
 
         const messages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[] = [
             { role: "system", content: systemPrompt },
@@ -823,13 +867,29 @@ When you have enough context, reply with EXACTLY "READY_FOR_GENERATION".`;
         try {
             const parsed = await this.structured(
                 templates.PLANNER_GOALS_SYSTEM_PROMPT,
-                templates.createPlannerGoalsUserPrompt(contextFound, maxGoals),
+                templates.createPlannerGoalsUserPrompt(contextFound, maxGoals) +
+                    (changelogSeed ?? ""),
                 schemas.GoalsSchema,
             );
+            if (!parsed.goals || parsed.goals.length === 0) {
+                throw new Error("the model returned an empty goal list");
+            }
             return parsed.goals.slice(0, maxGoals);
         } catch (error) {
-            this.logger.error(error, "Failed to parse user goals from LLM");
-            return ["Explore API documentation and verify endpoints."];
+            // FAIL LOUDLY. Returning a placeholder goal here used to let a run
+            // continue as if healthy: the undici target produced a single generic
+            // "Explore API documentation…" goal, scored 1/1, and looked like a
+            // valid result in the summary table while measuring nothing. A run
+            // without real goals is worthless, so abort and surface the cause —
+            // the caller marks the target failed and keeps its checkpoint.
+            const reason = (error as Error)?.message ?? String(error);
+            this.logger.error(error, "Goal generation FAILED — aborting run");
+            emitLog(onProgress, `Goal generation FAILED: ${reason}`);
+            throw new Error(
+                `Goal generation failed: ${reason}. The run is aborted rather than ` +
+                    `continuing with a placeholder goal, which would silently produce ` +
+                    `meaningless results.`,
+            );
         }
     }
 

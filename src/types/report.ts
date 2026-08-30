@@ -102,6 +102,12 @@ export interface StepResult {
     failureAnalysis?: FailureAnalysis;
     /** HTTP requests made by the user code during execution (intercepted by sandbox). */
     httpTrafficLog?: HttpTrafficEntry[];
+    /** Docs-faithfulness: did the code use a documented API it was expected to?
+     *  `false` = the agent dodged (used none of the expected symbols). `undefined`
+     *  when no expected symbols were supplied (check not applicable). */
+    docsFaithful?: boolean;
+    /** Expected documented symbols the code failed to use (dodge detail). */
+    docsUnfaithfulMissing?: string[];
 }
 
 export interface Report {

@@ -156,6 +156,7 @@ async function distillGroupsToSummary(
     modelName: string,
     callTimeoutMs: number,
     groups: ToolGroup[],
+    logger?: { error: (...args: any[]) => void },
 ): Promise<string> {
     const formatted = groups.map((g, idx) => {
         const queries = g.calls.map((c) => String(c.args.query ?? c.name)).join("; ");
@@ -188,12 +189,24 @@ async function distillGroupsToSummary(
                         `Distill the following research steps into a compact factsheet:\n\n${formatted}`,
                 },
             ],
-            max_tokens: 1500,
+            // Headroom for "reasoning" models: they spend tokens on internal
+            // thinking before emitting content, so a tight cap here returned an
+            // EMPTY factsheet (silently degrading research quality). The output
+            // itself stays short — the extra budget only covers the thinking.
+            max_tokens: 4000,
         },
         { signal: AbortSignal.timeout(callTimeoutMs) },
     );
 
-    return response.choices[0].message.content?.trim() ?? "";
+    const factsheet = response.choices[0].message.content?.trim() ?? "";
+    if (!factsheet) {
+        logger?.error(
+            `Context compaction produced an EMPTY factsheet ` +
+                `(finish_reason=${response.choices[0].finish_reason}); ` +
+                `research context for this phase may be degraded.`,
+        );
+    }
+    return factsheet;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -250,7 +263,13 @@ async function pruneMessages(
             let summary = "";
             try {
                 emitLog(onProgress, `Distilling ${groups.length} research step(s) into factsheet…`);
-                summary = await distillGroupsToSummary(openai, modelName, callTimeoutMs, groups);
+                summary = await distillGroupsToSummary(
+                    openai,
+                    modelName,
+                    callTimeoutMs,
+                    groups,
+                    logger,
+                );
                 logger.log(
                     `${phaseLabel} Distilled ${groups.length} groups → ${
                         countTokens(summary)

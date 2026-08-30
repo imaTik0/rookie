@@ -148,6 +148,26 @@ function goalHintsFor(lines: string[], idx: number): string[] {
     return ident ? [ident] : [heading];
 }
 
+/** Heading-style documented option, e.g. `#### options.timeout` or `### \`cwd\``. */
+const HEADING_OPT_RE = /^#{2,6}\s+`?([A-Za-z_$][\w$.]*)`?\s*$/;
+/** A "Type:" line (sindresorhus/execa style: `_Type:_ \`number\``, or `Type: \`x\``,
+ *  or `**Type**: \`x\``) marking the heading above as a documented option. The
+ *  markdown emphasis can wrap `Type:` (colon inside the italics), so underscores
+ *  / asterisks may appear on both sides of the colon. */
+const TYPE_LINE_RE = /^\s*[_*]{0,2}(type|default)[_*]{0,2}\s*[:：][_*]{0,2}\s*`/i;
+
+/** True when one of the next few non-empty lines documents a type (⇒ the heading is a real option). */
+function headingIsOption(lines: string[], idx: number): boolean {
+    let seen = 0;
+    for (let j = idx + 1; j < lines.length && seen < 3; j++) {
+        if (lines[j].trim() === "") continue;
+        seen++;
+        if (TYPE_LINE_RE.test(lines[j])) return true;
+        if (/^#{1,6}\s/.test(lines[j])) return false; // next heading ⇒ not an option block
+    }
+    return false;
+}
+
 /** Enumerate every applicable mutation site in the corpus. */
 export function enumerateSites(files: DocFileIn[]): MutationSite[] {
     const sites: MutationSite[] = [];
@@ -183,6 +203,33 @@ export function enumerateSites(files: DocFileIn[]): MutationSite[] {
                     lineStart: i + 1,
                     lineEnd: i + 1,
                     description: `insert fake parameter after \`${pm[1]}\``,
+                    matchKeywords: ["xVerifyMode"],
+                    goalHints: hints,
+                });
+            }
+
+            // DelParam / AddFalseInfo — heading-style option docs common in real
+            // API references (`#### options.timeout` followed by a `Type:` line).
+            const hm = line.match(HEADING_OPT_RE);
+            if (hm && headingIsOption(lines, i)) {
+                const opt = hm[1];
+                const short = opt.split(".").pop() || opt;
+                const hints = [short];
+                sites.push({
+                    operator: "DelParam",
+                    file: file.filename,
+                    lineStart: i + 1,
+                    lineEnd: i + 1,
+                    description: `delete documented option \`${opt}\``,
+                    matchKeywords: [opt, short],
+                    goalHints: hints,
+                });
+                sites.push({
+                    operator: "AddFalseInfo",
+                    file: file.filename,
+                    lineStart: i + 1,
+                    lineEnd: i + 1,
+                    description: `insert fake option after \`${opt}\``,
                     matchKeywords: ["xVerifyMode"],
                     goalHints: hints,
                 });

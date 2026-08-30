@@ -13,7 +13,15 @@ export class PlannerController {
 
     @Post(PlannerRoutes.RunMasterPlanRoute)
     runMasterPlan: RouteHandler<typeof PlannerRoutes.RunMasterPlanRoute> = async (c) => {
-        const { projectId, maxGoals, initialContext } = c.req.valid("json");
+        const {
+            projectId,
+            maxGoals,
+            initialContext,
+            packageOverrides,
+            changelogSeed,
+            withoutDocs,
+            expectedApis,
+        } = c.req.valid("json");
 
         return streamText(c, async (stream) => {
             try {
@@ -24,6 +32,10 @@ export class PlannerController {
                     async (msg) => {
                         await stream.writeln(msg);
                     },
+                    packageOverrides,
+                    changelogSeed,
+                    withoutDocs,
+                    expectedApis,
                 );
                 await stream.writeln(JSON.stringify({ type: "COMPLETE", result }));
             } catch (error) {
@@ -37,8 +49,17 @@ export class PlannerController {
 
     @Post(PlannerRoutes.RerunMasterPlanRoute)
     rerunMasterPlan: RouteHandler<typeof PlannerRoutes.RerunMasterPlanRoute> = async (c) => {
-        const { masterPlanId, projectId, initialContext, goalIndices, skipDocExamples } = c.req
-            .valid("json");
+        const {
+            masterPlanId,
+            projectId,
+            initialContext,
+            goalIndices,
+            skipDocExamples,
+            packageOverrides,
+            freeze,
+            withoutDocs,
+            expectedApis,
+        } = c.req.valid("json");
 
         return streamText(c, async (stream) => {
             try {
@@ -49,6 +70,10 @@ export class PlannerController {
                         initialContext,
                         goalIndices,
                         skipDocExamples,
+                        packageOverrides,
+                        freeze,
+                        withoutDocs,
+                        expectedApis,
                     },
                     async (msg) => {
                         await stream.writeln(msg);

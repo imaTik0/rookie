@@ -13,7 +13,7 @@
  */
 import OpenAI from "@openai/openai";
 import { z } from "zod";
-import { withRetry } from "./retry.ts";
+import { EMPTY_COMPLETION, withRetry } from "./retry.ts";
 
 export type StructuredMode = "json_schema" | "json_object" | "text";
 
@@ -38,6 +38,15 @@ export interface ChatStructuredOpts<T> {
     /** Transient-error retries (per model call). */
     maxRetries?: number;
     retryBaseMs?: number;
+    /**
+     * Max output tokens. Reasoning models spend budget on internal thinking
+     * before emitting content, so too small a cap yields an EMPTY body with
+     * finish_reason=length. When that happens the budget is DOUBLED for the
+     * retry (up to `maxTokensCap`) — retrying with the same cap cannot succeed.
+     */
+    maxTokens?: number;
+    /** Upper bound for the escalation above. */
+    maxTokensCap?: number;
     logger?: StructuredLlmLogger;
 }
 
@@ -171,6 +180,9 @@ export async function chatStructured<T>(opts: ChatStructuredOpts<T>): Promise<T>
 
     // Mode can degrade at runtime if the server rejects json_schema.
     let effectiveMode: StructuredMode = opts.mode;
+    // Output budget; escalates when the model hits the cap (see maxTokens docs).
+    let tokenBudget = opts.maxTokens;
+    const tokenCap = opts.maxTokensCap ?? 32_000;
 
     let lastError = "";
     for (let attempt = 0; attempt <= maxRepairs; attempt++) {
@@ -178,15 +190,55 @@ export async function chatStructured<T>(opts: ChatStructuredOpts<T>): Promise<T>
 
         let content: string;
         try {
-            const resp = await withRetry(
-                () =>
-                    opts.openai.chat.completions.create({
+            content = await withRetry(
+                async () => {
+                    const resp = await opts.openai.chat.completions.create({
                         model: opts.model,
                         messages,
                         temperature: opts.temperature,
                         ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
+                        ...(tokenBudget ? { max_tokens: tokenBudget } : {}),
                         ...(rf ? { response_format: rf } : {}),
-                    } as any),
+                    } as any);
+                    const choice = (resp as any).choices?.[0];
+                    const text: string = choice?.message?.content || "";
+                    const truncated = choice?.finish_reason === "length";
+
+                    if (!text.trim()) {
+                        // Two distinct causes of an empty HTTP-200 body:
+                        //  • finish_reason=length → the model burned its whole
+                        //    budget on internal "reasoning" tokens and emitted no
+                        //    content. Retrying with the SAME cap fails identically,
+                        //    so double the budget before backing off.
+                        //  • otherwise → an overloaded/flaky server; plain backoff.
+                        if (truncated && tokenBudget && tokenBudget < tokenCap) {
+                            const next = Math.min(tokenBudget * 2, tokenCap);
+                            opts.logger?.error(
+                                `Empty completion with finish_reason=length — the token ` +
+                                    `budget (${tokenBudget}) was consumed before any content. ` +
+                                    `Raising to ${next} for the retry.`,
+                            );
+                            tokenBudget = next;
+                        }
+                        throw new Error(
+                            `${EMPTY_COMPLETION} from model server ` +
+                                `(finish_reason=${choice?.finish_reason ?? "unknown"})`,
+                        );
+                    }
+                    // Partial content cut off mid-JSON: repairing truncated JSON
+                    // cannot succeed either — grow the budget and retry.
+                    if (truncated) {
+                        if (tokenBudget && tokenBudget < tokenCap) {
+                            tokenBudget = Math.min(tokenBudget * 2, tokenCap);
+                        }
+                        opts.logger?.error(
+                            `Completion truncated (finish_reason=length); retrying with ` +
+                                `a larger budget (${tokenBudget}).`,
+                        );
+                        throw new Error(`${EMPTY_COMPLETION} (truncated output)`);
+                    }
+                    return text;
+                },
                 {
                     retries,
                     baseDelayMs: opts.retryBaseMs,
@@ -194,7 +246,6 @@ export async function chatStructured<T>(opts: ChatStructuredOpts<T>): Promise<T>
                     logger: opts.logger,
                 },
             );
-            content = (resp as any).choices[0]?.message?.content || "";
         } catch (err) {
             // If the server rejected the JSON schema, drop to json_object and retry
             // this attempt without consuming a repair slot.
