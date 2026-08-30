@@ -10,6 +10,12 @@ import { VectorConnection } from "./db/vectordb/VectorManger.ts";
 import { VectorCollectionFactory } from "./db/vectordb/VectorCollectionFactory.ts";
 import { EmbeddingService } from "./service/EmbeddingService.ts";
 import OpenAI from "@openai/openai";
+import { TraceRepository } from "./db/mongo/TraceRepository.ts";
+import { ProjectRepository } from "./db/mongo/ProjectRepository.ts";
+import { FileRepository } from "./db/mongo/FileRepository.ts";
+import { JobRepository } from "./db/mongo/JobRepository.ts";
+import { ReportRepository } from "./db/mongo/ReportRepository.ts";
+import { TestSuiteRepository } from "./db/mongo/TestSuiteRepository.ts";
 
 export class Container extends IOC {
     constructor() {
@@ -28,6 +34,12 @@ export class Container extends IOC {
         this.register(App);
         this.register(MigrationManager);
         this.register(VectorCollectionFactory);
+        this.register(TraceRepository);
+        this.register(ProjectRepository);
+        this.register(FileRepository);
+        this.register(JobRepository);
+        this.register(ReportRepository);
+        this.register(TestSuiteRepository);
         this.registerFactory(
             "logger",
             (
@@ -42,10 +54,6 @@ export class Container extends IOC {
                     isClassConstructor ? parentClass.name : parentObjectName || "<unknown>",
                 );
             },
-        );
-        this.registerValue(
-            "embeddingService",
-            await EmbeddingService.init(this.getConfig()),
         );
         this.registerValue("container", this);
     }
@@ -64,6 +72,10 @@ export class Container extends IOC {
 
     registerOpenAIFetcher(openAI: OpenAI) {
         this.registerValue("openai", openAI);
+    }
+
+    registerOpenAIEmbeddingFetcher(openAI: OpenAI) {
+        this.registerValue("openaiEmbedding", openAI);
     }
 
     getMigrationManager() {

@@ -1,32 +1,55 @@
-import { FeatureExtractionPipeline, pipeline } from "@xenova/transformers";
+import OpenAI from "@openai/openai";
+import { Injectable, InjectParam } from "../ioc/decorator.ts";
 import { ConfigService } from "./ConfigService.ts";
-import { IOCManualRegistration } from "../ioc/decorator.ts";
+import * as types from "../types/index.ts";
+import { Bm25Params, encodeDocument, encodeQuery } from "../rag/Bm25.ts";
+import { withRetry } from "../llm/retry.ts";
 
-@IOCManualRegistration
+@Injectable()
 export class EmbeddingService {
-    private static instance: EmbeddingService | null = null;
-    private pipe: FeatureExtractionPipeline;
+    private modelName: string;
+    private dimensions: number;
+    private bm25Params: Bm25Params;
 
-    private constructor(pipe: FeatureExtractionPipeline) {
-        this.pipe = pipe;
+    constructor(
+        @InjectParam("openaiEmbedding") private openaiEmbedding: OpenAI,
+        private configService: ConfigService,
+    ) {
+        this.modelName = configService.values.embeddings.embeddingModel;
+        this.dimensions = configService.values.embeddings.vectorSize;
+        this.bm25Params = configService.values.sparse;
     }
 
-    static async init(configService: ConfigService): Promise<EmbeddingService> {
-        if (!this.instance) {
-            const modelName = configService.values.embeddings.embeddingModel;
-            const extractor = await pipeline("feature-extraction", modelName);
-            this.instance = new EmbeddingService(
-                extractor as FeatureExtractionPipeline,
-            );
+    async embed(text: string): Promise<types.vector.DenseVector[]> {
+        return this.embedBatch([text]);
+    }
+
+    async embedBatch(texts: string[]): Promise<types.vector.DenseVector[]> {
+        if (texts.length === 0) return [];
+        const payload: any = {
+            model: this.modelName,
+            input: texts,
+        };
+        if (this.dimensions && this.dimensions > 0) {
+            payload.dimensions = this.dimensions;
         }
-        return this.instance;
+
+        const response = await withRetry(
+            () => this.openaiEmbedding.embeddings.create(payload),
+            {
+                retries: this.configService.values.llm.maxRetries,
+                baseDelayMs: this.configService.values.llm.retryBaseMs,
+                label: "embeddings.create",
+            },
+        );
+        return response.data.map((d: any) => d.embedding);
     }
 
-    async embed(text: string): Promise<number[][]> {
-        const result = await this.pipe(text, {
-            pooling: "mean",
-            normalize: true,
-        });
-        return result.tolist();
+    sparseEmbed(text: string): types.vector.SparseVector {
+        return encodeQuery(text);
+    }
+
+    sparseEmbedDocument(text: string): types.vector.SparseVector {
+        return encodeDocument(text, this.bm25Params);
     }
 }

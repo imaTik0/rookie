@@ -4,6 +4,7 @@ import { FileService } from "../../service/FileService.ts";
 import { FileConverter } from "./FileConverter.ts";
 import * as types from "../../types/index.ts";
 import { FileRoutes } from "./FileRoute.ts";
+import { errorBody } from "../CommonSchema.ts";
 import { Buffer } from "node:buffer";
 
 @Controller("/files")
@@ -26,8 +27,8 @@ export class FileController {
             const dbMetadata = await this.fileService.uploadFile(file, buffer);
             const apiFile = this.fileConverter.mapDbFileToApi(dbMetadata);
             return c.json(apiFile, 201);
-        } catch (error: any) {
-            return c.json({ code: 400, message: error.message }, 400);
+        } catch (error) {
+            return c.json(errorBody(error), 400);
         }
     };
 
@@ -52,8 +53,8 @@ export class FileController {
                 }),
             );
             return c.json(apiFiles, 201);
-        } catch (error: any) {
-            return c.json({ code: 400, message: error.message }, 400);
+        } catch (error) {
+            return c.json(errorBody(error), 400);
         }
     };
 
@@ -84,7 +85,7 @@ export class FileController {
         headers.set("Content-Disposition", `attachment; filename="${apiMetadata.filename}"`);
         headers.set("Content-Length", apiMetadata.size.toString());
 
-        return new Response(buffer, {
+        return new Response(buffer as unknown as BodyInit, {
             status: 200,
             headers: headers,
         });

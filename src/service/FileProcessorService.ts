@@ -1,42 +1,45 @@
+import { Injectable } from "../ioc/decorator.ts";
 import { v4 as uuidv4 } from "uuid";
-import { EmbeddingService } from "./EmbeddingService.ts";
-import { Point } from "../db/vectordb/VectorCollection.ts";
 import * as types from "../types/index.ts";
 import { VectorCollectionFactory } from "../db/vectordb/VectorCollectionFactory.ts";
 import { Buffer } from "node:buffer";
+import { EmbeddingService } from "./EmbeddingService.ts";
 
+@Injectable()
 export class FileProcessorService {
     constructor(
-        private embeddingService: EmbeddingService,
         private vectorCollectionFactory: VectorCollectionFactory,
+        private embeddingService: EmbeddingService,
     ) {}
 
     async processAndStore(
         files: types.file.FileShard[],
         vectorCollectionName: string,
     ): Promise<void> {
-        const points: Point<types.file.FileShard>[] = await Promise.all(
-            files.map(async (file) => {
-                const embeddingResult = await this.embeddingService.embed(
-                    file.content,
-                );
-                if (!embeddingResult || embeddingResult.length === 0) {
-                    throw new Error(
-                        `Embedding failed for file with metadata: ${JSON.stringify(file.metadata)}`,
-                    );
-                }
-                const vector = embeddingResult[0];
-                const point: Point<types.file.FileShard> = {
-                    id: uuidv4() as types.core.VectorPointId,
-                    vector,
-                    payload: file,
-                };
-                return point;
-            }),
-        );
+        const BATCH_SIZE = 50;
         const vectorCollection = await this.vectorCollectionFactory
             .createCollection<types.file.FileShard>(vectorCollectionName);
-        await vectorCollection.upsertPoints(points);
+
+        for (let i = 0; i < files.length; i += BATCH_SIZE) {
+            const batch = files.slice(i, i + BATCH_SIZE);
+
+            const denseVectors = await this.embeddingService.embedBatch(
+                batch.map((f) => f.content),
+            );
+
+            const points: types.vector.VectorPoint<types.file.FileShard>[] = batch.map(
+                (file, j) => ({
+                    id: uuidv4() as types.core.VectorPointId,
+                    vector: {
+                        "dense": denseVectors[j],
+                        "sparse": this.embeddingService.sparseEmbedDocument(file.content),
+                    },
+                    payload: file,
+                }),
+            );
+
+            await vectorCollection.upsertPoints(points);
+        }
     }
 
     sanitizeWhiteCharsInText(text: string | Buffer): string {

@@ -1,6 +1,6 @@
 import * as path from "@std/path";
 import { IOC } from "./IOC.ts";
-import { isManualRegistrationSet } from "./decorator.ts";
+import { shouldAutoRegister } from "./decorator.ts";
 
 export interface Registry {
     register(type: unknown): void;
@@ -24,9 +24,10 @@ export class Scanner {
         for (const entry of entries) {
             const entryPath = path.resolve(dirPath, entry.name);
             if (Deno.statSync(entryPath).isDirectory) {
-                this.scan(registry, entryPath, filter);
+                await this.scan(registry, entryPath, filter);
             } else if (
                 (entry.name.endsWith(".js") || entry.name.endsWith(".ts")) &&
+                !entry.name.endsWith(".test.ts") &&
                 (!filter || filter.test(entry.name))
             ) {
                 try {
@@ -35,7 +36,7 @@ export class Scanner {
                         const exported = module[key];
                         if (
                             typeof exported == "function" &&
-                            isManualRegistrationSet(exported)
+                            shouldAutoRegister(exported)
                         ) {
                             if (Scanner.DEBUG) {
                                 console.log(
@@ -46,10 +47,11 @@ export class Scanner {
                         }
                     }
                 } catch (e) {
-                    console.log(
+                    console.error(
                         `Error during registering module ${entryPath} in IOC`,
                         e,
                     );
+                    throw e;
                 }
             }
         }

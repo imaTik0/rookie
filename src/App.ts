@@ -1,14 +1,13 @@
 import { Logger } from "./Logger.ts";
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { registerController } from "./api/Decorator.ts";
-import { ProjectController } from "./api/project/ProjectController.ts";
+import { registerControllers } from "./api/registerControllers.ts";
 import { Scalar } from "@scalar/hono-api-reference";
 import { ConfigService } from "./service/ConfigService.ts";
 import { Container } from "./Container.ts";
-import { FileController } from "./api/file/FileController.ts";
-import { ReportController } from "./api/report/ReportController.ts";
-import { TestSuiteController } from "./api/testsuite/TestSuiteController.ts";
+import { JobService } from "./service/JobService.ts";
+
 import { logger } from "hono/logger";
+import { cors } from "hono/cors";
 
 export class App {
     private honoServer?: OpenAPIHono;
@@ -21,27 +20,13 @@ export class App {
 
     init() {
         this.honoServer = new OpenAPIHono();
+        this.honoServer.use("/*", cors());
         this.honoServer.use(logger((...args) => this.logger.log(...args)));
-        registerController(
-            this.honoServer,
-            this.container.resolve<ProjectController>("projectController"),
-            this.logger,
-        );
-        registerController(
-            this.honoServer,
-            this.container.resolve<FileController>("fileController"),
-            this.logger,
-        );
-        registerController(
-            this.honoServer,
-            this.container.resolve<ReportController>("reportController"),
-            this.logger,
-        );
-        registerController(
-            this.honoServer,
-            this.container.resolve<TestSuiteController>("testSuiteController"),
-            this.logger,
-        );
+
+        registerControllers(this.honoServer, this.container, this.logger);
+
+        void this.container.resolve<JobService>("jobService").reconcileOnStartup();
+
         this.honoServer.doc("/docs", {
             openapi: "3.0.0",
             info: {
@@ -57,8 +42,10 @@ export class App {
                 theme: "solarized",
             }),
         );
+
         const port = this.configService.values.port;
         const hostname = this.configService.values.host;
+
         Deno.serve({
             port: port,
             hostname: hostname,

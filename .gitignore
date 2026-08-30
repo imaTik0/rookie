@@ -3,3 +3,6 @@ samples
 .vscode
 conf
 node_modules
+*.log
+coverage
+.DS_Store

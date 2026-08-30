@@ -1,15 +1,19 @@
+import { Injectable } from "../../ioc/decorator.ts";
 import { ConfigService } from "../../service/ConfigService.ts";
 import { FileShard } from "../../types/file.ts";
 import { VectorCollection } from "./VectorCollection.ts";
 import { VectorConnection } from "./VectorManger.ts";
 
+@Injectable()
 export class VectorCollectionFactory {
+    private existingCollections = new Set<string>();
+
     constructor(
         private vectorConnection: VectorConnection,
         private configService: ConfigService,
     ) {}
 
-    async createCollection<T = FileShard>(
+    async createCollection<T extends Record<string, unknown> = FileShard>(
         name: string,
         vectorSize?: number,
     ): Promise<VectorCollection<T>> {
@@ -17,25 +21,55 @@ export class VectorCollectionFactory {
             name,
             vectorSize || this.configService.values.embeddings.vectorSize,
         );
-        return new VectorCollection(this.vectorConnection, name);
+        return new VectorCollection<T>(this.vectorConnection, name);
+    }
+
+    async dropCollection(name: string): Promise<void> {
+        try {
+            await this.vectorConnection.vectorClient.deleteCollection(name);
+        } catch {
+            // Collection may not exist — that's fine
+        } finally {
+            this.existingCollections.delete(name);
+        }
+    }
+
+    invalidateCache(name: string): void {
+        this.existingCollections.delete(name);
     }
 
     private async ensureCollectionExists(name: string, vectorSize: number) {
+        if (this.existingCollections.has(name)) {
+            return;
+        }
+
         try {
             const { collections } = await this.vectorConnection.vectorClient
                 .getCollections();
 
             const collectionExists = collections.some((c) => c.name === name);
-            if (collectionExists) return;
+            if (collectionExists) {
+                this.existingCollections.add(name);
+                return;
+            }
 
             await this.vectorConnection.vectorClient.createCollection(name, {
                 vectors: {
-                    size: vectorSize,
-                    distance: "Cosine",
+                    dense: {
+                        size: vectorSize,
+                        distance: "Cosine",
+                    },
                 },
+                sparse_vectors: {
+                    sparse: { modifier: "idf" },
+                } as any,
             });
-        } catch (error: any) {
-            if (error?.status === 409 || error?.message?.includes("Conflict")) {
+
+            this.existingCollections.add(name);
+        } catch (error) {
+            const err = error as { status?: number; message?: string };
+            if (err?.status === 409 || err?.message?.includes("Conflict")) {
+                this.existingCollections.add(name);
                 return;
             }
             throw error;

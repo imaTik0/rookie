@@ -1,6 +1,8 @@
+import { Injectable } from "../../ioc/decorator.ts";
 import { Logger } from "../../Logger.ts";
 import { MongoDbConnection } from "./MongoDbManager.ts";
 import { Migration001Scheme } from "./migrations/Migration001Scheme.ts";
+import { Migration002Indices } from "./migrations/Migration002Indices.ts";
 
 interface Migration {
     migrationName: string;
@@ -10,8 +12,10 @@ interface Migration {
 
 const migrations: Migration[] = [
     Migration001Scheme,
+    Migration002Indices,
 ];
 
+@Injectable()
 export class MigrationManager {
     private migrationsCollectionName = "migrations";
     private migrationsCollection;
@@ -38,7 +42,7 @@ export class MigrationManager {
         }
     }
 
-    async runMigration(migration: Migration): Promise<void> { // For CLI/Client later?
+    async runMigration(migration: Migration): Promise<void> {
         const isMigrated = await this.migrationsCollection.findOne({
             migrationName: migration.migrationName,
         });
@@ -58,7 +62,7 @@ export class MigrationManager {
         this.logger.log(`Migration ${migration.migrationName} completed`);
     }
 
-    async rollbackMigration(migration: Migration): Promise<void> { // For CLI/Client later?
+    async rollbackMigration(migration: Migration): Promise<void> {
         const isMigrated = await this.migrationsCollection.findOne({
             migrationName: migration.migrationName,
         });

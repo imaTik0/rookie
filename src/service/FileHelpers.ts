@@ -1,6 +1,10 @@
+import { Injectable } from "../ioc/decorator.ts";
 import * as path from "@std/path";
 import * as types from "../types/index.ts";
 import * as db from "../db/mongo/Model.ts";
+import striptags from "striptags";
+import { ConfigService } from "./ConfigService.ts";
+import { Logger } from "../Logger.ts";
 
 interface ChunkingOptions {
     chunkSize: number;
@@ -16,37 +20,74 @@ const SUPPORTED_TEXT_MIMES = [
     "text/html",
     "text/xml",
     "application/xml",
+    "application/yaml",
+    "text/yaml",
+    "text/x-yaml",
 ];
 
+@Injectable()
 export class FileHelpers {
     private readonly textDecoder: TextDecoder;
 
-    constructor() {
+    constructor(private configService: ConfigService, private logger: Logger) {
         this.textDecoder = new TextDecoder("utf-8");
     }
 
     public chunkDbFile(
         dbFile: db.File,
-        options: ChunkingOptions = { chunkSize: 1000, chunkOverlap: 200 },
+        options?: ChunkingOptions,
     ): types.file.FileShard[] {
+        const opts: ChunkingOptions = options ?? {
+            chunkSize: this.configService.values.chunking.chunkSize,
+            chunkOverlap: this.configService.values.chunking.chunkOverlap,
+        };
         if (!this._isChunkable(dbFile.mimetype)) {
             throw new Error(
                 `File is not chunkable (MIME type ${dbFile.mimetype} is not supported text).`,
             );
         }
 
-        const content = this.textDecoder.decode(dbFile.data.buffer);
+        let content = this.textDecoder.decode(dbFile.data.buffer);
+        if (this._isHtmlLike(dbFile.mimetype)) {
+            content = striptags(content);
+        }
 
-        return this._chunkText(content, dbFile.filename, options);
+        if (
+            (dbFile.mimetype.startsWith("application/json") || dbFile.filename.endsWith(".json")) &&
+            this._isOpenApiJson(content)
+        ) {
+            const openApiChunks = this._chunkOpenApiJson(
+                content,
+                dbFile.filename,
+                opts,
+                dbFile._id,
+            );
+            if (openApiChunks.length > 0) return openApiChunks;
+        }
+
+        return this._chunkText(content, dbFile.filename, opts, dbFile._id);
     }
 
     public async chunkFileFromPath(
         filePath: string,
-        options: ChunkingOptions = { chunkSize: 1000, chunkOverlap: 200 },
+        options?: ChunkingOptions,
     ): Promise<types.file.FileShard[]> {
-        const content = await Deno.readTextFile(filePath);
+        const opts: ChunkingOptions = options ?? {
+            chunkSize: this.configService.values.chunking.chunkSize,
+            chunkOverlap: this.configService.values.chunking.chunkOverlap,
+        };
+        let content = await Deno.readTextFile(filePath);
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext === ".html" || ext === ".htm" || ext === ".xml") {
+            content = striptags(content);
+        }
         const fileName = path.basename(filePath);
-        return this._chunkText(content, fileName, options);
+        return this._chunkText(content, fileName, opts);
+    }
+
+    private _isHtmlLike(mimetype: string): boolean {
+        return mimetype.startsWith("text/html") || mimetype.startsWith("text/xml") ||
+            mimetype.startsWith("application/xml");
     }
 
     public async loadMarkdownContentFromDir(dir: string): Promise<string[]> {
@@ -73,7 +114,7 @@ export class FileHelpers {
                 append: false,
             });
         } catch (error) {
-            console.error(`Error writing content to "${filePath}":`, error);
+            this.logger.error(error, `Error writing content to "${filePath}"`);
             throw error;
         }
     }
@@ -86,136 +127,174 @@ export class FileHelpers {
         content: string,
         fileName: string,
         options: ChunkingOptions,
+        fileId?: string,
     ): types.file.FileShard[] {
+        if (content.length === 0) return [];
+
+        const lines = content.split("\n");
         const chunks: types.file.FileShard[] = [];
         let chunkNumber = 1;
-        let globalPosition = 0;
 
-        const pushChunk = (
-            chunkContent: string,
-            startPosition: number,
-        ): void => {
-            if (chunkContent.length === 0) {
-                return;
+        let currentSection = "";
+        let buf: string[] = [];
+        let bufStartLine = 1;
+        let bufStartPos = 0;
+        let posOfLine = 0;
+        let inFence = false;
+
+        const bufLength = () => buf.reduce((s, l) => s + l.length + 1, 0);
+
+        const flush = (startLineForNext: number, startPosForNext: number) => {
+            const body = buf.join("\n").trim();
+            if (body.length > 0) {
+                const needsHeader = currentSection && !body.startsWith(currentSection);
+                const chunkContent = needsHeader ? `${currentSection}\n\n${body}` : body;
+                chunks.push({
+                    content: chunkContent,
+                    metadata: {
+                        fileId,
+                        fileName,
+                        chunkId: chunkNumber++,
+                        chunkSize: chunkContent.length,
+                        startPosition: bufStartPos,
+                        lineNumber: bufStartLine,
+                        section: currentSection || undefined,
+                    },
+                });
             }
-            chunks.push({
-                content: chunkContent,
-                metadata: {
-                    fileName: fileName,
-                    chunkId: chunkNumber++,
-                    chunkSize: chunkContent.length,
-                    startPosition: startPosition,
-                },
-            });
+            buf = [];
+            bufStartLine = startLineForNext;
+            bufStartPos = startPosForNext;
         };
 
-        const paragraphs = content.split("\n");
-        let currentChunkParas: string[] = [];
-        let currentChunkLength = 0;
-        let currentChunkStartPosition = 0;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const lineNo = i + 1;
+            const isFenceToggle = /^\s*```/.test(line);
+            const isHeading = !inFence && /^#{1,6}\s+/.test(line);
 
-        for (let i = 0; i < paragraphs.length; i++) {
-            const para = paragraphs[i];
-            const paraStartPosition = globalPosition;
-
-            globalPosition += para.length;
-            if (i < paragraphs.length - 1) {
-                globalPosition++;
+            if (isHeading && buf.length > 0) {
+                flush(lineNo, posOfLine);
+            }
+            if (isHeading) {
+                currentSection = line.trim();
             }
 
-            if (para.length > options.chunkSize) {
-                if (currentChunkParas.length > 0) {
-                    pushChunk(
-                        currentChunkParas.join("\n"),
-                        currentChunkStartPosition,
-                    );
-                    currentChunkParas = [];
-                    currentChunkLength = 0;
+            if (buf.length === 0) {
+                bufStartLine = lineNo;
+                bufStartPos = posOfLine;
+            }
+            buf.push(line);
+            if (isFenceToggle) inFence = !inFence;
+
+            if (!inFence && !isHeading && bufLength() >= options.chunkSize) {
+                const tail = this._overlapTail(buf, options.chunkOverlap);
+                flush(lineNo + 1, posOfLine + line.length + 1);
+                if (tail.length > 0) {
+                    buf = [...tail];
                 }
-
-                let subPos = 0;
-                while (subPos < para.length) {
-                    const end = Math.min(
-                        subPos + options.chunkSize,
-                        para.length,
-                    );
-                    const subContent = para.slice(subPos, end);
-                    pushChunk(subContent, paraStartPosition + subPos);
-
-                    if (end === para.length) {
-                        break;
-                    }
-
-                    const nextPos = subPos + options.chunkSize - options.chunkOverlap;
-                    subPos = Math.max(nextPos, subPos + 1);
-                }
-
-                currentChunkStartPosition = globalPosition;
-                continue;
             }
 
-            const lengthWithNewPara = currentChunkLength +
-                (currentChunkParas.length > 0 ? 1 : 0) +
-                para.length;
-
-            if (lengthWithNewPara > options.chunkSize) {
-                const currentIsTooSmall = currentChunkLength < options.chunkSize * 0.5;
-                const potentialIsTooBig = lengthWithNewPara > options.chunkSize * 1.5;
-
-                if (
-                    currentChunkParas.length > 0 &&
-                    (!currentIsTooSmall || potentialIsTooBig)
-                ) {
-                    pushChunk(
-                        currentChunkParas.join("\n"),
-                        currentChunkStartPosition,
-                    );
-
-                    currentChunkParas = [para];
-                    currentChunkLength = para.length;
-                    currentChunkStartPosition = paraStartPosition;
-                } else {
-                    if (currentChunkParas.length === 0) {
-                        currentChunkStartPosition = paraStartPosition;
-                    }
-                    currentChunkParas.push(para);
-                    currentChunkLength = lengthWithNewPara - (currentChunkParas.length > 1 ? 1 : 0);
-                    if (currentChunkParas.length === 1) {
-                        currentChunkLength = para.length;
-                    }
-                }
-            } else {
-                if (currentChunkParas.length === 0) {
-                    currentChunkStartPosition = paraStartPosition;
-                }
-                currentChunkParas.push(para);
-                currentChunkLength = lengthWithNewPara - (currentChunkParas.length > 1 ? 1 : 0);
-                if (currentChunkParas.length === 1) {
-                    currentChunkLength = para.length;
-                }
-            }
+            posOfLine += line.length + 1;
         }
 
-        if (currentChunkParas.length > 0) {
-            pushChunk(
-                currentChunkParas.join("\n"),
-                currentChunkStartPosition,
-            );
-        }
-
-        if (chunks.length === 0 && content.length > 0) {
-            pushChunk(content, 0);
-        } else if (chunks.length === 0 && content.length === 0) {
-            return [];
-        }
+        if (buf.length > 0) flush(0, 0);
 
         const totalChunks = chunks.length;
         return chunks.map((chunk) => ({
             ...chunk,
-            metadata: {
-                ...chunk.metadata,
-                totalChunks,
-            },
+            metadata: { ...chunk.metadata, totalChunks },
         }));
+    }
+
+    private _isOpenApiJson(content: string): boolean {
+        if (
+            !content.includes('"paths"') && !content.includes('"swagger"') &&
+            !content.includes('"openapi"')
+        ) {
+            return false;
+        }
+        try {
+            const obj = JSON.parse(content);
+            return (
+                typeof obj === "object" && obj !== null &&
+                typeof obj.paths === "object" &&
+                (typeof obj.openapi === "string" || typeof obj.swagger === "string")
+            );
+        } catch {
+            return false;
+        }
+    }
+
+    private _chunkOpenApiJson(
+        content: string,
+        fileName: string,
+        _options: ChunkingOptions,
+        fileId?: string,
+    ): types.file.FileShard[] {
+        try {
+            const spec = JSON.parse(content) as Record<string, unknown>;
+            const paths = spec.paths as Record<string, Record<string, unknown>> | undefined;
+            if (!paths) return [];
+
+            const info = spec.info as Record<string, unknown> | undefined;
+            const apiTitle = (info?.title as string) || fileName;
+            const baseDescription = info?.description
+                ? `\n${String(info.description).slice(0, 300)}`
+                : "";
+
+            const chunks: types.file.FileShard[] = [];
+            let chunkId = 1;
+
+            for (const [apiPath, methods] of Object.entries(paths)) {
+                for (const [method, definition] of Object.entries(methods)) {
+                    if (["parameters", "summary", "description"].includes(method)) continue;
+                    const def = definition as Record<string, unknown>;
+                    const summary = (def?.summary as string) || "";
+                    const description = (def?.description as string) || "";
+                    const operationId = (def?.operationId as string) || "";
+
+                    const chunkContent = [
+                        `# ${method.toUpperCase()} ${apiPath}${summary ? ` — ${summary}` : ""}`,
+                        `**API:** ${apiTitle}${baseDescription}`,
+                        `**Operation:** ${operationId || `${method.toUpperCase()} ${apiPath}`}`,
+                        description ? `\n${description}` : "",
+                        "\n```json",
+                        JSON.stringify({ [method]: definition }, null, 2).slice(0, 3000),
+                        "```",
+                    ].filter(Boolean).join("\n");
+
+                    chunks.push({
+                        content: chunkContent,
+                        metadata: {
+                            fileId,
+                            fileName,
+                            chunkId: chunkId++,
+                            chunkSize: chunkContent.length,
+                            startPosition: 0,
+                            lineNumber: 0,
+                            section: `${method.toUpperCase()} ${apiPath}`,
+                        },
+                    });
+                }
+            }
+
+            const totalChunks = chunks.length;
+            return chunks.map((c) => ({ ...c, metadata: { ...c.metadata, totalChunks } }));
+        } catch {
+            return [];
+        }
+    }
+
+    private _overlapTail(buf: string[], maxChars: number): string[] {
+        if (maxChars <= 0) return [];
+        const tail: string[] = [];
+        let total = 0;
+        for (let i = buf.length - 1; i >= 0; i--) {
+            total += buf[i].length + 1;
+            tail.unshift(buf[i]);
+            if (total >= maxChars) break;
+        }
+        return tail;
     }
 }

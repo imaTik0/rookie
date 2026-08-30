@@ -20,5 +20,40 @@ export const PaginationQuerySchema = z.object({
     }),
 });
 
+export const PaginationMetaSchema = z
+    .object({
+        totalItems: z.number().int().openapi({ example: 100 }),
+        totalPages: z.number().int().openapi({ example: 10 }),
+        currentPage: z.number().int().openapi({ example: 1 }),
+        itemsPerPage: z.number().int().openapi({ example: 10 }),
+    })
+    .openapi("PaginationMeta");
+
+export function paginated<T extends z.ZodType>(itemSchema: T) {
+    return z.object({
+        items: z.array(itemSchema),
+        meta: PaginationMetaSchema,
+    });
+}
+
+export function buildMeta(
+    total: number,
+    page: number,
+    limit: number,
+): z.infer<typeof PaginationMetaSchema> {
+    return {
+        totalItems: total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+        currentPage: page,
+        itemsPerPage: limit,
+    };
+}
+
+export function errorBody(error: unknown, code = 400): { code: number; message: string } {
+    const err = error as { message?: string };
+    return { code, message: err?.message || "Unknown error" };
+}
+
 export type ErrorSchema = z.infer<typeof ErrorSchema>;
 export type PaginationQuerySchema = z.infer<typeof PaginationQuerySchema>;
+export type PaginationMeta = z.infer<typeof PaginationMetaSchema>;

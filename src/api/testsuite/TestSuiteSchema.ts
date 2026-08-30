@@ -1,5 +1,9 @@
 import { z } from "@hono/zod-openapi";
 
+export const TestSuiteMode = z.enum(["TEST_SCENARIO", "CODE_GENERATION"])
+    .describe("The mode of the test suite.")
+    .openapi({ example: "TEST_SCENARIO" });
+
 const TestSuiteId = z.string()
     .describe("Unique ID of the test suite.")
     .openapi({ example: "ts-8f3b2e" });
@@ -17,19 +21,25 @@ const FunctionTemplate = z.string()
     .openapi({ example: "function generate_story(context, length) { /* ... */ }" });
 
 const MinimalLength = z.number().int().positive()
-    .describe("The minimum length of the generated story.")
-    .openapi({ example: 100 });
+    .describe("The minimum length of the generated story/scenario.")
+    .openapi({ example: 10 });
 
 const MaximalLength = z.number().int().positive()
-    .describe("The maximum length of the generated story.")
-    .openapi({ example: 500 });
+    .describe("The maximum length of the generated story/scenario.")
+    .openapi({ example: 20 });
+
+const UserGoal = z.string()
+    .describe("The goal for code generation mode.")
+    .openapi({ example: "Create a program that calculates the Fibonacci sequence." });
 
 export const CreateTestSuiteSchema = z.object({
     initialContext: InitialContext,
-    functionTemplate: FunctionTemplate,
+    functionTemplate: FunctionTemplate.optional(),
     minimalStoryLength: MinimalLength,
     maximalStoryLength: MaximalLength,
     projectId: ProjectId,
+    mode: TestSuiteMode.default("TEST_SCENARIO"),
+    userGoal: UserGoal.optional(),
 });
 
 export const UpdateTestSuiteSchema = CreateTestSuiteSchema.partial();
@@ -48,6 +58,7 @@ export const TestSuiteIdParam = z.object({
     testSuiteId: TestSuiteId.describe("The unique ID of the Test Suite for URL path."),
 });
 
+export type TestSuiteMode = z.infer<typeof TestSuiteMode>;
 export type TestSuite = z.infer<typeof TestSuiteSchema>;
 export type CreateTestSuiteDTO = z.infer<typeof CreateTestSuiteSchema>;
 export type UpdateTestSuiteDTO = z.infer<typeof UpdateTestSuiteSchema>;

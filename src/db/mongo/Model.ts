@@ -29,23 +29,53 @@ export interface PopulatedProject {
 
 export interface ReportModel {
     _id: types.report.ReportId;
-    testSuiteId: types.test.TestSuiteId;
+    testSuiteId?: types.test.TestSuiteId;
     projectId: types.project.ProjectId;
     status: types.report.ReportStatus;
+    type: "CODE_GENERATION" | "TEST_SCENARIO" | "MASTER_PLAN";
+    summary?: string;
     initialContext: string;
-    executionPlan: unknown; // The raw JSON plan from LLM
+    executionPlan: unknown;
     steps: types.report.StepResult[];
+    finalOutput?: string;
     createdAt: Date;
     durationMs?: number;
+    masterPlanId?: string;
+    masterPlanGoals?: string[];
+    masterPlanReports?: types.report.ReportId[];
+    structuredSummary?: types.planner.StructuredMasterSummary;
+    coverageReport?: types.report.CoverageItem[];
+    frictionEvents?: types.report.FrictionEvent[];
+    gapFeedback?: types.report.GapFeedback[];
+    rerunFromMasterPlanId?: string;
 }
 
 export interface TestSuite {
     _id: string;
     projectId: types.project.ProjectId;
     initialContext: string;
-    functionTemplate: string;
+    functionTemplate?: string;
     minimalStoryLength: number;
     maximalStoryLength: number;
+    mode: "CODE_GENERATION" | "TEST_SCENARIO";
+    userGoal?: string;
+    packageOverrides?: Record<string, string>;
+    withoutDocs?: boolean;
+    frozenPrograms?: string[];
+    expectedApis?: string[];
     createdAt: Date;
     updatedAt: Date;
+}
+
+export interface JobModel {
+    _id: types.job.JobId;
+    kind: types.job.JobKind;
+    status: types.job.JobStatus;
+    params: Record<string, unknown>;
+    result?: Record<string, unknown>;
+    error?: string;
+    progress?: string;
+    createdAt: Date;
+    startedAt?: Date;
+    finishedAt?: Date;
 }

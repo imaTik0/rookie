@@ -1,0 +1,17 @@
+{
+    "tasks": {
+        "dev": "deno run -A --node-modules-dir npm:vite",
+        "build": "deno run -A --node-modules-dir npm:vite build",
+        "preview": "deno run -A --node-modules-dir npm:vite preview"
+    },
+    "compilerOptions": {
+        "jsx": "react-jsx",
+        "jsxImportSource": "react",
+        "lib": ["dom", "dom.iterable", "deno.ns"]
+    },
+    "fmt": {
+        "useTabs": false,
+        "lineWidth": 100,
+        "indentWidth": 4
+    }
+}

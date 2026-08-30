@@ -1,28 +1,27 @@
+import { Injectable } from "../ioc/decorator.ts";
 import * as db from "../db/mongo/Model.ts";
-import { TestSuiteRepository } from "./TestSuiteRepository.ts";
+import { TestSuiteRepository } from "../db/mongo/TestSuiteRepository.ts";
 import * as types from "../types/index.ts";
-import { UpdateTestSuiteDTO } from "../api/testsuite/TestSuiteSchema.ts";
+import { CreateTestSuiteDTO, UpdateTestSuiteDTO } from "../api/testsuite/TestSuiteSchema.ts";
 
+@Injectable()
 export class TestSuiteService {
     constructor(
         private testSuiteRepository: TestSuiteRepository,
     ) {}
 
     async createTestSuite(
-        projectId: types.project.ProjectId,
-        initialContext: string,
-        functionTemplate: string,
-        minimalStoryLength: number,
-        maximalStoryLength: number,
+        data: CreateTestSuiteDTO,
     ) {
-        const data = {
-            projectId,
-            initialContext,
-            functionTemplate,
-            minimalStoryLength,
-            maximalStoryLength,
-        };
-        const newDbSuite = await this.testSuiteRepository.create(data);
+        const newDbSuite = await this.testSuiteRepository.create({
+            projectId: data.projectId as types.project.ProjectId,
+            initialContext: data.initialContext,
+            functionTemplate: data.functionTemplate,
+            minimalStoryLength: data.minimalStoryLength,
+            maximalStoryLength: data.maximalStoryLength,
+            mode: data.mode as "CODE_GENERATION" | "TEST_SCENARIO",
+            userGoal: data.userGoal,
+        });
         return this.mapDbToApi(newDbSuite);
     }
 
@@ -36,8 +35,12 @@ export class TestSuiteService {
 
     async listTestSuites(
         pagination: { page: number; limit: number },
+        filter: { projectId?: types.project.ProjectId } = {},
     ) {
-        const { testSuites: dbSuites, total } = await this.testSuiteRepository.list(pagination);
+        const { testSuites: dbSuites, total } = await this.testSuiteRepository.list(
+            pagination,
+            filter,
+        );
         return { testSuites: dbSuites.map((test) => this.mapDbToApi(test)), total };
     }
 
@@ -48,8 +51,10 @@ export class TestSuiteService {
                 functionTemplate: data.functionTemplate,
                 initialContext: data.initialContext,
                 maximalStoryLength: data.maximalStoryLength,
-                minimalStoryLength: data.maximalStoryLength,
+                minimalStoryLength: data.minimalStoryLength,
                 projectId: data.projectId as types.project.ProjectId,
+                mode: data.mode as "CODE_GENERATION" | "TEST_SCENARIO",
+                userGoal: data.userGoal,
             },
         );
         if (!updatedDbSuite) {
@@ -74,6 +79,8 @@ export class TestSuiteService {
             functionTemplate: model.functionTemplate,
             minimalStoryLength: model.minimalStoryLength,
             maximalStoryLength: model.maximalStoryLength,
+            mode: model.mode,
+            userGoal: model.userGoal,
             createdAt: model.createdAt.toISOString(),
             updatedAt: model.updatedAt.toISOString(),
         };

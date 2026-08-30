@@ -1,13 +1,17 @@
 import type { RouteHandler } from "@hono/zod-openapi";
 import { Controller, Delete, Get, Patch, Post } from "../Decorator.ts";
 import { ProjectService } from "../../service/ProjectService.ts";
+import { JobService } from "../../service/JobService.ts";
+import { mapJobToApi } from "../job/JobMapper.ts";
 import * as types from "../../types/index.ts";
 import { ProjectRoutes } from "./ProjectRoute.ts";
+import { errorBody } from "../CommonSchema.ts";
 
 @Controller("/projects")
 export class ProjectController {
     constructor(
         private projectService: ProjectService,
+        private jobService: JobService,
     ) {}
 
     @Post(ProjectRoutes.CreateProjectRoute)
@@ -18,10 +22,22 @@ export class ProjectController {
                 createProjectDto.projectName,
                 createProjectDto.fileIds as types.file.FileId[],
             );
+            if (!newProject) {
+                return c.json({ code: 500, message: "Failed to create project" }, 500);
+            }
             return c.json(newProject, 201);
-        } catch (error: any) {
-            return c.json({ code: 400, message: error.message }, 400);
+        } catch (error) {
+            return c.json(errorBody(error), 400);
         }
+    };
+
+    @Post(ProjectRoutes.CreateProjectFromUrlRoute)
+    createProjectFromUrl: RouteHandler<typeof ProjectRoutes.CreateProjectFromUrlRoute> = async (
+        c,
+    ) => {
+        const { projectName, url, maxPages } = c.req.valid("json");
+        const job = await this.jobService.enqueue("CRAWL_DOCS", { projectName, url, maxPages });
+        return c.json(mapJobToApi(job), 202);
     };
 
     @Get(ProjectRoutes.GetProjectRoute)
@@ -57,8 +73,8 @@ export class ProjectController {
                 return c.json({ code: 404, message: "Project not found" }, 404);
             }
             return c.json(updatedProject, 200);
-        } catch (error: any) {
-            return c.json({ code: 400, message: error.message }, 400);
+        } catch (error) {
+            return c.json(errorBody(error), 400);
         }
     };
 
@@ -93,8 +109,8 @@ export class ProjectController {
                 return c.json({ code: 404, message: "Project not found" }, 404);
             }
             return c.json(updatedProject, 200);
-        } catch (error: any) {
-            return c.json({ code: 400, message: error.message }, 400);
+        } catch (error) {
+            return c.json(errorBody(error), 400);
         }
     };
 

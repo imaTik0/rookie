@@ -1,13 +1,28 @@
-import { OpenAI } from "https://jsr.io/@openai/openai/5.16.0/client.ts";
+import OpenAI from "@openai/openai";
 import { Container } from "./Container.ts";
 import { MongoDbManager } from "./db/mongo/MongoDbManager.ts";
 import { VectorManager } from "./db/vectordb/VectorManger.ts";
+
+globalThis.addEventListener("unhandledrejection", (event) => {
+    event.preventDefault();
+    console.error("[unhandledRejection] server kept alive:", event.reason);
+});
 
 async function go() {
     const container = new Container();
     await container.init();
     const config = container.getConfig();
-    config.loadFile("conf/config.json");
+    console.log("================ STARTING ROOKIE ================");
+    console.log("Loaded Configuration:");
+    console.log(JSON.stringify(
+        {
+            ...config.values,
+            openAI: { ...config.values.openAI, apiKey: "***" },
+        },
+        null,
+        2,
+    ));
+    console.log("=================================================");
     container.registerMongoConnection(
         MongoDbManager.init(config.values.mongoDb),
     );
@@ -15,7 +30,16 @@ async function go() {
         VectorManager.init(config.values.qdrantVectorDb),
     );
     container.registerOpenAIFetcher(
-        new OpenAI({ apiKey: config.values.openAI.apiKey }),
+        new OpenAI({
+            apiKey: config.values.openAI.apiKey,
+            baseURL: config.values.openAI.baseURL,
+        }),
+    );
+    container.registerOpenAIEmbeddingFetcher(
+        new OpenAI({
+            apiKey: config.values.openAI.apiKey,
+            baseURL: config.values.embeddings.baseURL,
+        }),
     );
     await container.getMigrationManager().runAllMigrations();
     const app = container.getApp();

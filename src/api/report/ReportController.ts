@@ -1,9 +1,8 @@
-// src/controller/ReportController.ts
-
 import type { RouteHandler } from "@hono/zod-openapi";
-import { Controller, Delete, Get } from "../Decorator.ts";
+import { Controller, Delete, Get, Post } from "../Decorator.ts";
 import { ReportRoutes } from "./ReportRoute.ts";
 import { ReportService } from "../../service/ReportService.ts";
+import { buildMeta } from "../CommonSchema.ts";
 import * as types from "../../types/index.ts";
 
 @Controller("/reports")
@@ -13,16 +12,18 @@ export class ReportController {
     ) {}
 
     @Get(ReportRoutes.ListReportsRoute)
-    listReports: RouteHandler<typeof ReportRoutes.ListReportsRoute> = async (c) => {
-        const page = Number(c.req.query("page") || 1);
-        const limit = Number(c.req.query("limit") || 10);
+    listReports: RouteHandler<typeof ReportRoutes.ListReportsRoute> = (async (c) => {
+        const { page, limit, projectId, testSuiteId, status, type } = c.req.valid("query");
 
-        const { reports, total } = await this.reportService.listReports(page, limit);
-
-        return c.json(reports, 200, {
-            "X-Total-Count": total.toString(),
+        const { reports, total } = await this.reportService.listReports(page, limit, {
+            projectId: projectId as types.project.ProjectId | undefined,
+            testSuiteId: testSuiteId as types.test.TestSuiteId | undefined,
+            status,
+            type,
         });
-    };
+
+        return c.json({ items: reports, meta: buildMeta(total, page, limit) }, 200);
+    }) as RouteHandler<typeof ReportRoutes.ListReportsRoute>;
 
     @Get(ReportRoutes.GetReportRoute)
     getReport: RouteHandler<typeof ReportRoutes.GetReportRoute> = async (c) => {
@@ -42,5 +43,36 @@ export class ReportController {
             return c.json({ message: "Report not found or could not be deleted" }, 404);
         }
         return c.body(null, 204);
+    };
+
+    @Get(ReportRoutes.GetDocsPatchRoute)
+    getDocsPatch: RouteHandler<typeof ReportRoutes.GetDocsPatchRoute> = async (c) => {
+        const { reportId } = c.req.valid("param");
+        const { format } = c.req.valid("query");
+        const patch = await this.reportService.generateDocsPatch(
+            reportId as types.report.ReportId,
+            format,
+        );
+        if (!patch) {
+            return c.json({ code: 404, message: "Report not found" }, 404);
+        }
+        return c.text(patch.content, 200, {
+            "X-Patched-Clusters": String(patch.patchedClusters),
+            "X-Unpatched-Clusters": String(patch.unpatchedClusters),
+        });
+    };
+
+    @Post(ReportRoutes.AddGapFeedbackRoute)
+    addGapFeedback: RouteHandler<typeof ReportRoutes.AddGapFeedbackRoute> = async (c) => {
+        const { reportId } = c.req.valid("param");
+        const body = c.req.valid("json");
+        const stored = await this.reportService.addGapFeedback(
+            reportId as types.report.ReportId,
+            body,
+        );
+        if (!stored) {
+            return c.json({ code: 404, message: "Report not found" }, 404);
+        }
+        return c.json(stored, 201);
     };
 }
