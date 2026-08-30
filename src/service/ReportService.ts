@@ -92,7 +92,6 @@ export class ReportService {
         return await this.reportRepository.delete(reportId);
     }
 
-    /** Record a human verdict on a proposed documentation fix. */
     async addGapFeedback(
         reportId: types.report.ReportId,
         feedback: Omit<types.report.GapFeedback, "createdAt">,
@@ -105,11 +104,6 @@ export class ReportService {
         return ok ? full : null;
     }
 
-    /**
-     * Aggregate a report's verified documentation gaps into an applyable
-     * unified diff / PR-style markdown against the project's actual doc files.
-     * For MASTER_PLAN reports the per-goal child reports are aggregated.
-     */
     async generateDocsPatch(
         reportId: types.report.ReportId,
         format: "markdown" | "diff",
@@ -117,7 +111,6 @@ export class ReportService {
         const report = await this.reportRepository.get(reportId);
         if (!report) return null;
 
-        // Resolve the set of reports to aggregate.
         let reports: db.ReportModel[];
         if (report.type === "MASTER_PLAN") {
             const children = await Promise.all(
@@ -128,7 +121,6 @@ export class ReportService {
             reports = [report];
         }
 
-        // Goal labels: master summaries know goal→report mapping; otherwise use ids.
         const goalByReportId = new Map<string, string>();
         for (const g of report.structuredSummary?.goalsBreakdown ?? []) {
             if (g.reportId) goalByReportId.set(g.reportId, g.goal);

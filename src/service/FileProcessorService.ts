@@ -23,7 +23,6 @@ export class FileProcessorService {
         for (let i = 0; i < files.length; i += BATCH_SIZE) {
             const batch = files.slice(i, i + BATCH_SIZE);
 
-            // One batched embeddings request per batch instead of one per chunk.
             const denseVectors = await this.embeddingService.embedBatch(
                 batch.map((f) => f.content),
             );
@@ -33,7 +32,6 @@ export class FileProcessorService {
                     id: uuidv4() as types.core.VectorPointId,
                     vector: {
                         "dense": denseVectors[j],
-                        // Document-side BM25 weights (IDF added server-side by Qdrant).
                         "sparse": this.embeddingService.sparseEmbedDocument(file.content),
                     },
                     payload: file,

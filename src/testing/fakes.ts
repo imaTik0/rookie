@@ -1,9 +1,3 @@
-/**
- * Shared test doubles. Pure, in-process — no infrastructure.
- *
- * Intentionally minimal: each fake implements only the surface the code under
- * test actually touches, cast to the real type so call sites stay honest.
- */
 import type OpenAI from "@openai/openai";
 import type { Logger } from "../Logger.ts";
 import type { JobRepository } from "../db/mongo/JobRepository.ts";
@@ -11,9 +5,6 @@ import type { EmbeddingService } from "../service/EmbeddingService.ts";
 import type * as db from "../db/mongo/Model.ts";
 import type * as types from "../types/index.ts";
 
-// ── Logger ───────────────────────────────────────────────────────────────────
-
-/** A no-op Logger that records calls, so tests can assert on logging without spam. */
 export function fakeLogger(): Logger & { calls: { level: string; args: unknown[] }[] } {
     const calls: { level: string; args: unknown[] }[] = [];
     const make = (level: string) => (...args: unknown[]) => calls.push({ level, args });
@@ -27,25 +18,15 @@ export function fakeLogger(): Logger & { calls: { level: string; args: unknown[]
     } as unknown as Logger & { calls: { level: string; args: unknown[] }[] };
 }
 
-// ── OpenAI chat client ─────────────────────────────────────────────────────────
-
-/** One scripted reply: either return `content` or throw `error`. */
 export type FakeChatStep =
     | { content: string; finish_reason?: string }
     | { error: unknown };
 
 export interface FakeOpenAI {
-    /** Cast to the real OpenAI type for injection. */
     openai: OpenAI;
-    /** Every request body passed to chat.completions.create, in order. */
     calls: Record<string, unknown>[];
 }
 
-/**
- * Minimal OpenAI fake driving `chat.completions.create`. Steps are consumed in
- * order; a function lets a step depend on the call index / request body
- * (e.g. to throw a 400 the first time and succeed after a mode-downgrade).
- */
 export function fakeOpenAI(
     steps: FakeChatStep[] | ((callIndex: number, body: Record<string, unknown>) => FakeChatStep),
 ): FakeOpenAI {
@@ -69,20 +50,12 @@ export function fakeOpenAI(
     return { openai, calls };
 }
 
-/** Build an OpenAI-style HTTP error (status + message), as the SDK surfaces it. */
 export function apiError(status: number, message = "error"): Error & { status: number } {
     const e = new Error(message) as Error & { status: number };
     e.status = status;
     return e;
 }
 
-// ── EmbeddingService ─────────────────────────────────────────────────────────────
-
-/**
- * Fake EmbeddingService. By default every text embeds to the same vector (so
- * cosine similarity is uniform and ordering is input-stable); pass `embedBatch`
- * to control scores.
- */
 export function fakeEmbeddingService(
     embedBatch?: (texts: string[]) => number[][],
 ): EmbeddingService {
@@ -95,8 +68,6 @@ export function fakeEmbeddingService(
     } as unknown as EmbeddingService;
 }
 
-// ── DockerExecutor ───────────────────────────────────────────────────────────────
-
 export interface FakeExecResult {
     exitCode: number;
     stdout: string;
@@ -104,10 +75,6 @@ export interface FakeExecResult {
     isTimeout?: boolean;
 }
 
-/**
- * Fake DockerExecutor: returns scripted results in order (last repeats).
- * Assign onto `(executor as any).dockerExecutor` to avoid real containers.
- */
 export function fakeDockerExecutor(results: FakeExecResult[]) {
     let i = 0;
     const calls: { language: string; code: string }[] = [];
@@ -123,9 +90,6 @@ export function fakeDockerExecutor(results: FakeExecResult[]) {
     };
 }
 
-// ── JobRepository (in-memory) ───────────────────────────────────────────────────
-
-/** In-memory JobRepository mirroring the Mongo one's status transitions. */
 export function inMemoryJobRepository(): JobRepository & { store: Map<string, db.JobModel> } {
     const store = new Map<string, db.JobModel>();
     let seq = 0;
@@ -177,18 +141,11 @@ export function inMemoryJobRepository(): JobRepository & { store: Map<string, db
     return repo as unknown as JobRepository & { store: Map<string, db.JobModel> };
 }
 
-// ── Hono context ────────────────────────────────────────────────────────────────
-
 export interface FakeResponse {
     body: unknown;
     status: number;
 }
 
-/**
- * Minimal Hono context for invoking a controller handler directly.
- * `valid` supplies what `c.req.valid("json"|"param"|"query")` returns; the
- * handler's `c.json/text/body` calls are echoed back as { body, status }.
- */
 // deno-lint-ignore no-explicit-any
 export function fakeContext(valid: { json?: unknown; param?: unknown; query?: unknown } = {}): any {
     const reply = (body: unknown, status = 200): FakeResponse => ({ body, status });
@@ -203,7 +160,6 @@ export function fakeContext(valid: { json?: unknown; param?: unknown; query?: un
     };
 }
 
-/** Poll `cond` until true or timeout (for awaiting fire-and-forget job runners). */
 export async function until(cond: () => boolean, timeoutMs = 1000): Promise<void> {
     const start = Date.now();
     while (!cond()) {

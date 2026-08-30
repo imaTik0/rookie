@@ -1,7 +1,3 @@
-/**
- * Unit tests for the guarded search session (chunk dedup + repeated-query nudge).
- * Pure — no infra. Run with: deno test src/service/prompt/SearchSession.test.ts
- */
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { createSearchSession } from "./SearchSession.ts";
 import type * as types from "../../types/index.ts";
@@ -45,14 +41,13 @@ Deno.test("first search returns full content and counts everything as new", asyn
 });
 
 Deno.test("a chunk seen before is stubbed with a preview, not re-serialised", async () => {
-    const long = "AUTH-DETAILS ".repeat(30); // > preview length
+    const long = "AUTH-DETAILS ".repeat(30);
     const { handler } = session([[chunk("c1", long)]]);
     await handler("id", { query: "authentication header format" });
     const second = await handler("id", { query: "completely different topic entirely" });
 
     assertStringIncludes(second, "0 new, 1 previously retrieved");
     assertStringIncludes(second, "already returned earlier");
-    // Full content must NOT be repeated — only the short preview.
     const contentOccurrences = second.split("AUTH-DETAILS").length - 1;
     assert(contentOccurrences * "AUTH-DETAILS ".length <= 200, "should only carry a preview");
 });
@@ -66,7 +61,6 @@ Deno.test("zero new results triggers an explicit do-not-repeat steer", async () 
 
     assertStringIncludes(out, "NO NEW information");
     assertStringIncludes(out, "grep_corpus");
-    // Near-identical query is called out by name.
     assertStringIncludes(out, "nearly identical");
     assertStringIncludes(out, "influxdb concurrent queries runtime adjustment");
 });

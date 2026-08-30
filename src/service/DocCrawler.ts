@@ -51,8 +51,6 @@ export class DocCrawler {
         const startOrigin = new URL(startUrl).origin;
         const startPathPrefix = this.getPathPrefix(startUrl);
 
-        // Standards-first: a single llms-full.txt holds the entire docs as
-        // Markdown. If present, ingest it directly and skip crawling entirely.
         const llms = await this.tryLlmsFullTxt(startOrigin, onProgress, opts);
         if (llms) return llms;
 
@@ -126,8 +124,6 @@ export class DocCrawler {
             }
         }
 
-        // The start URL was an unrendered SPA shell and nothing else was reachable.
-        // Surface an actionable error instead of a generic "no pages" message.
         if (results.length === 0 && startWasSpa) {
             throw new Error(
                 `The start page ${startUrl} appears to be a JavaScript-rendered app ` +
@@ -143,11 +139,6 @@ export class DocCrawler {
         return results;
     }
 
-    /**
-     * Probe the origin for an `llms-full.txt` — a single Markdown file holding
-     * the entire documentation (an emerging convention for LLM consumption).
-     * Returns it as one page, or null if absent / too small to be real content.
-     */
     private async tryLlmsFullTxt(
         origin: string,
         onProgress: ((msg: string) => void) | undefined,
@@ -164,7 +155,7 @@ export class DocCrawler {
             });
             if (!res.ok) return null;
             const text = (await res.text()).trim();
-            if (text.length < 500) return null; // an error page or stub, not real docs
+            if (text.length < 500) return null;
 
             this.logger.log(`Found llms-full.txt (${text.length} chars) — skipping HTML crawl`);
             onProgress?.(`Found llms-full.txt — ingesting directly, skipping crawl`);
@@ -174,7 +165,7 @@ export class DocCrawler {
                 markdown: `# Documentation\nSource: ${url}\n\n${text}`,
             }];
         } catch {
-            return null; // no llms-full.txt — fall back to crawling
+            return null;
         } finally {
             clearTimeout(timer);
         }
@@ -213,8 +204,6 @@ export class DocCrawler {
             const html = await response.text();
             if (!html || html.length < 100) return null;
 
-            // Readability (main-content extraction) + Turndown (DOM→Markdown,
-            // keeps tables/code). Link extraction + SPA detection happen inside.
             const { crawler } = this.configService.values;
             const parsed = htmlToMarkdown(html, {
                 pageUrl: url,
@@ -260,12 +249,6 @@ export class DocCrawler {
         const segments = parsed.pathname.split("/").filter(Boolean);
         if (segments.length === 0) return "";
 
-        // Confine the crawl to the subtree the start URL points at, so versioned
-        // documentation sites don't bleed across versions (e.g. starting at
-        // /influxdb/v2/ must not pull in /influxdb/v3/ via shared navigation).
-        //  - a directory URL (trailing slash) scopes to its full path;
-        //  - a file-like URL scopes to its parent directory;
-        //  - a bare single segment (e.g. /docs) stays unconstrained (lenient).
         if (url.endsWith("/")) {
             return "/" + segments.join("/");
         }
@@ -278,12 +261,6 @@ export class DocCrawler {
     private normalizeUrl(url: string): string {
         try {
             const parsed = new URL(url);
-            // Collapse duplicate slashes but keep a single trailing slash on
-            // path-only URLs (no file extension). Many static sites — including
-            // Gitea's Redoc docs — return 404 for "/api/1.22" but 200 for
-            // "/api/1.22/", so stripping unconditionally would break crawling.
-            // Check only the last path segment; require alphabetic chars so
-            // version numbers like "1.22" are not mistaken for file extensions.
             const lastSegment = parsed.pathname.split("/").filter((s) => s.length > 0).pop() ?? "";
             const hasExtension = /\.[a-zA-Z]{2,6}$/.test(lastSegment);
             const stripped = parsed.pathname.replace(/\/+$/, "") || "/";

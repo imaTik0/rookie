@@ -9,9 +9,6 @@ import { JobService } from "./service/JobService.ts";
 import { logger } from "hono/logger";
 import { cors } from "hono/cors";
 
-// NOTE: intentionally NOT @Injectable — App ↔ Container is a circular import, and
-// emitDecoratorMetadata would reference Container as a value at decoration time
-// (temporal dead zone). App resolves fine via the name-based fallback.
 export class App {
     private honoServer?: OpenAPIHono;
 
@@ -28,8 +25,6 @@ export class App {
 
         registerControllers(this.honoServer, this.container, this.logger);
 
-        // Fail any jobs left RUNNING by a previous process (their in-memory
-        // runners did not survive the restart).
         void this.container.resolve<JobService>("jobService").reconcileOnStartup();
 
         this.honoServer.doc("/docs", {

@@ -1,5 +1,3 @@
-// src/controller/ReportController.ts
-
 import type { RouteHandler } from "@hono/zod-openapi";
 import { Controller, Delete, Get, Post } from "../Decorator.ts";
 import { ReportRoutes } from "./ReportRoute.ts";
@@ -13,10 +11,6 @@ export class ReportController {
         private reportService: ReportService,
     ) {}
 
-    // The `as RouteHandler<…>` cast works around a @hono/zod-openapi typing quirk:
-    // `z.coerce.number()` query params infer an `unknown` input type, which makes the
-    // handler's context contravariantly incompatible with RouteHandler. The cast keeps
-    // full `c.req.valid` / `c.json` typing inside the body; runtime behaviour is unchanged.
     @Get(ReportRoutes.ListReportsRoute)
     listReports: RouteHandler<typeof ReportRoutes.ListReportsRoute> = (async (c) => {
         const { page, limit, projectId, testSuiteId, status, type } = c.req.valid("query");

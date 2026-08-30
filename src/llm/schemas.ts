@@ -1,12 +1,3 @@
-/**
- * Zod schemas for every structured LLM output. These are the single source of
- * truth for validation: the StructuredLlm helper parses model JSON against them
- * and repairs on mismatch, so a stray field or wrong shape from a small local
- * model no longer crashes the pipeline or silently corrupts data.
- *
- * Only widely-stable zod APIs are used (object/string/number/array/enum/
- * optional/default) so behaviour is identical across zod minor versions.
- */
 import { z } from "zod";
 
 export const GAP_ENUM = z.enum([
@@ -56,7 +47,6 @@ export const FailureAnalysisSchema = z.object({
     proposedFragment: z.string().optional(),
 });
 
-/** Research-phase coverage extraction: which decomposed sub-tasks the docs covered. */
 export const CoverageReportSchema = z.object({
     items: z.array(z.object({
         subtask: z.string(),
@@ -66,8 +56,6 @@ export const CoverageReportSchema = z.object({
     })).default([]),
 });
 
-// Master summary is rich; validate the scalar core, accept nested lists loosely
-// (they are only rendered, never branched on).
 export const MasterSummarySchema = z.object({
     executiveSummary: z.string().optional().default(""),
     overallPassRate: z.number().optional().default(0),

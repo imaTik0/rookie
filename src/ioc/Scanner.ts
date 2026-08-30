@@ -24,13 +24,9 @@ export class Scanner {
         for (const entry of entries) {
             const entryPath = path.resolve(dirPath, entry.name);
             if (Deno.statSync(entryPath).isDirectory) {
-                // Must await: controllers live in subdirectories, and callers
-                // (Container.init) rely on registration being complete on return.
                 await this.scan(registry, entryPath, filter);
             } else if (
                 (entry.name.endsWith(".js") || entry.name.endsWith(".ts")) &&
-                // Never import co-located test files: their top-level Deno.test()
-                // calls would run at startup (and break when scanning under a test).
                 !entry.name.endsWith(".test.ts") &&
                 (!filter || filter.test(entry.name))
             ) {

@@ -1,11 +1,3 @@
-/**
- * Virtual-file-system tool handlers for the research/verification agents.
- *
- * Exposes the project's documentation files to the LLM as callable tools
- * (list/read/head/tail/grep, cross-file grep, structural outline, section read,
- * and OpenAPI endpoint lookup). Extracted from PromptService — pure file logic,
- * no LLM or network.
- */
 import type { DocFile } from "../../types/file.ts";
 import { ConfigService } from "../ConfigService.ts";
 import { emitLog, ProgressCallback } from "./helpers.ts";
@@ -16,12 +8,9 @@ type OpenApiIndex = Map<string, OpenApiEndpoint[]>;
 export class VfsTools {
     constructor(private configService: ConfigService) {}
 
-    // Memoize by array reference: the same `files` array is passed to every
-    // createHandlers call within a single request, so parsing happens once.
     private readonly openApiIndexCache = new WeakMap<object[], OpenApiIndex>();
 
     createHandlers(files: DocFile[], onProgress?: ProgressCallback) {
-        // Pre-build a parsed OpenAPI index for get_endpoint lookups.
         const openApiIndex = this.buildOpenApiIndex(files);
 
         return {
@@ -37,9 +26,6 @@ export class VfsTools {
                 const file = files.find((f) => f.metadata.filename === args.filename);
                 if (!file) return Promise.resolve(`File not found: ${args.filename}`);
                 const content = new TextDecoder().decode(file.buffer);
-                // Cap whole-file reads: a large doc can be 200k+ tokens and would
-                // blow the model context in a single tool result. Return a head
-                // slice and steer the agent toward targeted tools for the rest.
                 const cap = this.configService.values.limits.maxFileReadChars;
                 if (content.length > cap) {
                     const totalLines = content.split("\n").length;
@@ -109,8 +95,6 @@ export class VfsTools {
                 );
             },
 
-            // ── New VFS tools ─────────────────────────────────────────────────
-
             // deno-lint-ignore no-explicit-any
             grep_corpus: (_id: string, args: any) => {
                 const pattern = args.pattern as string;
@@ -153,7 +137,6 @@ export class VfsTools {
                 if (!file) return Promise.resolve(`File not found: ${args.filename}`);
                 const content = new TextDecoder().decode(file.buffer);
 
-                // OpenAPI JSON: list paths + methods
                 if (
                     args.filename.endsWith(".json") || args.filename.endsWith(".yaml") ||
                     args.filename.endsWith(".yml")
@@ -171,7 +154,6 @@ export class VfsTools {
                     }
                 }
 
-                // Markdown: headings with line numbers
                 const lines = content.split("\n");
                 const headings: string[] = [];
                 for (let i = 0; i < lines.length; i++) {
@@ -199,7 +181,6 @@ export class VfsTools {
                 const content = new TextDecoder().decode(file.buffer);
                 const lines = content.split("\n");
 
-                // Find the first heading that matches (case-insensitive partial match).
                 let startIdx = -1;
                 let headingLevel = 0;
                 for (let i = 0; i < lines.length; i++) {
@@ -216,7 +197,6 @@ export class VfsTools {
                     );
                 }
 
-                // Collect lines until the next heading of same or higher level.
                 const section: string[] = [lines[startIdx]];
                 for (let i = startIdx + 1; i < lines.length; i++) {
                     const m = lines[i].match(/^(#{1,6})\s+/);
@@ -265,7 +245,6 @@ export class VfsTools {
         };
     }
 
-    /** Build a path→endpoints index from all OpenAPI JSON files in the project. */
     private buildOpenApiIndex(files: DocFile[]): OpenApiIndex {
         const cached = this.openApiIndexCache.get(files);
         if (cached) return cached;

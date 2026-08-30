@@ -1,9 +1,3 @@
-/**
- * Unit tests for prompt template helpers — currently the execution-environment
- * (ctx) block, which prevents generated code from targeting the docs' literal
- * localhost addresses instead of ctx.apiBase. Pure — no infra.
- * Run with: deno test src/service/prompt/templates.test.ts
- */
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { executionEnvironmentBlock } from "./templates.ts";
 
@@ -36,7 +30,6 @@ Deno.test("executionEnvironmentBlock masks secret-looking values", () => {
     assert(!block.includes("super-secret-value"));
     assert(!block.includes("k-123"));
     assert(!block.includes("hunter2"));
-    // Keys stay visible so the model knows what to reference via ctx.
     assertStringIncludes(block, '"token"');
     assertStringIncludes(block, '"apiKey"');
     assertStringIncludes(block, "reference it via ctx");

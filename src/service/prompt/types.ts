@@ -1,9 +1,3 @@
-/**
- * Types for the PromptService and its agentic pipeline.
- */
-
-// ─── Public Response Types ───────────────────────────────────────────────────
-
 export interface StructuredResponse {
     calls: {
         stepExplanation: string;
@@ -27,8 +21,6 @@ export interface PromptOptions {
     userPreferences?: string;
     mandatoryImports?: string;
 }
-
-// ─── Tool Argument Types ─────────────────────────────────────────────────────
 
 export interface SearchToolArgs {
     query: string;
@@ -66,8 +58,6 @@ export interface RouterPlanResponse {
     }[];
 }
 
-// ─── Agentic Loop Types ─────────────────────────────────────────────────────
-
 export type ToolHandler = (
     toolCallId: string,
     args: Record<string, any>,
@@ -83,16 +73,10 @@ export interface AgenticLoopConfig {
     phaseLabel: string;
     onTrace?: (event: import("../../types/index.ts").trace.TraceEvent) => Promise<void>;
     maxContextChars?: number;
-    /** Token budget before non-destructive pruning kicks in. */
     maxContextTokens?: number;
-    /** Determinism controls applied to every model call in the loop. */
     temperature?: number;
     seed?: number;
-    /** Transient-error retry controls. */
     maxRetries?: number;
     retryBaseMs?: number;
-    /** Per-call LLM request timeout in milliseconds. Defaults to 90 s.
-     *  A fresh AbortSignal is created per retry attempt so retries are not
-     *  pre-aborted by a signal that already fired. */
     callTimeoutMs?: number;
 }

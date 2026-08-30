@@ -1,9 +1,3 @@
-/**
- * Characterization tests for PlannerService's pure logic: gap regression
- * matching and endpoint-inventory extraction. Reaches private methods via
- * `as any` to pin behaviour before any extraction. No infra.
- * Run with: deno test src/service/PlannerService.pure.test.ts
- */
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { PlannerService, selectGoals } from "./PlannerService.ts";
 import { fakeLogger } from "../testing/fakes.ts";
@@ -25,8 +19,6 @@ function planner(): any {
 function docFile(filename: string, content: string) {
     return { metadata: { filename }, buffer: new TextEncoder().encode(content) };
 }
-
-// ── gapsSimilar ──────────────────────────────────────────────────────────────────
 
 Deno.test("gapsSimilar: same file + overlapping line range -> persisted", () => {
     const cluster = {
@@ -76,7 +68,6 @@ Deno.test("gapsSimilar: unrelated gaps -> not persisted", () => {
 });
 
 Deno.test("gapsSimilar: adjacent (touching) line ranges are NOT overlap", () => {
-    // overlap uses > 0, so ranges sharing a single endpoint are different gaps.
     const cluster = {
         file: "a.md",
         lineStart: 1,
@@ -87,8 +78,6 @@ Deno.test("gapsSimilar: adjacent (touching) line ranges are NOT overlap", () => 
     const prior = { file: "a.md", lineStart: 5, lineEnd: 9, fragment: "totally different" };
     assertEquals(planner().gapsSimilar(cluster, prior), false);
 });
-
-// ── extractEndpointInventory ──────────────────────────────────────────────────────
 
 Deno.test("extractEndpointInventory lists OpenAPI path+method entries", () => {
     const spec = JSON.stringify({
@@ -114,8 +103,6 @@ Deno.test("extractEndpointInventory returns undefined when no endpoints found", 
     assertEquals(inv, undefined);
 });
 
-// ── executeGoals: per-goal failure isolation (regression) ─────────────────────────
-
 Deno.test("executeGoals: a throwing goal is recorded FAILED, others still complete", async () => {
     const testSuiteRepo = {
         create: () => Promise.resolve({ _id: "ts-" + crypto.randomUUID() }),
@@ -123,8 +110,6 @@ Deno.test("executeGoals: a throwing goal is recorded FAILED, others still comple
     };
     let call = 0;
     const executor = {
-        // Second goal throws (e.g. structured-output validation failure) — must NOT
-        // abort the whole master plan.
         executeTestSuite: () => {
             call++;
             if (call === 2) {
@@ -157,10 +142,8 @@ Deno.test("executeGoals: a throwing goal is recorded FAILED, others still comple
     assertEquals(executionReports.length, 2);
     assertEquals(executionReports[0].status, "SUCCESS");
     assertEquals(executionReports[1].status, "FAILED");
-    assertEquals(reportIds.length, 1); // only the successful goal produced a report
+    assertEquals(reportIds.length, 1);
 });
-
-// ── selectGoals (rerun goalIndices subset) ───────────────────────────────────────
 
 Deno.test("selectGoals returns all goals when no subset is given", () => {
     assertEquals(selectGoals(["a", "b", "c"]), ["a", "b", "c"]);

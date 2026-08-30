@@ -1,9 +1,3 @@
-/**
- * Unit tests for the VFS tool handlers (relocated from PromptService).
- * Pure file logic — no LLM/network. Assertions match the pre-split
- * characterization tests, proving behaviour was preserved across the extraction.
- * Run with: deno test --allow-env src/service/prompt/VfsTools.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { VfsTools } from "./VfsTools.ts";
 import { ConfigService } from "../ConfigService.ts";
@@ -57,7 +51,7 @@ Deno.test("read_file truncates files above the configured cap", async () => {
 Deno.test("grep_file returns matching lines with line numbers", async () => {
     const { handlers } = vfs();
     const out = await handlers.grep_file("id", { filename: "guide.md", pattern: "auth" });
-    assert(out.includes("[Line 3]")); // "## Auth"
+    assert(out.includes("[Line 3]"));
 });
 
 Deno.test("grep_corpus searches across files with filename:line tags", async () => {

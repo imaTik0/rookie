@@ -20,7 +20,6 @@ export const PaginationQuerySchema = z.object({
     }),
 });
 
-/** Shared pagination metadata block, used by every paginated list response. */
 export const PaginationMetaSchema = z
     .object({
         totalItems: z.number().int().openapi({ example: 100 }),
@@ -30,7 +29,6 @@ export const PaginationMetaSchema = z
     })
     .openapi("PaginationMeta");
 
-/** Wrap an item schema into the standard `{ items, meta }` paginated envelope. */
 export function paginated<T extends z.ZodType>(itemSchema: T) {
     return z.object({
         items: z.array(itemSchema),
@@ -38,7 +36,6 @@ export function paginated<T extends z.ZodType>(itemSchema: T) {
     });
 }
 
-/** Compute the pagination metadata for a page of results. */
 export function buildMeta(
     total: number,
     page: number,
@@ -52,11 +49,6 @@ export function buildMeta(
     };
 }
 
-/**
- * Standard `{ code, message }` body for a failed request. Centralises the
- * error-message extraction the controllers previously duplicated; pair with the
- * matching status, e.g. `c.json(errorBody(err), 400)`.
- */
 export function errorBody(error: unknown, code = 400): { code: number; message: string } {
     const err = error as { message?: string };
     return { code, message: err?.message || "Unknown error" };

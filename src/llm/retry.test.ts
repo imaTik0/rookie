@@ -1,7 +1,3 @@
-/**
- * Unit tests for transient-error retry/backoff. Pure — no infra.
- * Run with: deno test src/llm/retry.test.ts
- */
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { isRetryableError, withRetry } from "./retry.ts";
 
@@ -61,7 +57,7 @@ Deno.test("withRetry exhausts retries then throws (retries + 1 attempts)", async
             return Promise.reject({ status: 503 });
         }, { retries: 2, baseDelayMs: 1 })
     );
-    assertEquals(calls, 3); // 1 initial + 2 retries
+    assertEquals(calls, 3);
 });
 
 Deno.test("withRetry rethrows non-retryable errors immediately", async () => {

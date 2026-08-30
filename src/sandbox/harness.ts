@@ -1,22 +1,8 @@
-/**
- * The Node.js harness injected into the sandbox before user code runs.
- *
- * It writes the user's module to disk, monkey-patches `globalThis.fetch` to
- * capture every HTTP request, runs the user's default export with the current
- * context, and prints results/errors/HTTP-traffic wrapped in unambiguous markers
- * that the Executor parses back out of stdout.
- *
- * Extracted from Executor so the (substantial) harness logic lives in one place
- * and the orchestration code stays readable. Marker strings are shared constants
- * so the producer (here) and the parser (Executor) can never drift apart.
- */
-
 export const RESULT_START = "___RESULT_START___";
 export const RESULT_END = "___RESULT_END___";
 export const HTTP_LOG_START = "___HTTP_LOG_START___";
 export const HTTP_LOG_END = "___HTTP_LOG_END___";
 
-/** Marker emitted when a program violates the export-default-function contract. */
 export const NO_DEFAULT_EXPORT = "ROOKIE_NO_DEFAULT_EXPORT";
 
 export interface HarnessOptions {
@@ -30,7 +16,6 @@ export interface HarnessOptions {
     requireDefaultExport?: boolean;
 }
 
-/** Build the Node harness script for a single sandbox step. */
 export function buildSandboxHarness(
     userCode: string,
     ctx: unknown,

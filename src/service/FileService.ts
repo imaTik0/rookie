@@ -48,8 +48,6 @@ export class FileService {
     }
 
     async deleteFile(fileId: types.file.FileId): Promise<boolean> {
-        // Collect project IDs before removing from MongoDB so we know which
-        // Qdrant collections to clean up.
         const projectIds = await this.projectRepository.findProjectIdsByFileId(fileId);
 
         for (const projectId of projectIds) {

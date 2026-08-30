@@ -1,31 +1,3 @@
-/**
- * End-to-end evaluation runner.
- *
- * Drives a RUNNING Rookie instance over its HTTP API for each labelled fixture,
- * then scores against the ground truth in fixtures.ts:
- *   1. documentation-gap DETECTION (precision / recall / F1),
- *   2. gap CLASSIFICATION (per-label PRF, macro-F1, Cohen's kappa),
- *   3. fragment LOCALIZATION (verified-quote rate, correct-file accuracy),
- *   4. classifier CONFIDENCE (self-consistency agreement on true vs spurious flags),
- *   5. docs-PATCH coverage (how many detected defects yield an applyable hunk),
- *   6. goal pass rates (strict and step-level; PARTIAL_FAILURE-aware).
- *
- * When a fixture provides `fixedFiles` the eval runs a SECOND phase using
- * `/planner/rerun`: the same goals are executed against a project built from the
- * corrected docs. This produces a BEFORE → AFTER delta showing how many gaps were
- * resolved by the documentation fix, with no LLM goal-generation cost for phase 2.
- *
- * Prerequisites: a running Rookie server (`deno task start`) plus its
- * dependencies (MongoDB, Qdrant, Docker) and a configured LLM/embeddings backend
- * (OpenAI or a local Ollama/llama.cpp endpoint — see README).
- *
- * Run:  deno run --allow-net --allow-env src/eval/runEval.ts
- * Env:  ROOKIE_EVAL_BASE_URL (default http://localhost:3000)
- *
- * This is an INTEGRATION evaluation: results depend on the model. Run it a few
- * times / with several models to compare. The pure metric maths is unit-tested
- * separately in metrics.test.ts (and src/feedback/feedback.test.ts).
- */
 import { EvalFixture, FIXTURES } from "./fixtures.ts";
 import {
     cohenKappa,
@@ -89,7 +61,6 @@ async function createProject(name: string, fileIds: string[]): Promise<string> {
     return (await res.json()).id;
 }
 
-/** Consume an NDJSON master-plan stream and return { reportIds, masterPlanId }. */
 async function streamMasterPlan(
     endpoint: string,
     body: Record<string, unknown>,
@@ -117,7 +88,6 @@ async function streamMasterPlan(
             try {
                 const evt = JSON.parse(line);
                 if (evt.reportId) reportIds.add(evt.reportId);
-                // The terminal COMPLETE event carries the full master-plan report
                 if (evt.type === "COMPLETE" && evt.result?._id) {
                     masterPlanId = evt.result._id;
                 }
@@ -127,7 +97,6 @@ async function streamMasterPlan(
     return { reportIds: [...reportIds], masterPlanId };
 }
 
-/** Run a fresh master plan for a project. */
 async function runMasterPlan(
     projectId: string,
     maxGoals: number,
@@ -135,7 +104,6 @@ async function runMasterPlan(
     return streamMasterPlan("/planner/run", { projectId, maxGoals, initialContext: "{}" });
 }
 
-/** Re-run an existing master plan's goals against a (possibly different) project. */
 async function rerunMasterPlan(
     masterPlanId: string,
     projectId: string,
@@ -150,7 +118,6 @@ async function getReport(reportId: string): Promise<(ReportLike & { id: string }
     return { ...json, id: json.id ?? json._id ?? reportId };
 }
 
-/** Fetch the raw unified docs patch for a report ("" when none / unavailable). */
 async function getDocsPatch(reportId: string): Promise<string> {
     try {
         const res = await fetch(`${BASE}/reports/${reportId}/docs-patch?format=diff`);
@@ -168,7 +135,6 @@ function failureText(s: StepLike): string {
         .toLowerCase();
 }
 
-/** Score a set of reports against a fixture's expected defects. Mutates the accumulator args. */
 function scoreReports(
     reports: (ReportLike & { id: string })[],
     fixture: EvalFixture,
@@ -256,7 +222,6 @@ function scoreReports(
 }
 
 async function main() {
-    // ── Before accumulators (original / broken docs) ─────────────────────────
     const before = {
         goldLabels: [] as GapLabel[],
         predLabels: [] as GapLabel[],
@@ -277,7 +242,6 @@ async function main() {
     };
     let patchableDefectsBefore = 0;
 
-    // ── After accumulators (fixed docs, rerun with same goals) ────────────────
     const after = structuredClone(before);
     let patchableDefectsAfter = 0;
     let fixturesWithRerun = 0;
@@ -285,7 +249,6 @@ async function main() {
     for (const fixture of FIXTURES) {
         console.log(`\n=== Fixture: ${fixture.name} ===`);
         try {
-            // ── Phase 1: run on original (broken) docs ────────────────────────
             const fileIds = await uploadFiles(fixture);
             const projectId = await createProject(fixture.name, fileIds);
             const { reportIds, masterPlanId } = await runMasterPlan(
@@ -304,7 +267,6 @@ async function main() {
             const beforeScores = await scoreReports(reports, fixture, before);
             patchableDefectsBefore += beforeScores.patchableDefects;
 
-            // Log individual defect results
             const allFailures = reports.flatMap((r) =>
                 r.steps.filter((s) => s.status === "FAILED" && s.failureAnalysis)
                     .map((s) => ({ step: s, reportId: r.id }))
@@ -335,7 +297,6 @@ async function main() {
                 }
             }
 
-            // ── Phase 2: rerun same goals on fixed docs (if available) ────────
             if (fixture.fixedFiles && fixture.fixedFiles.length > 0 && masterPlanId) {
                 fixturesWithRerun++;
                 console.log(`  [AFTER]  Re-running goals on fixed docs...`);
@@ -392,7 +353,6 @@ async function main() {
         }
     }
 
-    // ─── Report ──────────────────────────────────────────────────────────────
     function printMetrics(
         label: string,
         acc: typeof before,
@@ -475,7 +435,6 @@ async function main() {
             patchableDefectsAfter,
         );
 
-        // Delta summary
         const detBefore = detectionMetrics(
             before.detected.value,
             before.totalGold.value,

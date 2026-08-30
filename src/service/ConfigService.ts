@@ -30,114 +30,56 @@ export interface ConfigValues {
         maxResultChars: number;
         maxContextChars: number;
         maxScenarioDocsChars: number;
-        /** Token budget for the agentic loop before non-destructive pruning kicks in. */
         maxContextTokens: number;
-        /** Max chars returned by a single VFS read_file before truncation. */
         maxFileReadChars: number;
     };
-    /** Generation/determinism knobs. Kept conservative so small local models behave predictably. */
     llm: {
         temperature: number;
-        /** Optional integer seed; ignored by servers that do not support it (harmless). */
         seed?: number;
-        /**
-         * How structured JSON is requested from the model.
-         * - "json_schema": strict schema (OpenAI / newer servers). Most accurate.
-         * - "json_object": loose JSON mode (widely supported, incl. Ollama/llama.cpp). Default.
-         * - "text": no response_format; rely on prompt + zod repair (oldest/smallest models).
-         */
         structuredOutputMode: "json_schema" | "json_object" | "text";
-        /** Extra repair attempts when the model returns JSON that fails zod validation. */
         maxRepairAttempts: number;
-        /** Retries (with exponential backoff) on transient 429/5xx/network errors. */
         maxRetries: number;
         retryBaseMs: number;
-        /** Per-call timeout (ms) for a single LLM completion. Guards against hangs;
-         *  set generously for slow local models doing large generations. */
         callTimeoutMs: number;
-        /**
-         * Max output tokens per completion. MUST be generous for "reasoning"
-         * models (gpt-oss, qwen3, deepseek-r1…): they spend budget on internal
-         * thinking BEFORE emitting content, so a small cap returns an EMPTY body
-         * with finish_reason=length. Structured calls escalate this automatically
-         * when they hit the cap.
-         */
         maxTokens: number;
     };
-    /** BM25 sparse-vector parameters (Qdrant applies IDF server-side). */
     sparse: {
         k1: number;
         b: number;
-        /** Approximate average document length in tokens (FastEmbed-style, avoids global stats). */
         avgLen: number;
     };
-    /** Document chunking parameters. Changing these requires re-indexing all projects. */
     chunking: {
         chunkSize: number;
         chunkOverlap: number;
     };
-    /** HTML-to-Markdown crawler thresholds. */
     crawler: {
-        /** Below this body text length + an SPA root marker ⇒ treat as unrendered JS shell. */
         spaMinTextChars: number;
-        /** Below this Readability article length ⇒ fall back to direct main/body extraction. */
         readabilityMinChars: number;
     };
-    /** Reranking of retrieved chunks. Defaults to LLM-based reranking (no extra service needed). */
     reranker: {
         mode: "off" | "llm" | "api";
-        /** For "api" mode: a Jina/TEI-compatible /rerank endpoint. */
         baseURL?: string;
         apiKey?: string;
         model?: string;
-        /** Rerank this many top candidates, then keep `limit`. */
         topN: number;
     };
-    /** Failure classifier self-consistency. */
     classifier: {
-        /** Number of independent classifications; majority vote. 1 = legacy behaviour. */
         votes: number;
     };
-    /** Master-plan concurrency. */
     planner: {
-        /**
-         * How many goals to run concurrently inside runMasterPlan / rerunMasterPlan.
-         * 1 = fully sequential (default, safest for rate-limited LLM endpoints).
-         * 2–4 = good balance for most hosted APIs.
-         * Set equal to maxGoals for maximum throughput at the cost of KB cross-pollination.
-         */
         parallelGoals: number;
     };
-    /** Untrusted-code sandbox controls. */
     sandbox: {
-        /** Apply container hardening flags (non-root, cap-drop, read-only, etc.). */
         hardening: boolean;
-        /** Numeric user[:group] to run as. Empty string keeps the image default. */
         user: string;
         pidsLimit: number;
-        /** "network" (default rookie-network), "none" (offline), or a named network. */
         networkMode: string;
         networkName: string;
-        /** Auto `npm install` of bare imports detected in generated code. */
         autoInstallDeps: boolean;
-        /** Per-step Docker execution timeout in milliseconds (default 60 000).
-         *  Applies to the PROGRAM only — dependency install has its own budget. */
         stepTimeoutMs: number;
-        /** Separate budget for `npm install` so a slow registry never consumes the
-         *  program's execution time (which would look like a bogus timeout). */
         installTimeoutMs: number;
-        /** Max sandbox containers in flight process-wide. Goals, examples and doc
-         *  examples all fan out concurrently; without a cap they oversubscribe the
-         *  Docker VM, and the resulting slowness surfaces as spurious timeouts. */
         maxConcurrentContainers: number;
-        /** Memory cap per sandbox container. `node + npm install` needs far less
-         *  than the old 2 GB; a smaller cap lets more run safely side by side. */
         memoryLimit: string;
-        /**
-         * Reject exit-0 executions that never made an HTTP request to the API
-         * host(s) declared in the execution context (anti-mock / anti-no-op).
-         * Only enforced when the context contains URLs; library tests are exempt.
-         */
         requireGroundedSuccess: boolean;
     };
 }
@@ -177,8 +119,6 @@ export class ConfigService {
                 ),
             },
             embeddings: {
-                // Local-friendly default: served via an OpenAI-compatible endpoint
-                // (e.g. Ollama `nomic-embed-text`). Stronger on technical text than MiniLM.
                 embeddingModel: Deno.env.get("ROOKIE_EMBEDDING_MODEL") ||
                     "nomic-embed-text",
                 vectorSize: Number.parseInt(
@@ -188,7 +128,6 @@ export class ConfigService {
                 baseURL: Deno.env.get("ROOKIE_EMBEDDING_BASE_URL"),
             },
             openAI: {
-                // Accept the correctly-spelled var first, fall back to the historical typo.
                 apiKey: Deno.env.get("ROOKIE_OPENAI_KEY") ||
                     Deno.env.get("ROOKIE_OPEAN_AI_KEY") ||
                     "12345689ABCDEFG",

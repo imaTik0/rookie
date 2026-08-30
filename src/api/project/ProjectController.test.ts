@@ -1,17 +1,9 @@
-/**
- * Tests for ProjectController handler logic (status codes + error mapping),
- * driven through a fake Hono context with a faked ProjectService/JobService.
- * Run with: deno test src/api/project/ProjectController.test.ts
- */
 import { assertEquals } from "@std/assert";
 import { ProjectController } from "./ProjectController.ts";
 import type { ProjectService } from "../../service/ProjectService.ts";
 import type { JobService } from "../../service/JobService.ts";
 import { fakeContext, type FakeResponse } from "../../testing/fakes.ts";
 
-// Controllers' RouteHandler signature is strongly typed (expects (c, next) and a
-// Hono TypedResponse). For direct invocation in tests we view them as loose
-// single-arg handlers returning our FakeResponse.
 type Handlers = Record<string, (c: unknown) => Promise<FakeResponse>>;
 
 function controller(

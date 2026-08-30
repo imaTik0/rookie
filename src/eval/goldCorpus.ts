@@ -1,17 +1,3 @@
-/**
- * Large gold-standard documentation corpus for mutation testing.
- *
- * Five offline-friendly npm libraries, each function documented with a
- * description, a typed parameter list and a runnable example — deliberately
- * rich in mutation sites (parameter lines, precise types, example blocks) so
- * the four operators yield a large potential-mutant pool. Every statement is
- * factually correct: the gold baseline must satisfy the ≥90% pass-rate
- * requirement, otherwise mutant results are unreliable.
- *
- * All examples are deterministic and need no network: the sandbox auto-installs
- * the imports and the grounded-success check exempts URL-free contexts.
- */
-
 export interface GoldCorpus {
     name: string;
     files: { filename: string; mimetype: string; content: string }[];

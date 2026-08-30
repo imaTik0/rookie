@@ -51,7 +51,6 @@ export class JobRepository extends BaseRepository<types.job.JobId, db.JobModel> 
         return { items, total };
     }
 
-    /** Apply a partial update and return the resulting document. */
     private async patch(
         jobId: types.job.JobId,
         set: Partial<db.JobModel>,
@@ -87,10 +86,6 @@ export class JobRepository extends BaseRepository<types.job.JobId, db.JobModel> 
         return this.patch(jobId, { status: "CANCELLED", finishedAt: new Date() });
     }
 
-    /**
-     * Fail every job still marked RUNNING (or PENDING). Called on startup: the
-     * in-process runners that owned them did not survive the restart.
-     */
     async failAllRunning(reason: string): Promise<number> {
         const result = await this.getCollection().updateMany(
             { status: { $in: ["RUNNING", "PENDING"] } },

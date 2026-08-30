@@ -1,8 +1,3 @@
-/**
- * Tests for JobService lifecycle: enqueue -> run -> terminal state, startup
- * reconciliation, and cancellation. Uses an in-memory JobRepository + fakes.
- * Run with: deno test src/service/JobService.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { JobService } from "./JobService.ts";
 import type { Executor } from "./Executor.ts";

@@ -1,12 +1,3 @@
-/**
- * Programmatic aggregation of documentation-gap findings across steps/goals.
- *
- * Before the master-summary LLM call, identical or near-identical gaps hit by
- * multiple goals are clustered here so that counts, affected goals and the
- * failure taxonomy are computed facts — the LLM only writes prose on top.
- *
- * Pure & dependency-free — unit-tested in feedback.test.ts.
- */
 import type * as types from "../types/index.ts";
 import { tokenOverlap } from "./fragmentVerify.ts";
 
@@ -18,21 +9,17 @@ export interface GapFinding {
 }
 
 export interface GapCluster {
-    /** Stable key: file + first finding's failed function. */
     key: string;
     documentationGap: types.report.DocumentationGap;
     file?: string;
     lineStart?: number;
     lineEnd?: number;
-    /** Verified ground-truth fragment when available, else the LLM quote. */
     fragment: string;
     proposedFix: string;
     failedFunction: string;
     occurrences: number;
     affectedGoals: string[];
-    /** Mean classifier confidence over the cluster (0..1, undefined when unknown). */
     meanConfidence?: number;
-    /** True when at least one finding's fragment was verified against the corpus. */
     verified: boolean;
     reportIds: string[];
 }
@@ -47,8 +34,6 @@ function sameCluster(a: GapFinding, b: GapFinding): boolean {
     const fa = a.analysis;
     const fb = b.analysis;
 
-    // Same verified file + overlapping line range → same gap.
-    // Use > 0 (not >= 0): adjacent ranges share only an endpoint and are distinct gaps.
     const va = fa.fragmentVerification;
     const vb = fb.fragmentVerification;
     if (va?.verified && vb?.verified && va.file === vb.file) {
@@ -61,7 +46,6 @@ function sameCluster(a: GapFinding, b: GapFinding): boolean {
         }
     }
 
-    // Same failed function + same gap category → same gap.
     if (
         fa.failedFunction && fb.failedFunction &&
         fa.failedFunction !== "unknown" &&
@@ -69,7 +53,6 @@ function sameCluster(a: GapFinding, b: GapFinding): boolean {
         fa.documentationGap === fb.documentationGap
     ) return true;
 
-    // Similar fragments → same gap.
     const ta = fragmentOf(fa);
     const tb = fragmentOf(fb);
     if (ta && tb && tokenOverlap(ta, tb) >= CLUSTER_SIMILARITY) return true;
@@ -77,7 +60,6 @@ function sameCluster(a: GapFinding, b: GapFinding): boolean {
     return false;
 }
 
-/** Greedy single-pass clustering (findings per project are small). */
 export function clusterGaps(findings: GapFinding[]): GapCluster[] {
     const clusters: { members: GapFinding[] }[] = [];
 
@@ -88,7 +70,6 @@ export function clusterGaps(findings: GapFinding[]): GapCluster[] {
     }
 
     return clusters.map(({ members }) => {
-        // Representative: prefer verified fragments, then highest confidence.
         const sorted = [...members].sort((a, b) => {
             const av = a.analysis.fragmentVerification?.verified ? 1 : 0;
             const bv = b.analysis.fragmentVerification?.verified ? 1 : 0;
@@ -121,7 +102,6 @@ export function clusterGaps(findings: GapFinding[]): GapCluster[] {
     }).sort((a, b) => b.occurrences - a.occurrences);
 }
 
-/** Collect all non-environment doc-gap findings from per-goal execution reports. */
 export function collectFindings(
     executionReports: {
         goal: string;
@@ -146,7 +126,6 @@ export function collectFindings(
     return findings;
 }
 
-/** Deterministic failure taxonomy from raw findings (counts per gap label). */
 export function taxonomyOf(
     findings: GapFinding[],
 ): Record<string, number> {
@@ -157,7 +136,6 @@ export function taxonomyOf(
     return taxonomy;
 }
 
-/** Deterministic top-failing-functions list from raw findings. */
 export function topFailingFunctionsOf(
     findings: GapFinding[],
     max = 10,

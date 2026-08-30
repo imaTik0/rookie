@@ -80,8 +80,6 @@ export class TestSuiteController {
     @Post(TestSuiteRoutes.ExecuteTestSuiteRoute)
     executeTestSuite: RouteHandler<typeof TestSuiteRoutes.ExecuteTestSuiteRoute> = async (c) => {
         const { testSuiteId } = c.req.valid("param");
-        // Validate up-front so a missing suite fails fast with 404 rather than
-        // surfacing only later via the job's error.
         const suite = await this.testSuiteService.getTestSuite(
             testSuiteId as types.test.TestSuiteId,
         );

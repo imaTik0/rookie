@@ -1,7 +1,3 @@
-/**
- * Unit tests for the evaluation metrics. Run with: `deno test src/eval/metrics.test.ts`
- * These need no infrastructure (no Mongo/Qdrant/Docker/LLM).
- */
 import { assertAlmostEquals, assertEquals } from "@std/assert";
 import {
     accuracy,
@@ -17,7 +13,6 @@ import {
 } from "./metrics.ts";
 
 Deno.test("detectionMetrics computes precision/recall/f1", () => {
-    // 8 detected, 10 injected defects, 12 total flagged
     const m = detectionMetrics(8, 10, 12);
     assertAlmostEquals(m.recall, 0.8, 1e-9);
     assertAlmostEquals(m.precision, 8 / 12, 1e-9);
@@ -38,10 +33,8 @@ Deno.test("accuracy and confusionMatrix agree", () => {
 
     const cm = confusionMatrix(gold, pred);
     const per = perLabelMetrics(cm);
-    // MISSING: 1 tp, 0 fp, 1 fn -> recall .5, precision 1
     assertAlmostEquals(per["MISSING"].recall, 0.5, 1e-9);
     assertAlmostEquals(per["MISSING"].precision, 1, 1e-9);
-    // CONFIG: 1 tp, 1 fp, 0 fn -> precision .5, recall 1
     assertAlmostEquals(per["CONFIG"].precision, 0.5, 1e-9);
     assertAlmostEquals(per["CONFIG"].recall, 1, 1e-9);
 });
@@ -50,7 +43,6 @@ Deno.test("cohenKappa is 1 for perfect agreement and 0 for chance", () => {
     const a: GapLabel[] = ["MISSING", "CONFIG", "INCORRECT", "MISSING"];
     assertEquals(cohenKappa(a, a), 1);
 
-    // Total disagreement but matched marginals can give <= 0
     const gold: GapLabel[] = ["MISSING", "CONFIG"];
     const pred: GapLabel[] = ["CONFIG", "MISSING"];
     const k = cohenKappa(gold, pred);
@@ -76,13 +68,9 @@ Deno.test("mean handles empty and non-empty lists", () => {
 
 Deno.test("localizationMetrics scores verification and file accuracy", () => {
     const stats = localizationMetrics([
-        // verified & correct file
         { expectedFile: "a.md", predictedFile: "a.md", verified: true },
-        // verified but wrong file
         { expectedFile: "a.md", predictedFile: "b.md", verified: true },
-        // unverified
         { expectedFile: "c.md", predictedFile: undefined, verified: false },
-        // unverified with a stale predicted file must not count as correct
         { expectedFile: "d.md", predictedFile: "d.md", verified: false },
     ]);
     assertAlmostEquals(stats.verifiedRate, 0.5, 1e-9);

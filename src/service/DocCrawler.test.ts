@@ -1,9 +1,3 @@
-/**
- * Tests for DocCrawler path-prefix scoping — ensures a crawl started at a
- * versioned docs subtree does not bleed into sibling versions (e.g. /influxdb/v2
- * must not pull in /influxdb/v3). Reaches the private helper via `as any`.
- * Run with: deno test src/service/DocCrawler.test.ts
- */
 import { assertEquals } from "@std/assert";
 import { DocCrawler } from "./DocCrawler.ts";
 import type { ConfigService } from "./ConfigService.ts";

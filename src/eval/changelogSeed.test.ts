@@ -1,7 +1,3 @@
-/**
- * Unit tests for the changelog-seed / golden-dataset module. Pure — no infra.
- * Run with: deno test src/eval/changelogSeed.test.ts
- */
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import {
     CHANGELOG_SEEDS,
@@ -16,10 +12,8 @@ Deno.test("expectedApiSymbols extracts distinctive API identifiers, not generic 
     const execa = expectedApiSymbols(CHANGELOG_SEEDS.execa);
     assert(execa.includes("execaCommand"), `expected execaCommand in ${JSON.stringify(execa)}`);
     assert(execa.includes("parseCommandString"), "expected parseCommandString");
-    // generic tokens must be filtered out
     assert(!execa.includes("template"), "template is not a distinctive API symbol");
     assert(!execa.includes("ipc"), "ipc is too short/generic");
-    // every seed yields a (possibly empty) string array of well-formed identifiers
     for (const [key, s] of Object.entries(CHANGELOG_SEEDS)) {
         for (const sym of expectedApiSymbols(s)) {
             assert(/^[A-Za-z_$][\w$.]*$/.test(sym), `${key}: bad symbol ${sym}`);
@@ -52,8 +46,6 @@ Deno.test("renderChangelogSeed is empty for no seed", () => {
 });
 
 Deno.test("all seeds pin a NEW version released in 2026 (post-cutoff)", () => {
-    // The whole point of this sample: the new version's breaking changes cannot
-    // be memorised. Encoded pairs must be the 2026 majors.
     const newMajor: Record<string, string> = {
         commander: "15",
         execa: "10",
@@ -75,14 +67,12 @@ Deno.test("renderChangelogSeed steers goals but hides the version/changelog", ()
     const block = renderChangelogSeed(CHANGELOG_SEEDS.execa);
     assertStringIncludes(block, "OLD-API usage to exercise");
     assertStringIncludes(block, "execa@9.6.1");
-    // Must instruct the model NOT to leak the drift framing into goal text.
     assertStringIncludes(block, "Do NOT");
     assertStringIncludes(block, "execaCommand");
 });
 
 Deno.test("scoreBreakingChanges: recall counts items whose keywords appear in signals", () => {
     const seed = CHANGELOG_SEEDS.execa;
-    // A gap mentioning execaCommand (1 of the 2 items).
     const score = scoreBreakingChanges(seed, [
         { text: "The docs use execaCommand('git status') which no longer exists in v10." },
     ]);
@@ -100,12 +90,9 @@ Deno.test("scoreBreakingChanges: no signals → zero recall", () => {
 
 Deno.test("scoreBreakingChanges: keyword matches at a word start only", () => {
     const seed = CHANGELOG_SEEDS.got;
-    // 'cancellation' should still match 'cancel' (word start); unrelated text must not.
     assert(scoreBreakingChanges(seed, [{ text: "cancel the request" }]).detected >= 1);
     assertEquals(scoreBreakingChanges(seed, [{ text: "nothing relevant here" }]).detected, 0);
 });
-
-// ── drift-tied evidence (recall must not count seeded-goal chatter) ────────────
 
 Deno.test("driftEvidenceSignals: a regressed step is evidence", () => {
     const s = driftEvidenceSignals({
@@ -131,25 +118,17 @@ Deno.test("driftEvidenceSignals: a gap NEW in the experiment is drift evidence",
 });
 
 Deno.test("recall is NOT inflated by seeded goals when nothing regressed", () => {
-    // Regression: eslint scored 3/3 recall with zero drift, because goals seeded
-    // from the changelog mention those APIs by construction.
     const seed = CHANGELOG_SEEDS.eslint;
     const noDrift = driftEvidenceSignals({ stepRegressions: [], experimentGaps: [] });
     assertEquals(scoreBreakingChanges(seed, noDrift).detected, 0);
 
-    // …but a real regression naming the API does count.
     const withDrift = driftEvidenceSignals({
         stepRegressions: [{ goal: "custom rule", evidence: "context.getScope is not a function" }],
     });
     assert(scoreBreakingChanges(seed, withDrift).detected >= 1);
 });
 
-// ── guards for the recall-inflation bug ───────────────────────────────────────
-
 Deno.test("seeded goal/description text is NOT evidence — only the runtime error is", () => {
-    // Root cause of the 19/22-vs-11/22 inflation: goals are generated FROM the
-    // changelog, so their text names the changed API by construction. Scoring it
-    // credited a breaking change whenever a goal merely mentioned it.
     const s = driftEvidenceSignals({
         stepRegressions: [{
             goal: "exercise prefixUrl and error.response.json() together",
@@ -164,8 +143,6 @@ Deno.test("seeded goal/description text is NOT evidence — only the runtime err
 });
 
 Deno.test("a regression caused by change A does not credit unrelated change B", () => {
-    // undici: a step failed on the handler-interface change, but the goal text
-    // said "blob body", so the Blob change was wrongly credited too.
     const seed = CHANGELOG_SEEDS.undici;
     const signals = driftEvidenceSignals({
         stepRegressions: [{
@@ -182,8 +159,6 @@ Deno.test("a regression caused by change A does not credit unrelated change B", 
 });
 
 Deno.test("generic tokens must not match ordinary stack traces", () => {
-    // `node` used to match `at #asyncInstantiate (node:internal/modules/...)`,
-    // crediting typeorm's "Node 16/18 dropped" to an unrelated import failure.
     const seed = CHANGELOG_SEEDS.typeorm;
     const score = scoreBreakingChanges(seed, [{
         text:
@@ -216,14 +191,10 @@ Deno.test("confirmed ≤ detected, and gap-only evidence never counts as confirm
     ]);
     assertEquals(regr.confirmed, 1);
     assertEquals(regr.perItem.find((p) => p.detected)?.via, "regression");
-    // Invariant that would have flagged the bug: confirmed can never exceed detected.
     for (const sc of [gapOnly, regr]) assert(sc.confirmed <= sc.detected);
 });
 
 Deno.test("a library's own stack frames are not evidence", () => {
-    // typeorm routes every failure through `at DataSource.buildMetadatas
-    // (…/typeorm/data-source/DataSource.js)`, which would credit the
-    // Connection→DataSource rename to any unrelated error.
     const seed = CHANGELOG_SEEDS.typeorm;
     const signals = driftEvidenceSignals({
         stepRegressions: [{
@@ -239,7 +210,6 @@ Deno.test("a library's own stack frames are not evidence", () => {
         false,
         "an internal stack frame must not evidence the rename",
     );
-    // …but the developer-facing message still does.
     const real = driftEvidenceSignals({
         stepRegressions: [{
             evidence: "SyntaxError: 'typeorm' does not provide an export named 'createConnection'",
@@ -252,8 +222,6 @@ Deno.test("a library's own stack frames are not evidence", () => {
 });
 
 Deno.test("stripStackNoise removes frames but keeps the analysis that follows", () => {
-    // The evidence string concatenates error + analysis, so a line-based filter
-    // would swallow prose sitting after a stack frame.
     const cleaned = stripStackNoise(
         "Error: boom\\n    at Foo.bar (/eval/node_modules/x/y.js:1:2) the docs omit prefixUrl",
     );

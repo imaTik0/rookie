@@ -1,9 +1,3 @@
-/**
- * Integration tests for the Mongo data layer. GATED: skip when no Mongo is
- * reachable at ROOKIE_TEST_MONGO_URL (default mongodb://localhost:27017).
- * Each run uses a throwaway database that is dropped afterwards.
- * Run with: deno test --allow-all src/db/mongo/repositories.integration.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { MongoDbManager } from "./MongoDbManager.ts";
 import { MigrationManager } from "./MigrationManager.ts";
@@ -49,7 +43,7 @@ Deno.test(
         const mgr = new MigrationManager(conn, fakeLogger());
         try {
             await mgr.runAllMigrations();
-            await mgr.runAllMigrations(); // second pass must be a no-op, not throw
+            await mgr.runAllMigrations();
 
             const applied = await conn.getCollection("migrations").countDocuments();
             assert(applied >= 2, `expected >=2 applied migrations, got ${applied}`);

@@ -2,7 +2,6 @@
 import "reflect-metadata";
 import { getParamOverrides } from "./decorator.ts";
 
-/** Lower-case the first character — class `FooBar` ⇒ binding name `fooBar`. */
 function lowerFirst(name: string): string {
     return name ? name[0].toLowerCase() + name.slice(1) : name;
 }
@@ -57,7 +56,6 @@ export interface IOCEntry {
 
 export class IOC {
     protected map: { [name: string]: IOCEntry };
-    /** Names currently mid-construction — used to detect circular dependencies. */
     private resolving = new Set<string>();
 
     constructor(private parent?: IOC) {
@@ -140,12 +138,6 @@ export class IOC {
         throw new Error("Invalid ioc entry");
     }
 
-    /**
-     * Constructor dependency binding-names. Prefers `design:paramtypes` reflection
-     * metadata (emitted for any decorated class) — mapping each parameter type to
-     * its binding name, with `@InjectParam` overrides for ambiguous types. Falls
-     * back to source-text parsing for classes that carry no metadata.
-     */
     private getConstructorDependencyNames(clazz: Function): string[] {
         const paramTypes = Reflect.getMetadata("design:paramtypes", clazz) as
             | Array<{ name?: string }>
@@ -192,7 +184,6 @@ export class IOC {
             if (
                 !(result instanceof Injectable) && clazz.postInjection !== false
             ) {
-                // Post constructor injection
                 for (const key in injectMap) {
                     (<any> result)[key] = injectMap[key];
                 }

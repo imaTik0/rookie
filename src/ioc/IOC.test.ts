@@ -1,15 +1,7 @@
-/**
- * Unit tests for the IoC container: the legacy source-text parser (now a
- * fallback), metadata-based type resolution, @InjectParam overrides, and
- * circular-dependency detection.
- * Run with: deno test src/ioc/IOC.test.ts
- */
 import "reflect-metadata";
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { IOC, ReflectUtils } from "./IOC.ts";
 import { Injectable, InjectParam } from "./decorator.ts";
-
-// ── ReflectUtils ───────────────────────────────────────────────────────────────
 
 Deno.test("getClassConstructorParametersNames reads constructor params", () => {
     class A {
@@ -32,8 +24,6 @@ Deno.test("getClassConstructorParametersNames caches on the constructor", () => 
     assertEquals(first, second);
     assert("__constructorParametersNames" in A);
 });
-
-// ── IOC ────────────────────────────────────────────────────────────────────────
 
 Deno.test("register lowercases the first letter of the class name", () => {
     const ioc = new IOC();
@@ -107,8 +97,6 @@ Deno.test("create(name, props) overrides a named dependency", () => {
     assertEquals((overridden.repo as { value: number }).value, 99);
 });
 
-// ── metadata-based resolution (design:paramtypes) ────────────────────────────────
-
 Deno.test("resolves @Injectable constructor deps by TYPE metadata, not param name", () => {
     const ioc = new IOC();
     @Injectable()
@@ -117,7 +105,6 @@ Deno.test("resolves @Injectable constructor deps by TYPE metadata, not param nam
     }
     @Injectable()
     class MetaSvc {
-        // param deliberately NOT named after its type — only metadata can wire this.
         constructor(public anything: MetaDep) {}
     }
     ioc.register(MetaDep);
@@ -141,12 +128,8 @@ Deno.test("@InjectParam overrides the resolved binding name for a parameter", ()
     assertEquals((o.dep as { marker: boolean }).marker, true);
 });
 
-// ── circular-dependency detection ─────────────────────────────────────────────────
-
 Deno.test("resolve throws on a circular dependency (with the chain)", () => {
     const ioc = new IOC();
-    // Use `unknown` param types (no @Injectable) so the cycle is exercised via the
-    // fallback parser without a decoration-time circular type reference.
     class CycA {
         constructor(public cycB: unknown) {}
     }

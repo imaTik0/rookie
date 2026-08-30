@@ -1,8 +1,3 @@
-/**
- * Unit tests for FailureClassifier (relocated from PromptService): self-consistency
- * voting, fragment-verifiability tiebreak, the all-failed fallback, and query
- * refinement. Run with: deno test --allow-env src/service/prompt/FailureClassifier.test.ts
- */
 import { assertEquals } from "@std/assert";
 import { FailureClassifier } from "./FailureClassifier.ts";
 import { ConfigService } from "../ConfigService.ts";
@@ -19,7 +14,7 @@ Deno.test("classify: majority vote sets gap, votes and confidence", async () => 
     }]);
     const a = await classifier(openai).classify("err", "code", "docs", "desc");
     assertEquals(a.documentationGap, "INCORRECT");
-    assertEquals(a.votes, 3); // default classifier.votes
+    assertEquals(a.votes, 3);
     assertEquals(a.confidence, 1);
 });
 

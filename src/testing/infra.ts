@@ -1,13 +1,3 @@
-/**
- * Availability probes for infrastructure-backed (Tier 3) tests.
- *
- * Each returns false instead of throwing, so test files can do:
- *   const HAS_X = await xAvailable();
- *   Deno.test({ name, ignore: !HAS_X }, ...)
- * which skips cleanly when the service is absent — never aborting the run
- * (unlike a top-level Deno.exit).
- */
-
 export async function dockerAvailable(): Promise<boolean> {
     try {
         const out = await new Deno.Command("docker", {

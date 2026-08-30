@@ -1,14 +1,7 @@
-/**
- * Unit tests for structured-output handling: JSON extraction, zod validation,
- * the repair loop, and json_schema -> json_object runtime degrade.
- * Run with: deno test src/llm/StructuredLlm.test.ts
- */
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { z } from "zod";
 import { chatStructured, coerceJson, extractJson } from "./StructuredLlm.ts";
 import { apiError, fakeLogger, fakeOpenAI } from "../testing/fakes.ts";
-
-// ── extractJson ────────────────────────────────────────────────────────────────
 
 Deno.test("extractJson unwraps ```json fences", () => {
     assertEquals(extractJson('```json\n{"a":1}\n```'), '{"a":1}');
@@ -31,9 +24,6 @@ Deno.test("extractJson returns trimmed body when no JSON present", () => {
 });
 
 Deno.test("extractJson ignores a nested ```yaml block inside a string value (regression)", () => {
-    // Reproduces the master-planner crash: raw JSON (json_object mode, no outer
-    // fence) whose summary field embeds a YAML readiness-probe snippet. The old
-    // regex grabbed the inner ```yaml block -> JSON.parse('yaml\\nread...') failed.
     const payload = {
         examples: [],
         finalMarkdownSummary:
@@ -56,8 +46,6 @@ Deno.test("coerceJson recovers a payload with a nested ```yaml fence", () => {
     assert(r.ok);
 });
 
-// ── coerceJson ───────────────────────────────────────────────────────────────
-
 const schema = z.object({ name: z.string() });
 
 Deno.test("coerceJson parses + validates a good payload", () => {
@@ -77,8 +65,6 @@ Deno.test("coerceJson reports zod validation failure", () => {
     assert(!r.ok);
 });
 
-// ── chatStructured ─────────────────────────────────────────────────────────────
-
 Deno.test("chatStructured returns typed data on first valid response", async () => {
     const { openai, calls } = fakeOpenAI([{ content: '{"name":"ok"}' }]);
     const out = await chatStructured({
@@ -97,8 +83,8 @@ Deno.test("chatStructured returns typed data on first valid response", async () 
 
 Deno.test("chatStructured repairs an invalid response, then succeeds", async () => {
     const { openai, calls } = fakeOpenAI([
-        { content: '{"name":123}' }, // fails zod
-        { content: '{"name":"fixed"}' }, // repair succeeds
+        { content: '{"name":123}' },
+        { content: '{"name":"fixed"}' },
     ]);
     const out = await chatStructured({
         openai,
@@ -132,7 +118,6 @@ Deno.test("chatStructured degrades json_schema -> json_object on a 400 schema re
     });
     assertEquals(out.name, "degraded");
     assertEquals(calls.length, 2);
-    // First attempt requested a strict schema; the retry dropped to loose JSON mode.
     assertEquals((calls[0].response_format as { type: string }).type, "json_schema");
     assertEquals((calls[1].response_format as { type: string }).type, "json_object");
 });
@@ -156,13 +141,7 @@ Deno.test("chatStructured throws after exhausting repair attempts", async () => 
     );
 });
 
-// ── empty completions (overloaded server under high concurrency) ───────────────
-
 Deno.test("an EMPTY completion is retried as transient, not 'repaired'", async () => {
-    // Regression: an overloaded model server answers HTTP 200 with an empty body.
-    // JSON.parse("") throws "Unexpected end of JSON input", which used to look
-    // like a schema violation and burned repair calls — adding load to an already
-    // overloaded backend. It must be retried with backoff instead.
     const { openai, calls } = fakeOpenAI([{ content: "" }, { content: '{"name":"ok"}' }]);
     const out = await chatStructured({
         openai,
@@ -177,8 +156,6 @@ Deno.test("an EMPTY completion is retried as transient, not 'repaired'", async (
     });
     assertEquals(out.name, "ok");
     assertEquals(calls.length, 2);
-    // Crucially it RETRIED the same request: no repair turns were appended
-    // (a repair would make the 2nd call carry 4 messages: system,user,assistant,user).
     assertEquals((calls[1].messages as unknown[]).length, 2);
 });
 
@@ -220,9 +197,6 @@ Deno.test("persistent empty completions surface as an empty-completion error", a
 });
 
 Deno.test("empty + finish_reason=length DOUBLES the token budget on retry", async () => {
-    // Reasoning models ("thinking" models) spend the output budget internally and
-    // can return an empty body with finish_reason=length. Retrying with the SAME
-    // cap fails identically, so the budget must grow.
     const { openai, calls } = fakeOpenAI([
         { content: "", finish_reason: "length" },
         { content: '{"name":"ok"}' },
@@ -241,7 +215,7 @@ Deno.test("empty + finish_reason=length DOUBLES the token budget on retry", asyn
     });
     assertEquals(out.name, "ok");
     assertEquals(calls[0].max_tokens, 1000);
-    assertEquals(calls[1].max_tokens, 2000); // escalated
+    assertEquals(calls[1].max_tokens, 2000);
 });
 
 Deno.test("truncated (non-empty) JSON also escalates instead of 'repairing'", async () => {
@@ -263,7 +237,6 @@ Deno.test("truncated (non-empty) JSON also escalates instead of 'repairing'", as
     });
     assertEquals(out.name, "ok");
     assertEquals(calls[1].max_tokens, 1000);
-    // Retried as a fresh request, not a repair turn.
     assertEquals((calls[1].messages as unknown[]).length, 2);
 });
 
@@ -287,5 +260,5 @@ Deno.test("the escalated budget is capped", async () => {
         logger: fakeLogger(),
     });
     assertEquals(calls[1].max_tokens, 1500);
-    assertEquals(calls[2].max_tokens, 1500); // clamped, not 3000
+    assertEquals(calls[2].max_tokens, 1500);
 });

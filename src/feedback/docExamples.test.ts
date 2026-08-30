@@ -1,7 +1,3 @@
-/**
- * Unit tests for documentation code-example extraction. Pure — no infra.
- * Run with: deno test src/feedback/docExamples.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { docExampleLabel, extractDocExamples } from "./docExamples.ts";
 
@@ -11,12 +7,12 @@ function md(filename: string, content: string) {
 
 Deno.test("extracts a JS fence with section, context and 1-based line number", () => {
     const content = [
-        "# Quickstart", // line 1
-        "", // 2
-        "Call the client like so:", // 3
-        "```js", // 4
-        'const c = require("sdk"); c.connect();', // 5
-        "```", // 6
+        "# Quickstart",
+        "",
+        "Call the client like so:",
+        "```js",
+        'const c = require("sdk"); c.connect();',
+        "```",
     ].join("\n");
     const [ex] = extractDocExamples([md("readme.md", content)]);
     assertEquals(ex.language, "js");

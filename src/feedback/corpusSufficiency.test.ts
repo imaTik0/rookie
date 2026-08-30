@@ -1,7 +1,3 @@
-/**
- * Unit tests for the corpus sufficiency pre-flight. Pure — no infra.
- * Run with: deno test src/feedback/corpusSufficiency.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { assessCorpus } from "./corpusSufficiency.ts";
 

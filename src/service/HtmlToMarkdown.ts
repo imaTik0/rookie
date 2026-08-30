@@ -1,12 +1,3 @@
-/**
- * HTML → Markdown extraction for the documentation crawler.
- *
- * Pipeline: linkedom (real DOM) → Mozilla Readability (main-content extraction,
- * drops nav/sidebar/footer) → Turndown + GFM (DOM→Markdown, keeps tables and
- * fenced code). Falls back to direct main/body extraction when Readability
- * returns too little (common on terse API reference pages), and detects
- * unrendered single-page-app shells so the crawler can skip them.
- */
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -14,11 +5,8 @@ import { strikethrough, taskListItems } from "turndown-plugin-gfm";
 
 export interface ParsedPage {
     title: string;
-    /** Clean Markdown with a `# title` + `Source:` header, or "" when skipped. */
     markdown: string;
-    /** Same-origin links discovered on the page (origin + pathname, trailing slash kept). */
     links: string[];
-    /** True when the page looks like an unrendered JS shell (no real content). */
     isLikelySpa: boolean;
 }
 
@@ -31,8 +19,6 @@ export interface ParseOptions {
     readabilityMinChars: number;
 }
 
-// Minimal structural DOM types — linkedom's exported types don't surface
-// `document` on the parseHTML return, so we describe just what we use.
 interface DomNode {
     textContent?: string | null;
     innerHTML?: string;
@@ -44,7 +30,6 @@ interface DomDocument {
     querySelectorAll(selector: string): Iterable<DomNode>;
 }
 
-// CSS selectors that signal a client-rendered app root with no server HTML.
 const SPA_ROOT_SELECTORS = [
     "#swagger-ui",
     "#app",
@@ -56,15 +41,11 @@ const SPA_ROOT_SELECTORS = [
 
 const ASSET_EXT = /\.(png|jpg|jpeg|gif|svg|ico|webp|mp4|pdf|zip|tar|gz|css|js)$/i;
 
-// Single shared Turndown instance — configured once, reused per call.
 const turndown = new TurndownService({
     headingStyle: "atx",
     codeBlockStyle: "fenced",
     bulletListMarker: "-",
 });
-// GFM strikethrough + task lists, but NOT the GFM table rule — it only fires on
-// tables that have a header row, leaving headerless docs tables (e.g. Redoc API
-// parameter tables) as raw HTML. The custom rule below handles all tables.
 turndown.use([strikethrough, taskListItems]);
 
 interface TurndownNode {
@@ -90,8 +71,6 @@ turndown.addRule("anyTable", {
             return copy;
         };
 
-        // Use the first row as the header (synthesises one for headerless tables
-        // so the result is always a valid GFM table that the chunker preserves).
         const [header, ...body] = matrix.map(pad);
         const line = (cells: string[]) => `| ${cells.join(" | ")} |`;
         const sep = `| ${header.map(() => "---").join(" | ")} |`;
@@ -105,16 +84,13 @@ export function htmlToMarkdown(html: string, opts: ParseOptions): ParsedPage {
     const docTitle = document.querySelector("title")?.textContent?.trim() ||
         urlToTitle(opts.pageUrl);
 
-    // Extract links BEFORE Readability runs — it mutates/strips the document.
     const links = extractLinks(document, opts);
 
-    // SPA detection: tiny body text + a known client-render root ⇒ no real content.
     const bodyText = document.body?.textContent?.trim() ?? "";
     if (bodyText.length < opts.spaMinTextChars && hasSpaRoot(document)) {
         return { title: docTitle, markdown: "", links, isLikelySpa: true };
     }
 
-    // Primary: Readability main-content extraction.
     let articleHtml = "";
     let title = docTitle;
     try {
@@ -128,8 +104,6 @@ export function htmlToMarkdown(html: string, opts: ParseOptions): ParsedPage {
         // fall through to fallback extraction
     }
 
-    // Fallback: terse/reference pages where Readability bails — take the most
-    // content-bearing container directly so tables/params are still captured.
     if (!articleHtml) {
         const container = document.querySelector("main") ??
             document.querySelector("article") ??
@@ -167,7 +141,6 @@ function extractLinks(document: DomDocument, opts: ParseOptions): string[] {
         let href: string;
         try {
             const resolved = new URL(raw, opts.pageUrl);
-            // Preserve the trailing slash; normalizeUrl in the crawler canonicalizes.
             href = resolved.origin + resolved.pathname;
         } catch {
             continue;

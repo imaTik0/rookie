@@ -1,7 +1,3 @@
-/**
- * Unit tests for structure-aware chunking. Pure — no infra.
- * Run with: deno test src/service/FileHelpers.test.ts
- */
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { FileHelpers } from "./FileHelpers.ts";
 import type { ConfigService } from "./ConfigService.ts";
@@ -59,14 +55,12 @@ Deno.test("fenced code blocks are never split mid-fence", () => {
         "```",
         "after",
     ].join("\n");
-    // Tiny chunkSize would normally split, but a fence must stay intact.
     const shards = helpers().chunkDbFile(file("c.md", "text/markdown", md), {
         chunkSize: 30,
         chunkOverlap: 0,
     });
     const codeChunk = shards.find((s) => s.content.includes("const a = 1"))!;
     assert(codeChunk, "expected a chunk containing the code");
-    // The same chunk holds both fences and the whole code line — not split.
     assert(codeChunk.content.includes("```js"));
     assert(codeChunk.content.includes("const e = 5;"));
 });

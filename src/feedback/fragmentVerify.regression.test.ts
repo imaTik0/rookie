@@ -1,9 +1,3 @@
-/**
- * Regression tests for fragment verification window sizing.
- * Guards the fix where a forced 10-line scoring window diluted short paraphrased
- * fragments below the verify threshold. Run with:
- *   deno test src/feedback/fragmentVerify.regression.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { verifyFragment } from "./fragmentVerify.ts";
 
@@ -54,6 +48,5 @@ Deno.test("hallucinated fragment is still rejected", () => {
 Deno.test("a fragment longer than the document does not crash", () => {
     const tiny = [{ filename: "x.md", content: "one line only" }];
     const v = verifyFragment("line one\nline two\nline three\nline four", tiny);
-    // Should return a result (verified true/false) without throwing.
     assertEquals(typeof v.verified, "boolean");
 });

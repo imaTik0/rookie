@@ -61,9 +61,6 @@ export class VectorCollectionFactory {
                     },
                 },
                 sparse_vectors: {
-                    // `modifier: idf` makes Qdrant apply Inverse Document Frequency to the
-                    // sparse vectors at query time — together with the BM25 term-frequency
-                    // saturation we store per document, this gives real BM25 scoring.
                     sparse: { modifier: "idf" },
                 } as any,
             });

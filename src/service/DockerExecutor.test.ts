@@ -1,17 +1,8 @@
-/**
- * DockerExecutor tests.
- *  - Pure argument/script building runs everywhere (no Docker needed).
- *  - End-to-end container runs are gated on Docker availability and skip cleanly
- *    when it is absent (no more top-level Deno.exit that aborts the whole suite).
- * Run with: deno test --allow-all src/service/DockerExecutor.test.ts
- */
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { DockerExecutor } from "./DockerExecutor.ts";
 import { dockerAvailable } from "../testing/infra.ts";
 
 const HAS_DOCKER = await dockerAvailable();
-
-// ── Pure: hardening flags (always run) ────────────────────────────────────────────
 
 Deno.test("hardeningArgs include cap-drop, read-only, pids-limit and user", () => {
     // deno-lint-ignore no-explicit-any
@@ -35,8 +26,6 @@ Deno.test("hardeningArgs omit --user when user is empty", () => {
     assert(!args.includes("--user"));
 });
 
-// ── Pure: node bootstrap script (always run) ──────────────────────────────────────
-
 Deno.test("buildNodeScript installs de-duplicated packages and runs the code", () => {
     // deno-lint-ignore no-explicit-any
     const script: string = (new DockerExecutor() as any).buildNodeScript(
@@ -47,7 +36,6 @@ Deno.test("buildNodeScript installs de-duplicated packages and runs the code", (
     assertStringIncludes(script, "npm install");
     assertStringIncludes(script, "'lodash'");
     assertStringIncludes(script, "'axios'");
-    // de-duped: lodash listed once in the install line
     assertEquals(script.match(/'lodash'/g)!.length, 1);
     assertStringIncludes(script, 'echo "setup"');
     assertStringIncludes(script, "node run.js");
@@ -62,8 +50,6 @@ Deno.test("buildNodeScript omits the install line when there are no packages", (
     );
     assert(!script.includes("npm install"));
 });
-
-// ── Integration: real containers (gated) ──────────────────────────────────────────
 
 Deno.test({ name: "[docker] runs Node.js code", ignore: !HAS_DOCKER }, async () => {
     const r = await new DockerExecutor({ timeoutMs: 15000 }).execute(

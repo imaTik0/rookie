@@ -1,7 +1,3 @@
-/**
- * Unit tests for Utils (sha256, tryPromise). Pure — no infra.
- * Run with: deno test src/Utils.test.ts
- */
 import { assertEquals } from "@std/assert";
 import { Utils } from "./Utils.ts";
 

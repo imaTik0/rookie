@@ -1,4 +1,3 @@
-// TestSuiteRoute.ts
 import { createRoute } from "@hono/zod-openapi";
 import {
     CreateTestSuiteSchema,
@@ -97,7 +96,7 @@ const GetTestSuiteRoute = createRoute({
 });
 
 const UpdateTestSuiteRoute = createRoute({
-    method: "patch", // Changed to PATCH for partial updates, matching example
+    method: "patch",
     path: "/testsuites/{testSuiteId}",
     tags: ["Test suites"],
     summary: "Update a Test Suite",
@@ -127,7 +126,7 @@ const DeleteTestSuiteRoute = createRoute({
         "Deletes a test-suite definition. Reports already produced by its past executions are retained. Returns `204 No Content`.",
     request: { params: TestSuiteIdParam },
     responses: {
-        204: { description: "Test Suite deleted successfully" }, // 204 has no body
+        204: { description: "Test Suite deleted successfully" },
         404: commonResponses["404"],
     },
 });

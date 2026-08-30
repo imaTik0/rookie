@@ -48,14 +48,10 @@ export class FileHelpers {
         }
 
         let content = this.textDecoder.decode(dbFile.data.buffer);
-        // Only strip HTML for actual HTML/XML; stripping Markdown/JSON corrupts
-        // content (e.g. `Array<string>`, generics, `<email>` placeholders).
         if (this._isHtmlLike(dbFile.mimetype)) {
             content = striptags(content);
         }
 
-        // OpenAPI/Swagger JSON specs get endpoint-level chunking so each path+method
-        // is its own retrievable chunk instead of being split mid-definition.
         if (
             (dbFile.mimetype.startsWith("application/json") || dbFile.filename.endsWith(".json")) &&
             this._isOpenApiJson(content)
@@ -127,19 +123,6 @@ export class FileHelpers {
         return SUPPORTED_TEXT_MIMES.some((supportedType) => mimetype.startsWith(supportedType));
     }
 
-    /**
-     * Structure-aware chunker.
-     *
-     * Splits on line boundaries while respecting document structure:
-     *  - Markdown headings (`#`..`######`) start a new chunk and define the
-     *    "section" context, which is prepended to every chunk under them so a
-     *    retrieved fragment carries its heading.
-     *  - Fenced code blocks (``` ... ```) are never split across chunks.
-     *  - Each chunk records its 1-based starting line number for precise
-     *    pinpointing in reports.
-     * Chunks grow until ~chunkSize, then carry `chunkOverlap` characters of the
-     * previous chunk's tail for context continuity.
-     */
     private _chunkText(
         content: string,
         fileName: string,
@@ -154,9 +137,9 @@ export class FileHelpers {
 
         let currentSection = "";
         let buf: string[] = [];
-        let bufStartLine = 1; // 1-based
+        let bufStartLine = 1;
         let bufStartPos = 0;
-        let posOfLine = 0; // running char offset of the current line
+        let posOfLine = 0;
         let inFence = false;
 
         const bufLength = () => buf.reduce((s, l) => s + l.length + 1, 0);
@@ -164,8 +147,6 @@ export class FileHelpers {
         const flush = (startLineForNext: number, startPosForNext: number) => {
             const body = buf.join("\n").trim();
             if (body.length > 0) {
-                // Prepend the heading context only to continuation chunks; the
-                // chunk that opens a section already begins with the heading.
                 const needsHeader = currentSection && !body.startsWith(currentSection);
                 const chunkContent = needsHeader ? `${currentSection}\n\n${body}` : body;
                 chunks.push({
@@ -192,7 +173,6 @@ export class FileHelpers {
             const isFenceToggle = /^\s*```/.test(line);
             const isHeading = !inFence && /^#{1,6}\s+/.test(line);
 
-            // A heading boundary closes the current chunk and updates the section.
             if (isHeading && buf.length > 0) {
                 flush(lineNo, posOfLine);
             }
@@ -207,9 +187,7 @@ export class FileHelpers {
             buf.push(line);
             if (isFenceToggle) inFence = !inFence;
 
-            // Only break on size when not inside a code fence and not mid-heading.
             if (!inFence && !isHeading && bufLength() >= options.chunkSize) {
-                // Carry a small overlap tail into the next chunk for continuity.
                 const tail = this._overlapTail(buf, options.chunkOverlap);
                 flush(lineNo + 1, posOfLine + line.length + 1);
                 if (tail.length > 0) {
@@ -217,7 +195,7 @@ export class FileHelpers {
                 }
             }
 
-            posOfLine += line.length + 1; // +1 for the split "\n"
+            posOfLine += line.length + 1;
         }
 
         if (buf.length > 0) flush(0, 0);
@@ -229,9 +207,7 @@ export class FileHelpers {
         }));
     }
 
-    /** Detect an OpenAPI / Swagger JSON spec by the presence of `paths` + version key. */
     private _isOpenApiJson(content: string): boolean {
-        // Quick pre-check before full parse.
         if (
             !content.includes('"paths"') && !content.includes('"swagger"') &&
             !content.includes('"openapi"')
@@ -250,11 +226,6 @@ export class FileHelpers {
         }
     }
 
-    /**
-     * Chunk an OpenAPI JSON spec at the endpoint level.
-     * Each `paths[path][method]` entry becomes its own chunk so the vector search
-     * can retrieve individual endpoint definitions instead of a large combined blob.
-     */
     private _chunkOpenApiJson(
         content: string,
         fileName: string,
@@ -315,7 +286,6 @@ export class FileHelpers {
         }
     }
 
-    /** Return the trailing lines whose combined length is ~maxChars (for overlap). */
     private _overlapTail(buf: string[], maxChars: number): string[] {
         if (maxChars <= 0) return [];
         const tail: string[] = [];

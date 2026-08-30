@@ -36,8 +36,6 @@ export class ProjectController {
         c,
     ) => {
         const { projectName, url, maxPages } = c.req.valid("json");
-        // Crawling can take minutes — run it as a background job and return
-        // immediately. The created project's ID arrives in the job's result.
         const job = await this.jobService.enqueue("CRAWL_DOCS", { projectName, url, maxPages });
         return c.json(mapJobToApi(job), 202);
     };

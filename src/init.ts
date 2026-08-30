@@ -3,10 +3,6 @@ import { Container } from "./Container.ts";
 import { MongoDbManager } from "./db/mongo/MongoDbManager.ts";
 import { VectorManager } from "./db/vectordb/VectorManger.ts";
 
-// Safety net: a stray background promise rejection (e.g. an embedding timeout
-// during async indexing) must NOT terminate the whole server — that would abort
-// an entire experiment batch. Log it and stay up; individual requests still fail
-// on their own error paths.
 globalThis.addEventListener("unhandledrejection", (event) => {
     event.preventDefault();
     console.error("[unhandledRejection] server kept alive:", event.reason);

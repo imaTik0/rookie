@@ -1,14 +1,9 @@
-/**
- * Shared LLM call helpers, factored out of PromptService so its collaborators
- * (RagSearch, FailureClassifier) request structured output identically.
- */
 import type OpenAI from "@openai/openai";
 import type { z } from "zod";
 import type { ConfigService } from "../ConfigService.ts";
 import type { Logger } from "../../Logger.ts";
 import { chatStructured } from "../../llm/StructuredLlm.ts";
 
-/** Deterministic generation params (temperature/seed) for raw chat.create() calls. */
 export function llmParams(configService: ConfigService): Record<string, unknown> {
     const llm = configService.values.llm;
     return {
@@ -17,10 +12,6 @@ export function llmParams(configService: ConfigService): Record<string, unknown>
     };
 }
 
-/**
- * Extra knobs for the agentic-loop config (NOT valid as raw create() body params).
- * Includes determinism + retry + token budget.
- */
 export function loopParams(configService: ConfigService): Record<string, unknown> {
     const llm = configService.values.llm;
     return {
@@ -35,7 +26,6 @@ export function loopParams(configService: ConfigService): Record<string, unknown
 
 export type StructuredFn = <T>(system: string, user: string, schema: z.ZodType<T>) => Promise<T>;
 
-/** Build a `structured(system, user, schema)` closure bound to the given LLM config. */
 export function makeStructured(
     openai: OpenAI,
     configService: ConfigService,

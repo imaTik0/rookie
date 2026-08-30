@@ -1,14 +1,8 @@
-/**
- * Unit tests for environment-driven configuration. Pure (reads Deno.env).
- * Run with: deno test --allow-env src/service/ConfigService.test.ts
- */
 import { assertEquals } from "@std/assert";
 import { ConfigService } from "./ConfigService.ts";
 import { fakeLogger } from "../testing/fakes.ts";
 
-/** Run `fn` with the given ROOKIE_* env vars set, restoring the prior state after. */
 function withEnv(vars: Record<string, string>, fn: () => void) {
-    // Snapshot and clear every ROOKIE_* var so the host environment can't leak in.
     const prior = new Map<string, string | undefined>();
     for (const key of Object.keys(Deno.env.toObject())) {
         if (key.startsWith("ROOKIE_")) {
@@ -39,9 +33,6 @@ Deno.test("defaults apply when no env is set", () => {
         assertEquals(c.qdrantVectorDb.port, 6333);
         assertEquals(c.openAI.modelName, "gpt-4o-mini");
         assertEquals(c.embeddings.embeddingModel, "nomic-embed-text");
-        // Speed profile defaults: no LLM reranker call per search, goals run
-        // concurrently, and a generous output budget so "reasoning" models do not
-        // return an empty body with finish_reason=length.
         assertEquals(c.reranker.mode, "off");
         assertEquals(c.sandbox.hardening, true);
         assertEquals(c.sandbox.stepTimeoutMs, 60_000);
@@ -57,7 +48,7 @@ Deno.test("envNum parses numbers and falls back on garbage", () => {
     withEnv({ ROOKIE_PORT: "8080", ROOKIE_LLM_TEMPERATURE: "not-a-number" }, () => {
         const c = new ConfigService(fakeLogger()).values;
         assertEquals(c.port, 8080);
-        assertEquals(c.llm.temperature, 0.2); // fallback
+        assertEquals(c.llm.temperature, 0.2);
     });
 });
 

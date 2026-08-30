@@ -1,8 +1,3 @@
-/**
- * Unit tests for RagSearch (relocated from PromptService): cosine similarity,
- * relevance-aware truncation, and off-mode rerank. Assertions match the pre-split
- * characterization tests. Run with: deno test --allow-env src/service/prompt/RagSearch.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { RagSearch } from "./RagSearch.ts";
 import { ConfigService } from "../ConfigService.ts";
@@ -14,7 +9,7 @@ function ragSearch(opts: { config?: ConfigService; embed?: (t: string[]) => numb
     return new RagSearch(
         {} as OpenAI,
         fakeEmbeddingService(opts.embed),
-        null as never, // vectorCollectionFactory — unused by the methods tested here
+        null as never,
         config,
         fakeLogger(),
     );
@@ -56,6 +51,6 @@ Deno.test("rankAndFilterDocs packs DOCUMENT chunks greedily within the cap", asy
         "\n--- DOCUMENT 2 (Score: 1) ---\n" + "B".repeat(40);
     const out = await ragSearch().rankAndFilterDocs(content, "q", 50);
     assert(out.length <= 50);
-    assert(out.includes("A".repeat(40))); // first chunk fits
-    assert(!out.includes("B".repeat(40))); // second exceeds the budget
+    assert(out.includes("A".repeat(40)));
+    assert(!out.includes("B".repeat(40)));
 });

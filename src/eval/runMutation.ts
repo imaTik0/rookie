@@ -1,35 +1,4 @@
 #!/usr/bin/env -S deno run --allow-net --allow-env --allow-write
-/**
- * runMutation.ts — the documentation MUTATION-TESTING protocol (thesis §eval).
- *
- * For each gold corpus (a fixture's corrected `fixedFiles`):
- *   Phase 0 (gold baseline): run a fresh master plan on the GOLD docs.
- *     - checks the ≥90% goal-pass-rate gold-standard requirement,
- *     - counts flagged gaps on gold docs = false-alarm baseline.
- *   Phase 1 (mutants): generate seeded first-order mutants (4 operators),
- *     for each mutant re-run ONLY the goals that can exercise the wounded
- *     fragment (planner/rerun with `goalIndices`, doc-example smoke phase
- *     skipped) against a project built from the mutated docs, then score:
- *     - detection (MDS = detected/total, per operator),
- *     - classification of detected mutants (confusion, accuracy, Cohen's κ).
- *
- * The gold corpus is the FULL, version-pinned documentation of a library
- * released AFTER the model's knowledge cutoff (default: marked@18), so the model
- * cannot fall back on memorised knowledge and a mutated doc actually misleads it
- * (mutants become detectable). The library is pinned in the sandbox via
- * `packageOverrides`. Use `--library <key>` to select another corpus.
- *
- * Requires the full stack (Rookie + Mongo + Qdrant + Docker + LLM backend).
- * `--dry-run` only generates and prints the mutant set (no infra needed).
- *
- * Usage:
- *   deno task eval:mutation -- --dry-run
- *   deno task eval:mutation -- --seed 42 --per-operator 2
- *   deno task eval:mutation -- --concurrency 4                  # parallel mutants
- *   deno task eval:mutation -- --per-operator all               # full run
- *   deno task eval:mutation -- --gold <masterPlanId>            # reuse a prior gold baseline
- *   deno task eval:mutation -- --library execa                  # alternative corpus
- */
 import { type GoldCorpus } from "./goldCorpus.ts";
 import { fetchMutationCorpus } from "./mutationCorpus.ts";
 import {
@@ -54,19 +23,12 @@ const SEED = Number(argOf("--seed") ?? 1);
 const perOpArg = argOf("--per-operator") ?? "2";
 const PER_OPERATOR: number | "all" = perOpArg === "all" ? "all" : Number(perOpArg);
 const DRY_RUN = flag("--dry-run");
-/** Reuse an existing gold-baseline MASTER_PLAN report instead of re-running it. */
 const GOLD_ID = argOf("--gold");
-/** How many mutants run in parallel (each is an independent project). */
 const CONCURRENCY = Math.max(1, Number(argOf("--concurrency") ?? "1") || 1);
-/** The post-cutoff mutation corpus (see mutationCorpus.ts). Overridable so an
- *  alternative corpus can be evaluated without editing code. */
 const LIBRARY = argOf("--library") ?? "marked";
 const GOLD_PASS_THRESHOLD = 0.9;
 
-/** npm install pins for the whole run (pins the corpus library to its version). */
 let PACKAGE_OVERRIDES: Record<string, string> | undefined;
-
-// ── Rookie HTTP client (mirrors runEval.ts conventions) ──────────────────────
 
 async function uploadFiles(
     files: { filename: string; mimetype: string; content: string }[],
@@ -113,12 +75,10 @@ async function streamPlanner(endpoint: string, body: unknown): Promise<PlannerOu
             if (!line) continue;
             try {
                 const evt = JSON.parse(line);
-                // Controller emits { type: "COMPLETE", result: <report> } — keep the
-                // whole event; parsePlannerComplete reads the report under `result`.
                 if (evt.type === "COMPLETE") complete = evt;
                 if (evt.type === "ERROR") throw new Error(`planner ERROR: ${evt.message}`);
             } catch (e) {
-                if (e instanceof SyntaxError) continue; // partial noise line
+                if (e instanceof SyntaxError) continue;
                 throw e;
             }
         }
@@ -127,7 +87,6 @@ async function streamPlanner(endpoint: string, body: unknown): Promise<PlannerOu
     return parsePlannerComplete(complete);
 }
 
-/** Load a previously saved gold-baseline master plan (for `--gold`). */
 async function fetchGoldReport(reportId: string): Promise<PlannerOutcome> {
     const res = await fetch(`${BASE}/reports/${reportId}`);
     if (!res.ok) throw new Error(`GET /reports/${reportId} failed: HTTP ${res.status}`);
@@ -136,7 +95,6 @@ async function fetchGoldReport(reportId: string): Promise<PlannerOutcome> {
     return outcome;
 }
 
-/** Run `fn` over `items` with at most `limit` in flight; preserves order. */
 async function mapPool<T, R>(
     items: T[],
     limit: number,
@@ -154,8 +112,6 @@ async function mapPool<T, R>(
     return out;
 }
 
-// ── scoring ───────────────────────────────────────────────────────────────────
-
 interface MutantResult {
     mutant: string;
     operator: string;
@@ -163,15 +119,12 @@ interface MutantResult {
     detected: boolean;
     predicted?: GapLabel;
     passRate: number;
-    /** How many of the baseline goals were re-run (goal targeting). */
     goalsRun?: number;
-    /** Set when the mutant run itself failed; excluded from MDS denominators. */
     error?: string;
 }
 
 function scoreMutant(mutant: Mutant, outcome: PlannerOutcome): MutantResult {
     const matches = outcome.gaps.filter((g) => gapMatchesMutant(g, mutant));
-    // Prefer a location-verified match for the predicted label.
     const best = matches.find((g) => g.verified) ?? matches[0];
     return {
         mutant: mutant.id,
@@ -183,11 +136,6 @@ function scoreMutant(mutant: Mutant, outcome: PlannerOutcome): MutantResult {
     };
 }
 
-// ── main ──────────────────────────────────────────────────────────────────────
-
-// Gold corpus = the FULL, version-pinned docs of execa@10 (post-cutoff). The
-// library is pinned in the sandbox via packageOverrides, so correct docs →
-// working code (gold passes) and mutated docs → broken code (mutant detected).
 const fetched = await fetchMutationCorpus(LIBRARY);
 const goldCorpora: GoldCorpus[] = [fetched.corpus];
 PACKAGE_OVERRIDES = { [fetched.pkg]: fetched.version };
@@ -225,7 +173,6 @@ for (const corpus of goldCorpora) {
     }
     if (DRY_RUN) continue;
 
-    // Phase 0 — gold baseline (fresh run, or reused via --gold).
     let goldRun: PlannerOutcome;
     if (GOLD_ID) {
         console.log(`  ▸ reusing gold baseline ${GOLD_ID}…`);
@@ -262,11 +209,6 @@ for (const corpus of goldCorpora) {
         console.log(`  ⓘ reuse this baseline next time: --gold ${goldRun.masterPlanId}`);
     }
 
-    // Phase 1 — mutants via planner/rerun, targeted at the goals that can
-    // exercise the wound (goalIndices) and with the doc-example smoke phase
-    // skipped (no signal for any operator). One failing mutant run must not
-    // abort the protocol: it is recorded as errored and excluded from MDS
-    // denominators. Runs are parallelised with --concurrency.
     const runMutant = async (mutant: Mutant): Promise<MutantResult> => {
         const goalIdx = goldRun.goals.length > 0
             ? relevantGoalIndices(mutant, goldRun.goals)
@@ -314,7 +256,6 @@ for (const corpus of goldCorpora) {
     };
     const results = await mapPool(mutants, CONCURRENCY, runMutant);
 
-    // Metrics — errored runs are excluded from MDS denominators.
     const valid = results.filter((r) => !r.error);
     const errored = results.length - valid.length;
     const perOperator: Record<string, { total: number; detected: number; mds: number }> = {};
@@ -351,8 +292,6 @@ for (const corpus of goldCorpora) {
 
     (report.corpora as unknown[]).push({
         fixture: corpus.name,
-        // Persist the baseline id: it is the handle for `--gold` on later runs,
-        // and printing it only to the console made it unrecoverable once scrolled away.
         gold: {
             masterPlanId: goldRun.masterPlanId,
             passRate: goldRun.passRate,

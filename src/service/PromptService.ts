@@ -45,15 +45,11 @@ export type { CodeGenerationResponse, PromptOptions, StructuredResponse } from "
 export class PromptService {
     /** Hybrid retrieval + rerank + relevance-aware truncation. */
     private readonly ragSearch: RagSearch;
-    /** Virtual-file-system tools exposed to the research agents. */
     private readonly vfsTools: VfsTools;
-    /** Self-consistency documentation-gap classification + query refinement. */
     private readonly failureClassifier: FailureClassifier;
-    /** Structured-output closure bound to the configured LLM. */
     private readonly structured: StructuredFn;
 
     constructor(
-        // Two distinct OpenAI instances share one type; resolve this one by name.
         @InjectParam("openai") private openai: OpenAI,
         private logger: Logger,
         embeddingService: EmbeddingService,
@@ -73,22 +69,14 @@ export class PromptService {
         this.structured = makeStructured(openai, configService, logger);
     }
 
-    /** Common deterministic generation params (temperature/seed) for raw chat calls. */
     private llmParams(): Record<string, unknown> {
         return llmParams(this.configService);
     }
 
-    /** Extra knobs for the agentic loop config (determinism + retry + token budget). */
     private loopParams(): Record<string, unknown> {
         return loopParams(this.configService);
     }
 
-    /**
-     * Guarded `search_knowledge_base` handler with per-phase session memory:
-     * chunks already returned are stubbed instead of re-serialised, and repeated
-     * queries yielding nothing new steer the agent toward the file tools or
-     * concluding. One session per agent phase (the KB is immutable within a run).
-     */
     private createSearchHandler(
         vectorCollectionName: string,
         logLabel: string,
@@ -118,12 +106,10 @@ export class PromptService {
             options.userPreferences || "None"
         }. Steps: ${options.minimalLength || 10}-${options.maximalLength || 20}.`;
 
-        // 1. Router
         const plan = await this.promptForExecutionPlan(vectorCollectionName, goal, onProgress);
         const planStepsStr = plan.steps.map((s) => `- ${s.stepExplanation} (Action: ${s.action})`)
             .join("\n");
 
-        // 2. Research / Exploration using agentic loop
         const systemPrompt = `You are a Research Agent planning a test scenario. 
 Your goal is to gather the exact API functions and context needed.
 Follow this plan:
@@ -172,7 +158,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             onTrace: traceTracker,
         });
 
-        // 3. Generation Phase
         const agentSynthesis = finalMessages
             .filter((m) => m.role === "assistant" && typeof m.content === "string" && m.content)
             .map((m) => m.content as string)
@@ -246,22 +231,13 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         files: DocFile[],
         onProgress?: ProgressCallback,
         smokeTestCallback?: SmokeTestCallback,
-        /** JSON string with the runtime `ctx` (apiBase, credentials…). Rendered
-         *  into the verification+generation prompts so code targets ctx.apiBase
-         *  instead of the docs' literal localhost addresses. */
         initialContext?: string,
-        /** Docs-ablation arm: when true, NO documentation is retrieved (no RAG,
-         *  no research/bounce). The agent must rely on its parametric knowledge —
-         *  `pass_with − pass_without` measures the documentation's value. */
         withoutDocs?: boolean,
     ): Promise<{
         response: CodeGenerationResponse;
         history: any[];
-        /** Documentation context the generator actually worked from. */
         contextFound: string;
-        /** Research-phase per-subtask coverage breakdown (undefined on extraction failure). */
         coverageReport?: types.report.CoverageItem[];
-        /** Friction signals captured mid-run (smoke-test failures, research bounces). */
         frictionEvents: types.report.FrictionEvent[];
     }> {
         this.logger.log(`Starting Agentic RAG for goal: "${userGoal}"`);
@@ -275,8 +251,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         let researchMessages: import("@openai/openai").default.Chat.ChatCompletionMessageParam[] =
             [];
         if (withoutDocs) {
-            // Ablation: withhold all documentation; the agent works from its own
-            // knowledge only. No retrieval, no research/bounce loop.
             contextFound =
                 "NO DOCUMENTATION IS PROVIDED. Rely solely on your own knowledge of the " +
                 "library. Do not assume undocumented behaviour.";
@@ -291,8 +265,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                 ));
         }
 
-        // The research agent's explicit COVERED / NEEDS RESEARCH gap analysis is
-        // documentation feedback in its own right — extract and persist it.
         const coverageReport = withoutDocs
             ? undefined
             : await this.extractCoverageReport(researchMessages);
@@ -318,7 +290,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             const lastMessage = verificationMessages[verificationMessages.length - 1];
             const content = lastMessage.content;
 
-            // In the ablation arm there is no corpus to search — never bounce.
             if (
                 !withoutDocs && typeof content === "string" && content.includes("NEEDS_RESEARCH:")
             ) {
@@ -328,10 +299,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                     this.logger.log(`Verification agent requested more research: "${query}"`);
                     emitLog(onProgress, `Verification agent requested more research: "${query}"`);
 
-                    // #21 — Extract the agent's gap analysis prose from the bounce.
-                    // The agent typically writes a diagnostic paragraph before NEEDS_RESEARCH:
-                    // e.g. "The documentation is missing the auth header format..."
-                    // Capture this as the friction note so it isn't buried in raw traces.
                     const analysisNote = this.extractGapAnalysisFromBounce(content);
 
                     frictionEvents.push({
@@ -381,11 +348,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         };
     }
 
-    /**
-     * Extract the research agent's per-subtask coverage state (COVERED /
-     * NEEDS RESEARCH) from the research transcript into structured data.
-     * Returns undefined when extraction fails — never blocks the pipeline.
-     */
     private async extractCoverageReport(
         researchMessages: OpenAI.Chat.ChatCompletionMessageParam[],
     ): Promise<types.report.CoverageItem[] | undefined> {
@@ -428,7 +390,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         messages: OpenAI.Chat.ChatCompletionMessageParam[],
     ): OpenAI.Chat.ChatCompletionMessageParam[] {
         return messages.map((m) => {
-            // Spread into a mutable copy; use the assistant message sub-type to access tool_calls.
             if (m.role === "assistant") {
                 const clean: OpenAI.Chat.ChatCompletionAssistantMessageParam = { ...m };
                 if (typeof clean.content === "string") {
@@ -439,7 +400,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                 }
                 if (Array.isArray(clean.tool_calls)) {
                     clean.tool_calls = clean.tool_calls.map((tc) => {
-                        // Narrow away custom tool calls (which have no `.function`).
                         if (!("function" in tc)) return tc;
                         const fn = tc.function;
                         if (fn?.name === "smoke_test_code" && fn?.arguments) {
@@ -494,8 +454,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
 
         const finalMessages = await runAgenticLoop(this.openai, this.logger, onProgress, {
             messages,
-            // VFS tools are advertised in the research prompt — register them here
-            // so the agent can read full files instead of only truncated search chunks.
             tools: [
                 SEARCH_TOOL,
                 LIST_FILES_TOOL,
@@ -551,10 +509,8 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         onProgress: ProgressCallback,
         smokeTestCallback?: SmokeTestCallback,
         frictionEvents?: types.report.FrictionEvent[],
-        /** Rendered executionEnvironmentBlock() — "" when there is no runtime ctx. */
         envBlock = "",
     ): Promise<OpenAI.Chat.ChatCompletionMessageParam[]> {
-        // Smartly prune documentation before verification to stay within token budget
         const query = userGoal.substring(0, 2000);
         const maxDocsChars = this.configService.values.limits.maxScenarioDocsChars;
 
@@ -570,7 +526,7 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             {
                 role: "user",
                 content: templates.createVerificationUserPrompt(
-                    "", // Doc fragments now in contextFound string passed as smartDocs
+                    "",
                     smartDocs,
                     userGoal,
                     maxDocsChars,
@@ -612,8 +568,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
                     const status = testResult.startsWith("SUCCESS") ? "Passed" : "Failed";
                     emitLog(onProgress, `Smoke Test ${status}:\n${testResult}`);
 
-                    // A failed smoke test the agent later works around is friction
-                    // the final pass/fail status would otherwise hide — record it.
                     if (status === "Failed" && frictionEvents) {
                         frictionEvents.push({
                             type: "SMOKE_TEST_FAILURE",
@@ -637,7 +591,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
     private async runGenerationPhase(
         verificationMessages: OpenAI.Chat.ChatCompletionMessageParam[],
         onProgress: ProgressCallback,
-        /** Rendered executionEnvironmentBlock() — "" when there is no runtime ctx. */
         envBlock = "",
     ): Promise<CodeGenerationResponse> {
         this.logger.log(`Agentic RAG Generation Phase...`);
@@ -646,7 +599,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             `Agentic RAG Finalizing Phase... Formatting verified code into final response.`,
         );
 
-        // Preserve a larger window of context to avoid hallucinations
         const verificationCompleteIdx = verificationMessages.findLastIndex((m) =>
             typeof m.content === "string" && m.content.includes("VERIFICATION_COMPLETE")
         );
@@ -656,10 +608,8 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         const relevantMessages = verificationMessages.filter((m, i, arr) => {
             if (m.role === "system" || (m.role === "user" && i <= 1)) return true;
 
-            // Keep the last 10 messages of the verification phase for context
             if (i >= lastFewMessagesStart) return true;
 
-            // Also keep any successful tool results leading up to it
             if (
                 m.role === "tool" && typeof m.content === "string" &&
                 m.content.startsWith("SUCCESS")
@@ -682,9 +632,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         const genUserPrompt =
             `### TESTED EXAMPLES HISTORY:\n${testedHistory}\n\n### TASK\nExtract the working examples from the history above and format them precisely into the requested JSON structure.`;
 
-        // Respect structuredOutputMode: only set json_object response_format when
-        // the mode actually supports it. "text" and "json_schema" modes must not
-        // include this field — it would cause an API error on those servers.
         const structuredMode = this.configService.values.llm.structuredOutputMode;
         const responseFormat = structuredMode === "json_object"
             ? { response_format: { type: "json_object" } }
@@ -710,7 +657,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
             }
         }
 
-        // Validate the streamed JSON; if malformed, do one non-streaming repair pass.
         const coerced = coerceJson(jsonString, schemas.CodeGenerationSchema);
         if (coerced.ok) return coerced.data as CodeGenerationResponse;
 
@@ -722,7 +668,6 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         ) as CodeGenerationResponse;
     }
 
-    /** Rerank hybrid-retrieval results (no-op unless `reranker.mode` is set). */
     public rerankSearchResults(
         query: string,
         results: types.vector.SearchResult<types.file.FileShard>[],
@@ -731,23 +676,16 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         return this.ragSearch.rerank(query, results, limit);
     }
 
-    /** Turn a crash + context into a sharper RAG query (delegates to FailureClassifier). */
     public refineSearchQuery(error: string, context: string): Promise<string> {
         return this.failureClassifier.refineSearchQuery(error, context);
     }
 
-    /** Classify a documentation-gap failure via self-consistency voting. */
     public classifyFailure(
         errorMessage: string,
         scriptContent: string,
         relatedDocs: string,
         stepDescription: string,
         options: {
-            /**
-             * Scores a candidate's pinpointed fragment against the real docs corpus
-             * (0..1). Used to break ties between same-category candidates in favour
-             * of verifiable (non-hallucinated) quotes.
-             */
             fragmentScorer?: (fragment: string | undefined) => number;
         } = {},
         httpTrafficLog?: types.report.HttpTrafficEntry[],
@@ -768,16 +706,11 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         maxGoals: number = 5,
         onProgress?: ProgressCallback,
         endpointInventory?: string,
-        /** Changelog-drift steering block (rendered by renderChangelogSeed).
-         *  Injected ONLY into goal generation — never the code-writing phase —
-         *  so goals target breaking-change areas while code is still written
-         *  from the OLD documentation. Empty string = no steering. */
         changelogSeed?: string,
     ): Promise<string[]> {
         this.logger.log(`Generating user goals using agentic loop...`);
         emitLog(onProgress, `Generating user goals using agentic loop...`);
 
-        // 1. Router
         const goal =
             `Explore the project's documentation broadly and DEEPLY to identify up to ${maxGoals} ` +
             `demanding, multi-feature test scenarios. Actively seek the advanced / less-obvious ` +
@@ -787,13 +720,10 @@ When you have found all necessary functions and endpoints, reply with EXACTLY "R
         const planStepsStr = plan.steps.map((s) => `- ${s.stepExplanation} (Action: ${s.action})`)
             .join("\n");
 
-        // Coverage hint: when we have a known endpoint inventory, steer the research
-        // agent toward thorough coverage rather than gravitating to popular endpoints.
         const inventoryHint = endpointInventory
             ? `\n\n## ENDPOINT INVENTORY\nThe API exposes the following endpoints/operations. Generate goals that exercise as many of these as possible and avoid duplicating coverage from goal to goal:\n${endpointInventory}`
             : "";
 
-        // 2. Research / Exploration
         const systemPrompt = `You are a Research Agent gathering context for ${maxGoals} DEMANDING,
 multi-feature user goals. Do not stop at the introductory "getting started" material — dig into
 the advanced and less-obvious features (transactions, relations/joins/associations, batch or bulk
@@ -848,7 +778,6 @@ When you have gathered enough advanced context, reply with EXACTLY "READY_FOR_GE
             onTrace: traceTracker,
         });
 
-        // 3. Generation Phase
         const agentSynthesis = finalMessages
             .filter((m) => m.role === "assistant" && typeof m.content === "string" && m.content)
             .map((m) => m.content as string)
@@ -876,12 +805,6 @@ When you have gathered enough advanced context, reply with EXACTLY "READY_FOR_GE
             }
             return parsed.goals.slice(0, maxGoals);
         } catch (error) {
-            // FAIL LOUDLY. Returning a placeholder goal here used to let a run
-            // continue as if healthy: the undici target produced a single generic
-            // "Explore API documentation…" goal, scored 1/1, and looked like a
-            // valid result in the summary table while measuring nothing. A run
-            // without real goals is worthless, so abort and surface the cause —
-            // the caller marks the target failed and keeps its checkpoint.
             const reason = (error as Error)?.message ?? String(error);
             this.logger.error(error, "Goal generation FAILED — aborting run");
             emitLog(onProgress, `Goal generation FAILED: ${reason}`);
@@ -910,7 +833,6 @@ When you have gathered enough advanced context, reply with EXACTLY "READY_FOR_GE
                 schemas.MasterSummarySchema,
             ) as unknown as types.planner.StructuredMasterSummary;
 
-            // Build a fallback markdown from the structured data
             const markdown = structured.executiveSummary || "See structured summary for details.";
 
             return { structured, markdown };
@@ -931,22 +853,11 @@ When you have gathered enough advanced context, reply with EXACTLY "READY_FOR_GE
         }
     }
 
-    /**
-     * #21 — Extract structured gap-analysis prose from a NEEDS_RESEARCH bounce.
-     *
-     * When the verification agent writes text like "The documentation doesn't describe
-     * the auth header format …\nNEEDS_RESEARCH: auth header", the content before the
-     * NEEDS_RESEARCH: line is its self-reported diagnostic. Extracting it gives the
-     * friction event a human-readable note that carries the agent's gap insight even
-     * when the run ultimately succeeds.
-     */
     private extractGapAnalysisFromBounce(content: string): string | undefined {
         const idx = content.indexOf("NEEDS_RESEARCH:");
         if (idx <= 0) return undefined;
         const before = content.slice(0, idx).trim();
         if (before.length < 20) return undefined;
-        // Take the last 3 paragraphs of the pre-bounce text — that's where the
-        // diagnostic is most likely to sit.
         const paragraphs = before.split(/\n{2,}/).filter((p) => p.trim().length > 0);
         return paragraphs.slice(-3).join("\n\n").slice(0, 800);
     }

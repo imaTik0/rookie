@@ -35,7 +35,6 @@ import {
     verifyFragment,
 } from "../feedback/fragmentVerify.ts";
 
-/** Throw if a cancellation signal has fired — used at execution checkpoints. */
 function throwIfAborted(signal?: AbortSignal): void {
     if (signal?.aborted) throw new JobCancelledError();
 }
@@ -56,7 +55,6 @@ export class Executor {
         private configService: ConfigService,
     ) {
         const sb = this.configService.values.sandbox;
-        // networkMode: "none" → offline; "network"/named → attach to that docker network.
         const offline = sb.networkMode === "none";
         this.dockerExecutor = new DockerExecutor({
             timeoutMs: sb.stepTimeoutMs,
@@ -155,9 +153,6 @@ export class Executor {
         let frictionEvents: types.report.FrictionEvent[] = [];
 
         if (testSuite.frozenPrograms && testSuite.frozenPrograms.length > 0) {
-            // Frozen re-execution: run the baseline's programs VERBATIM against the
-            // (new) library version. Drift is measured on identical code, and the
-            // agent gets no chance to regenerate around the change (§ freeze fix).
             onProgress?.(JSON.stringify({
                 type: "log",
                 content:
@@ -211,8 +206,6 @@ export class Executor {
         const corpus = corpusFromFiles(files);
         const ctx = this.parseInitialContext(testSuite.initialContext);
 
-        // Run all generated examples through Docker concurrently — they are
-        // independent programs that do not share state.
         throwIfAborted(signal);
         onProgress?.(JSON.stringify({
             type: "log",
@@ -228,7 +221,6 @@ export class Executor {
             }),
         );
 
-        // Build step reports (preserving original order).
         const stepsResults: types.report.StepResult[] = execResults.map((execResult, idx) => {
             const example = codeGenResponse.examples[idx];
             const stepReport: types.report.StepResult = {
@@ -240,9 +232,6 @@ export class Executor {
                 contextAfter: execResult.result?.ctx || null,
                 httpTrafficLog: execResult.httpTrafficLog,
             };
-            // Docs-faithfulness: did the code use a documented API it was expected
-            // to, or dodge it with a substitute? Only meaningful when the caller
-            // supplied expected symbols (drift experiment).
             const faith = checkFaithfulness(example.fullProgram, testSuite.expectedApis ?? []);
             if (faith.checked) {
                 stepReport.docsFaithful = faith.faithful;
@@ -256,7 +245,6 @@ export class Executor {
             return stepReport;
         });
 
-        // Analyse failures concurrently — each is an independent LLM call.
         throwIfAborted(signal);
         await Promise.all(
             stepsResults
@@ -302,7 +290,6 @@ export class Executor {
         return await this.reportRepository.create(reportData);
     }
 
-    /** SUCCESS when all steps passed, FAILED when all failed, PARTIAL_FAILURE otherwise. */
     private overallStatus(steps: types.report.StepResult[]): types.report.ReportStatus {
         const failed = steps.filter((s) => s.status === "FAILED").length;
         if (failed === 0) return "SUCCESS";
@@ -407,19 +394,6 @@ export class Executor {
         return await this.reportRepository.create(reportData);
     }
 
-    /**
-     * Diagnose a failed step.
-     *
-     * Environment/tooling failures are classified without an LLM — but a missing
-     * dependency that the documentation itself references is a docs gap (CONFIG),
-     * not an environment problem: the docs told the reader to use something
-     * without working install/setup instructions.
-     *
-     * Genuine failures go to the LLM documentation-gap classifier with both the
-     * RAG-retrieved related docs and the documentation context the generator
-     * actually used. The classifier's pinpointed fragment is then verified
-     * against the real corpus (file + line range + match score).
-     */
     private async analyzeStepFailure(
         projectId: string,
         stepReport: types.report.StepResult,
@@ -460,9 +434,6 @@ export class Executor {
             })
             .join("\n\n").substring(0, 15000);
 
-        // Include the documentation the generator actually worked from, so the
-        // classifier can pinpoint the fragment that misled the code — not only
-        // whatever a post-hoc search happens to retrieve.
         if (usedDocsContext) {
             relatedDocsText +=
                 `\n\n--- DOCUMENTATION CONTEXT USED DURING GENERATION (truncated) ---\n` +
@@ -478,7 +449,6 @@ export class Executor {
             stepReport.httpTrafficLog,
         );
 
-        // Ground the pinpointed fragment in the real files (anti-hallucination).
         analysis.fragmentVerification = verifyFragment(analysis.pinpointedFragment, corpus);
         stepReport.failureAnalysis = analysis;
 
@@ -495,19 +465,6 @@ export class Executor {
         );
     }
 
-    /**
-     * Deterministic classification of environment-looking errors.
-     *
-     * Upgrade logic (#23):
-     *  1. Missing module that the docs MENTION and DESCRIBE INSTALLING → CONFIG.
-     *     Docs reference the package in a code import/usage context without working
-     *     install instructions — that's a documentation gap.
-     *  2. Missing module the docs MENTION but only incidentally (no install context)
-     *     → still CONFIG, because the reader follows the docs and hits a missing dep.
-     *  3. Missing module the docs DON'T mention at all → ENVIRONMENT.
-     *     The LLM hallucinated the import; no documentation change required.
-     *  4. Anything else (sandbox limits, permissions, ENOSPC) → ENVIRONMENT.
-     */
     private classifyEnvironmentError(
         error: string,
         corpus: CorpusFile[],
@@ -515,7 +472,6 @@ export class Executor {
         const missingModule = extractMissingModule(error);
 
         if (missingModule && corpusMentions(corpus, missingModule)) {
-            // Check whether the docs provide installation instructions (install/npm/yarn/pip).
             const installKeywords = [
                 "npm install",
                 "yarn add",
@@ -544,7 +500,6 @@ export class Executor {
                         matchScore: 1,
                         matchedText: lines[idx],
                     };
-                    // Look at the surrounding ±5 lines for install instructions.
                     const window = lines.slice(
                         Math.max(0, idx - 5),
                         Math.min(lines.length, idx + 6),
@@ -575,9 +530,6 @@ export class Executor {
             };
         }
 
-        // Wall-clock exhaustion is a machine property (slow registry, saturated
-        // Docker VM, heavy parallelism) — call it out explicitly so it is never
-        // read as evidence about the documentation.
         if (error.includes("ROOKIE_SANDBOX_TIMEOUT") || error.includes("Execution timed out")) {
             return {
                 errorMessage: error.substring(0, 200),
@@ -641,10 +593,6 @@ export class Executor {
         }
     }
 
-    /**
-     * Run a single user-code step in Docker.
-     * Returns structured result, full logs, and captured HTTP traffic.
-     */
     private async runStepInDocker(
         userCode: string,
         currentCtx: unknown,
@@ -656,13 +604,9 @@ export class Executor {
         logs: string;
         httpTrafficLog?: types.report.HttpTrafficEntry[];
     }> {
-        // Install any third-party packages the generated code imports, so library
-        // examples actually run instead of failing with MODULE_NOT_FOUND.
         const parsed = this.configService.values.sandbox.autoInstallDeps
             ? parseImportedPackages(userCode)
             : [];
-        // Apply package overrides: pin a parsed package to a specific version and
-        // force-install any extra packages the caller requires (drift experiment).
         const packages = applyPackageOverrides(parsed, opts.packageOverrides);
         if (packages.length > 0) {
             this.logger.log(`Sandbox installing packages: ${packages.join(", ")}`);
@@ -691,10 +635,6 @@ export class Executor {
                 return { success: false, error: parsedError, logs: fullLogs, httpTrafficLog };
             }
 
-            // Grounded success: an exit-0 run that never touched the documented API
-            // (declared via URLs in the execution context) proves nothing about the
-            // docs — the code may be mocked or a no-op. Reject it so neither the
-            // verification smoke test nor the final report counts it as a pass.
             if (this.configService.values.sandbox.requireGroundedSuccess) {
                 const declaredHosts = extractApiHosts(currentCtx);
                 if (!isGrounded(declaredHosts, httpTrafficLog)) {
@@ -736,7 +676,6 @@ export class Executor {
         }
     }
 
-    /** Parse `___HTTP_LOG_START___` … `___HTTP_LOG_END___` from Docker stdout. */
     private parseHttpLog(stdout: string): types.report.HttpTrafficEntry[] | undefined {
         const start = stdout.indexOf(HTTP_LOG_START);
         const end = stdout.indexOf(HTTP_LOG_END);
@@ -749,15 +688,8 @@ export class Executor {
         }
     }
 
-    /**
-     * Execute a raw JS code snippet (e.g. a documentation code example) without
-     * wrapping it in a full test-suite execution. Used by the master-plan doc-examples phase.
-     */
     public async runDocExample(
         code: string,
-        /** Version pins for this phase — the smoke phase must exercise the SAME
-         *  version as the graded code (e.g. `<pkg>@<oldVersion>` on the baseline),
-         *  not whatever npm resolves as latest. */
         packageOverrides?: Record<string, string>,
     ): Promise<{
         success: boolean;
@@ -765,8 +697,6 @@ export class Executor {
         error?: unknown;
         httpTrafficLog?: types.report.HttpTrafficEntry[];
     }> {
-        // Doc examples are top-level scripts, not export-default modules — the
-        // import in the harness executes them; do not enforce the module contract.
         const result = await this.runStepInDocker(code, {}, {
             requireDefaultExport: false,
             packageOverrides,

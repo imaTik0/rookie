@@ -1,18 +1,9 @@
-/**
- * Characterization tests for Executor's pure logic: status rollup, initial-context
- * parsing, the CONFIG-vs-ENVIRONMENT classifier, and HTTP-log marker parsing.
- *
- * These reach private methods via `as any` deliberately — they pin current
- * behaviour ahead of the planned extraction of this logic into pure modules.
- * Run with: deno test src/service/Executor.pure.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { Executor } from "./Executor.ts";
 import type { ConfigService } from "./ConfigService.ts";
 import type { CorpusFile } from "../feedback/fragmentVerify.ts";
 import { fakeLogger } from "../testing/fakes.ts";
 
-// Offline sandbox config so the constructor builds a DockerExecutor without a network name.
 const cfg = {
     values: {
         sandbox: {
@@ -41,8 +32,6 @@ function executor(): any {
     );
 }
 
-// ── overallStatus ──────────────────────────────────────────────────────────────
-
 Deno.test("overallStatus: all passed -> SUCCESS", () => {
     assertEquals(
         executor().overallStatus([{ status: "SUCCESS" }, { status: "SUCCESS" }]),
@@ -62,16 +51,12 @@ Deno.test("overallStatus: no steps -> SUCCESS (zero failures)", () => {
     assertEquals(executor().overallStatus([]), "SUCCESS");
 });
 
-// ── parseInitialContext ─────────────────────────────────────────────────────────
-
 Deno.test("parseInitialContext parses valid JSON", () => {
     assertEquals(executor().parseInitialContext('{"token":"abc"}'), { token: "abc" });
 });
 Deno.test("parseInitialContext falls back to {} on invalid JSON", () => {
     assertEquals(executor().parseInitialContext("not json"), {});
 });
-
-// ── classifyEnvironmentError ─────────────────────────────────────────────────────
 
 Deno.test("classifyEnvironmentError: module mentioned, no install context -> CONFIG", () => {
     const corpus: CorpusFile[] = [{
@@ -105,8 +90,6 @@ Deno.test("classifyEnvironmentError: non-module error -> ENVIRONMENT", () => {
     const a = executor().classifyEnvironmentError("ENOSPC: no space left on device", []);
     assertEquals(a.documentationGap, "ENVIRONMENT");
 });
-
-// ── parseHttpLog ─────────────────────────────────────────────────────────────────
 
 Deno.test("parseHttpLog extracts the JSON array between markers", () => {
     const entries = [{ method: "GET", url: "http://x", responseStatus: 200 }];

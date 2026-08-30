@@ -42,7 +42,6 @@ export class JobController {
         if (!outcome.cancelled) {
             return c.json({ code: 409, message: "Job has already finished" }, 409);
         }
-        // Re-read so the response reflects the cancellation taking effect.
         const job = await this.jobService.get(jobId as types.job.JobId);
         return c.json(mapJobToApi(job!), 202);
     };

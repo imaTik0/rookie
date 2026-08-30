@@ -1,7 +1,3 @@
-/**
- * Unit tests for sandbox dependency detection. Pure — no infra.
- * Run with: deno test src/sandbox/depDetect.test.ts
- */
 import { assert, assertArrayIncludes, assertEquals } from "@std/assert";
 import { applyPackageOverrides, isEnvironmentError, parseImportedPackages } from "./depDetect.ts";
 
@@ -51,8 +47,6 @@ Deno.test("parseImportedPackages: de-duplicates repeated imports", () => {
     assertEquals(parseImportedPackages(code), ["lodash"]);
 });
 
-// ── applyPackageOverrides ─────────────────────────────────────────────────────
-
 Deno.test("applyPackageOverrides: no overrides returns the parsed set unchanged", () => {
     assertEquals(applyPackageOverrides(["sequelize", "pg"]), ["sequelize", "pg"]);
     assertEquals(applyPackageOverrides(["sequelize"], {}), ["sequelize"]);
@@ -66,7 +60,6 @@ Deno.test("applyPackageOverrides: pins a parsed package to name@version", () => 
 });
 
 Deno.test("applyPackageOverrides: force-adds override packages the code never imported", () => {
-    // Sequelize's peer driver isn't imported by the example, but must install.
     const out = applyPackageOverrides(["sequelize"], {
         sequelize: "5.22.5",
         pg: "latest",
@@ -118,13 +111,7 @@ Deno.test("isEnvironmentError treats harness-contract violations as environment 
     );
 });
 
-// ── sandbox timeouts are NOT documentation defects ─────────────────────────────
-
 Deno.test("a sandbox timeout is an ENVIRONMENT error, never a doc gap", () => {
-    // Regression: "Execution timed out" was absent from the signature list, so a
-    // slow npm install / oversubscribed Docker VM reached the LLM gap classifier
-    // and was recorded as MISSING/INCORRECT/AMBIGUOUS — polluting the taxonomy
-    // with machine load. Timeouts must short-circuit to ENVIRONMENT.
     assert(isEnvironmentError("ROOKIE_SANDBOX_TIMEOUT: execution timed out"));
     assert(isEnvironmentError("Execution timed out"));
 });
@@ -134,12 +121,7 @@ Deno.test("genuine runtime errors still reach the documentation classifier", () 
     assert(!isEnvironmentError("AssertionError: expected 200, got 404"));
 });
 
-// ── prefix (family) version pinning ────────────────────────────────────────────
-
 Deno.test("a `*` prefix rule pins a whole package family without installing itself", () => {
-    // Regression: @mikro-orm/core@6.6.16 + @mikro-orm/postgresql@latest(7.x) makes
-    // npm abort on ERESOLVE and install NOTHING, which surfaced at runtime as a
-    // misleading "Cannot find package '@mikro-orm/core'".
     const parsed = ["@mikro-orm/core", "@mikro-orm/postgresql", "@mikro-orm/sqlite"];
     const out = applyPackageOverrides(parsed, {
         "@mikro-orm/core": "6.6.16",
@@ -147,14 +129,12 @@ Deno.test("a `*` prefix rule pins a whole package family without installing itse
         "@mikro-orm/*": "6.6.16",
         "reflect-metadata": "latest",
     });
-    // Every family package is version-matched, including the unforeseen sqlite one.
     assertArrayIncludes(out, [
         "@mikro-orm/core@6.6.16",
         "@mikro-orm/postgresql@6.6.16",
         "@mikro-orm/sqlite@6.6.16",
         "reflect-metadata",
     ]);
-    // The wildcard key itself is never installed.
     assertEquals(out.some((p) => p.includes("*")), false);
 });
 

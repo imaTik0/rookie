@@ -1,9 +1,3 @@
-/**
- * End-to-end test for the extracted sandbox harness. GATED on Docker.
- * Runs the real harness in a container so a regression in the (large) template
- * is actually caught — the fake-DockerExecutor tests cannot see harness output.
- * Run with: deno test --allow-all src/sandbox/harness.test.ts
- */
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { DockerExecutor } from "../service/DockerExecutor.ts";
 import {
@@ -60,10 +54,6 @@ Deno.test({
 });
 
 Deno.test({
-    // Regression guard: non-fetch clients (got, axios, …) issue requests via
-    // node:http, not globalThis.fetch. If the harness only patched fetch, their
-    // traffic would be invisible to grounding and every real API call wrongly
-    // treated as "no call" (the got-experiment 0/0 bug).
     name: "[docker] harness captures node:http traffic (not just fetch)",
     ignore: !HAS_DOCKER,
 }, async () => {
@@ -113,10 +103,6 @@ Deno.test({
 });
 
 Deno.test({
-    // Regression: undici drives its own socket stack, bypassing BOTH
-    // globalThis.fetch and node:http. Its traffic was invisible to grounding, so
-    // every undici run was rejected as "never called the API" (39/74 failing
-    // steps on that target). node:diagnostics_channel is the supported hook.
     name: "[docker] harness captures undici traffic via diagnostics_channel",
     ignore: !HAS_DOCKER,
 }, async () => {
@@ -129,8 +115,6 @@ export default async () => {
     return { result: 'done' };
 };`;
     const script = buildSandboxHarness(userCode, {});
-    // networkAccess is required only to reach the npm registry for the install;
-    // the probe itself targets an unreachable local port.
     const r = await new DockerExecutor({
         timeoutMs: 30000,
         installTimeoutMs: 180000,

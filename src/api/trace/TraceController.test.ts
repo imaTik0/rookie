@@ -1,9 +1,3 @@
-/**
- * Tests for TraceController handler logic.
- * (Registration of these routes is covered by the smoke test once App wires the
- * controller — see src/api/smoke.test.ts.)
- * Run with: deno test src/api/trace/TraceController.test.ts
- */
 import { assertEquals } from "@std/assert";
 import { TraceController } from "./TraceController.ts";
 import type { TraceRepository } from "../../db/mongo/TraceRepository.ts";

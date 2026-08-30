@@ -7,7 +7,6 @@ import * as types from "../../types/index.ts";
 export interface ReportFilter {
     projectId?: types.project.ProjectId;
     testSuiteId?: types.test.TestSuiteId;
-    /** Matched against the stored status; accepts any string for forward-compat. */
     status?: string;
     type?: db.ReportModel["type"];
 }
@@ -88,7 +87,6 @@ export class ReportRepository extends BaseRepository<types.report.ReportId, db.R
         };
     }
 
-    /** Append a human verdict on a proposed documentation fix. */
     async addGapFeedback(
         reportId: types.report.ReportId,
         feedback: types.report.GapFeedback,

@@ -1,7 +1,3 @@
-/**
- * Tests for HTML -> Markdown extraction. Runs in-process (linkedom), no network.
- * Run with: deno test src/service/HtmlToMarkdown.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { htmlToMarkdown, type ParseOptions } from "./HtmlToMarkdown.ts";
 
@@ -47,10 +43,9 @@ Deno.test("falls back to main/body extraction and converts a headerless table to
             <tr><td>name</td><td>string</td></tr>
         </tbody></table>
     </main></body></html>`;
-    // Force the fallback path so extraction is deterministic.
     const r = htmlToMarkdown(html, opts({ readabilityMinChars: 1_000_000 }));
     assert(r.markdown.includes("| id | string |"));
-    assert(r.markdown.includes("| --- | --- |")); // synthesized separator row
+    assert(r.markdown.includes("| --- | --- |"));
 });
 
 Deno.test("extracts same-origin links and excludes assets/mailto/anchors/external", () => {

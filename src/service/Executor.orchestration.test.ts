@@ -1,8 +1,3 @@
-/**
- * Orchestration tests for Executor.executeTestSuite (CODE_GENERATION path),
- * with the DockerExecutor, PromptService and repositories faked. No infra.
- * Run with: deno test src/service/Executor.orchestration.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { Executor } from "./Executor.ts";
 import type { ConfigService } from "./ConfigService.ts";
@@ -30,7 +25,6 @@ const cfg = {
 function build(opts: {
     examples: { title: string; explanation: string; fullProgram: string }[];
     docker: ReturnType<typeof fakeDockerExecutor>;
-    /** JSON string for the suite's execution context (default: no declared API). */
     initialContext?: string;
 }) {
     const testSuite = {
@@ -58,10 +52,10 @@ function build(opts: {
         { get: () => Promise.resolve(testSuite) } as unknown as TestSuiteRepository,
         promptService,
         { get: () => Promise.resolve({ files: [] }) } as unknown as ProjectRepository,
-        null as never, // fileService — unused (no project files)
+        null as never,
         fakeLogger(),
-        null as never, // vectorCollectionFactory — unused (env-error path)
-        null as never, // embeddingService — unused
+        null as never,
+        null as never,
         {
             create: (data: Record<string, unknown>) => {
                 created.push(data);
@@ -82,12 +76,11 @@ Deno.test("executeTestSuite with no generated examples produces a SUCCESS report
     const report = await ex.executeTestSuite("ts-1" as any);
     assertEquals(report!.status, "SUCCESS");
     assertEquals(report!.steps.length, 0);
-    assertEquals(docker.calls.length, 0); // nothing to run
+    assertEquals(docker.calls.length, 0);
     assertEquals(created.length, 1);
 });
 
 Deno.test("a failing step is classified and the report is FAILED", async () => {
-    // Container exits non-zero with a missing-module error -> environment classification.
     const docker = fakeDockerExecutor([
         { exitCode: 1, stdout: "", stderr: "Error: Cannot find module 'dayjs'" },
     ]);
@@ -104,19 +97,13 @@ Deno.test("a failing step is classified and the report is FAILED", async () => {
     assertEquals(report!.status, "FAILED");
     assertEquals(report!.steps.length, 1);
     assertEquals(report!.steps[0].status, "FAILED");
-    // No project docs mention dayjs, so it's an environment (not docs) problem.
     assertEquals(report!.steps[0].failureAnalysis!.documentationGap, "ENVIRONMENT");
     assert(docker.calls.length === 1);
 });
 
-// ── grounded success (anti-mock / anti-no-op) ─────────────────────────────────────
-
 const API_CTX = JSON.stringify({ apiBase: "http://host.docker.internal:14000/api/v1", token: "t" });
 
 Deno.test("an exit-0 run with NO real API call is rejected as ROOKIE_UNGROUNDED_SUCCESS", async () => {
-    // Container exits 0 and prints a result, but the traffic log is empty —
-    // e.g. the agent mocked the server. Must be a FAILED step, classified
-    // ENVIRONMENT (model misbehaviour, not a documentation gap).
     const docker = fakeDockerExecutor([{
         exitCode: 0,
         stdout: `___RESULT_START___\n{"result":"ok","ctx":{}}\n___RESULT_END___`,

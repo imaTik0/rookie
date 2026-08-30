@@ -8,22 +8,12 @@ import * as types from "../types/index.ts";
 
 export interface CancelOutcome {
     found: boolean;
-    /** True when the job was non-terminal and a cancellation was signalled. */
     cancelled: boolean;
 }
 
-/**
- * Orchestrates long-running operations as cancellable, Mongo-persisted jobs.
- *
- * Jobs run in-process via fire-and-forget promises; an in-memory map of
- * AbortControllers backs cooperative cancellation. Mongo is the source of truth
- * for status/result so clients can poll across requests. In-flight jobs do not
- * survive a process restart — `reconcileOnStartup()` fails any left RUNNING.
- */
 @Injectable()
 export class JobService {
     private readonly running = new Map<types.job.JobId, AbortController>();
-    /** Last progress-write timestamp per job, for throttling DB writes. */
     private readonly lastProgressAt = new Map<types.job.JobId, number>();
     private static readonly PROGRESS_THROTTLE_MS = 1000;
 
@@ -34,7 +24,6 @@ export class JobService {
         private logger: Logger,
     ) {}
 
-    /** Mark orphaned jobs as failed on boot (their runners died with the process). */
     async reconcileOnStartup(): Promise<void> {
         const n = await this.jobRepository.failAllRunning("Interrupted by server restart");
         if (n > 0) this.logger.log(`Reconciled ${n} interrupted job(s) to FAILED on startup.`);
@@ -47,7 +36,6 @@ export class JobService {
         const job = await this.jobRepository.create(kind, params);
         const controller = new AbortController();
         this.running.set(job._id, controller);
-        // Fire-and-forget — the HTTP response returns immediately with the job.
         void this.run(job, controller.signal);
         return job;
     }
@@ -63,10 +51,6 @@ export class JobService {
         return this.jobRepository.list(filter, pagination);
     }
 
-    /**
-     * Request cancellation. Aborts the running operation's signal; the runner
-     * then transitions the job to CANCELLED at its next checkpoint.
-     */
     async requestCancel(jobId: types.job.JobId): Promise<CancelOutcome> {
         const job = await this.jobRepository.get(jobId);
         if (!job) return { found: false, cancelled: false };
@@ -77,12 +61,10 @@ export class JobService {
             controller.abort();
             return { found: true, cancelled: true };
         }
-        // Non-terminal but no live runner (edge case) — settle it directly.
         await this.jobRepository.markCancelled(jobId);
         return { found: true, cancelled: true };
     }
 
-    // ── execution ────────────────────────────────────────────────────────────
     private async run(job: db.JobModel, signal: AbortSignal): Promise<void> {
         await this.jobRepository.markRunning(job._id);
         const onProgress = (msg: string) => this.recordProgress(job._id, msg);
@@ -134,13 +116,11 @@ export class JobService {
         }
     }
 
-    /** Persist the latest progress message, throttled to avoid excessive writes. */
     private recordProgress(jobId: types.job.JobId, msg: string): void {
         const now = Date.now();
         const last = this.lastProgressAt.get(jobId) ?? 0;
         if (now - last < JobService.PROGRESS_THROTTLE_MS) return;
         this.lastProgressAt.set(jobId, now);
-        // Best-effort, non-blocking; progress is advisory.
         void this.jobRepository.updateProgress(jobId, msg.slice(0, 500)).catch(() => {});
     }
 }

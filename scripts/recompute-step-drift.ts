@@ -14,6 +14,7 @@
  * Usage:
  *   deno run --allow-read --allow-write scripts/recompute-step-drift.ts --dry-run
  *   deno run --allow-read --allow-write scripts/recompute-step-drift.ts
+ *   deno run --allow-read --allow-write scripts/recompute-step-drift.ts --dir DIR
  */
 import { analyzeStepDrift, type GoalSteps } from "../src/eval/stepDrift.ts";
 import {
@@ -23,6 +24,11 @@ import {
 } from "../src/eval/changelogSeed.ts";
 
 const DRY_RUN = Deno.args.includes("--dry-run");
+/** Directory holding the experiment reports (default: the archived results tree). */
+const DATA_DIR = (() => {
+    const i = Deno.args.indexOf("--dir");
+    return i !== -1 ? Deno.args[i + 1] ?? "." : "../docs_and_raports/wyniki-eksperymentow";
+})();
 
 function toGoalSteps(
     plan: Record<string, unknown> | undefined,
@@ -55,11 +61,11 @@ const gapsOf = (plan: Record<string, unknown> | undefined) =>
 
 // Newest bundle per config key.
 const bundles = new Map<string, string>();
-for (const e of Deno.readDirSync(".")) {
+for (const e of Deno.readDirSync(DATA_DIR)) {
     const m = e.isFile && e.name.match(/^experiment-([a-z0-9]+)-(\d+)-full-reports\.json$/);
     if (!m) continue;
     const prev = bundles.get(m[1]);
-    if (!prev || e.name > prev) bundles.set(m[1], e.name);
+    if (!prev || e.name > prev) bundles.set(m[1], `${DATA_DIR}/${e.name}`);
 }
 
 const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
@@ -98,7 +104,7 @@ for (const [key, bundleFile] of [...bundles].sort()) {
 
     // Locate the matching top-level report (same timestamp).
     const stamp = bundleFile.match(/-(\d+)-full-reports\.json$/)![1];
-    const reportFile = `experiment-${key}-${stamp}.json`;
+    const reportFile = `${DATA_DIR}/experiment-${key}-${stamp}.json`;
     let note = "";
     try {
         const report = JSON.parse(Deno.readTextFileSync(reportFile)) as Record<string, unknown>;

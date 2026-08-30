@@ -1,19 +1,8 @@
-/**
- * Documentation patch generation: turn verified gap findings into an applyable
- * unified diff plus a PR-style markdown summary.
- *
- * Only VERIFIED fragments (located in the real files by fragmentVerify) are
- * patched — unverified LLM quotes are listed as suggestions instead of hunks.
- *
- * Pure & dependency-free — unit-tested in feedback.test.ts.
- */
 import type { CorpusFile } from "./fragmentVerify.ts";
 import type { GapCluster } from "./gapAggregate.ts";
 
 export interface DocsPatchResult {
-    /** Unified diff across all patched files ("" when nothing was patchable). */
     patch: string;
-    /** PR-style markdown: summary table, hunks, and unpatchable suggestions. */
     markdown: string;
     patchedClusters: number;
     unpatchedClusters: number;
@@ -21,13 +10,12 @@ export interface DocsPatchResult {
 
 interface FileEdit {
     file: string;
-    lineStart: number; // 1-based, inclusive
-    lineEnd: number; // 1-based, inclusive
+    lineStart: number;
+    lineEnd: number;
     replacement: string;
     cluster: GapCluster;
 }
 
-/** Build a single-hunk unified diff for one edit. */
 function unifiedDiffFor(
     file: string,
     originalLines: string[],
@@ -59,7 +47,6 @@ function dedupeOverlapping(edits: FileEdit[]): FileEdit[] {
     const byFile = new Map<string, FileEdit[]>();
     for (const e of edits) {
         const list = byFile.get(e.file) ?? [];
-        // Skip edits overlapping an already-accepted edit in the same file.
         const overlaps = list.some(
             (o) => Math.min(o.lineEnd, e.lineEnd) - Math.max(o.lineStart, e.lineStart) >= 0,
         );
@@ -71,7 +58,6 @@ function dedupeOverlapping(edits: FileEdit[]): FileEdit[] {
     return [...byFile.values()].flat();
 }
 
-/** Generate a docs patch from gap clusters + the original documentation corpus. */
 export function generateDocsPatch(
     clusters: GapCluster[],
     corpus: CorpusFile[],
@@ -117,7 +103,6 @@ export function generateDocsPatch(
     }
     const patch = hunks.join("\n\n") + (hunks.length ? "\n" : "");
 
-    // ── Markdown ──
     const md: string[] = [];
     md.push(`# Documentation fix proposal`);
     md.push("");

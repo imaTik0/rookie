@@ -1,7 +1,3 @@
-/**
- * Unit tests for the documentation mutation engine. Pure — no infra.
- * Run with: deno test src/eval/mutation.test.ts
- */
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import {
     applySite,
@@ -36,8 +32,6 @@ Returns the created user object.
 
 const FILES = [{ filename: "users.md", content: GOLD }];
 
-// ── enumeration ───────────────────────────────────────────────────────────────
-
 Deno.test("enumerateSites finds sites for all four operators", () => {
     const sites = enumerateSites(FILES);
     const ops = new Set(sites.map((s) => s.operator));
@@ -56,15 +50,13 @@ Deno.test("non-markdown files are skipped", () => {
     assertEquals(enumerateSites([{ filename: "spec.json", content: GOLD }]), []);
 });
 
-// ── operators ─────────────────────────────────────────────────────────────────
-
 Deno.test("DelParam removes exactly the parameter line", () => {
     const site = enumerateSites(FILES).find(
         (s) => s.operator === "DelParam" && s.matchKeywords[0] === "age",
     )!;
     const { files } = applySite(FILES, site);
     assert(!files[0].content.includes("`age`"));
-    assert(files[0].content.includes("`name`")); // sibling untouched
+    assert(files[0].content.includes("`name`"));
     assertEquals(
         files[0].content.split("\n").length,
         GOLD.split("\n").length - 1,
@@ -85,7 +77,7 @@ Deno.test("ObfuscateType replaces one precise type with string", () => {
     )!;
     const { files } = applySite(FILES, site);
     assert(files[0].content.includes("`age` (string, optional)"));
-    assert(files[0].content.includes("`name` (string, required)")); // untouched
+    assert(files[0].content.includes("`name` (string, required)"));
 });
 
 Deno.test("AddFalseInfo inserts the fake parameter after a real one", () => {
@@ -99,8 +91,6 @@ Deno.test("AddFalseInfo inserts the fake parameter after a real one", () => {
     );
 });
 
-// ── generation ────────────────────────────────────────────────────────────────
-
 Deno.test("generateMutants is deterministic for a given seed", () => {
     const a = generateMutants(FILES, { seed: 42, perOperator: 1 });
     const b = generateMutants(FILES, { seed: 42, perOperator: 1 });
@@ -109,7 +99,7 @@ Deno.test("generateMutants is deterministic for a given seed", () => {
 
 Deno.test("each mutant is first-order and carries the expected gap label", () => {
     const mutants = generateMutants(FILES, { seed: 7, perOperator: 1 });
-    assertEquals(mutants.length, 4); // one per operator on this corpus
+    assertEquals(mutants.length, 4);
     for (const m of mutants) {
         assert(m.files[0].content !== GOLD, `${m.id} must differ from gold`);
         assertEquals(
@@ -123,8 +113,6 @@ Deno.test("each mutant is first-order and carries the expected gap label", () =>
         );
     }
 });
-
-// ── detection matching ────────────────────────────────────────────────────────
 
 const mutant: Mutant = {
     id: "DelParam-users.md-L12",
@@ -174,8 +162,6 @@ Deno.test("gapMatchesMutant: keyword fallback matches unverified analyses", () =
     ));
 });
 
-// ── goal targeting ────────────────────────────────────────────────────────────
-
 const MULTILIB_GOALS = [
     "Using the documented lodash functions, split [1,2,3] into chunks of 3.",
     "Using the documented lodash functions, group words by their length.",
@@ -193,7 +179,7 @@ Deno.test("relevantGoalIndices restricts to goals mentioning the wounded file's 
 
 Deno.test("relevantGoalIndices narrows by section hint within the library pool", () => {
     const idx = relevantGoalIndices(
-        { file: "lodash.md", goalHints: ["chunk"] }, // "chunk" matches "chunks"
+        { file: "lodash.md", goalHints: ["chunk"] },
         MULTILIB_GOALS,
     );
     assertEquals(idx, [0]);
@@ -224,7 +210,6 @@ Deno.test("relevantGoalIndices: file stem must match at a word start ('ms' ≠ '
 });
 
 Deno.test("enumerateSites detects heading-style options (real API-doc format)", () => {
-    // sindresorhus/execa style: `#### options.timeout` then `_Type:_ \`number\``.
     const files = [{
         filename: "api.md",
         content: [
@@ -242,12 +227,10 @@ Deno.test("enumerateSites detects heading-style options (real API-doc format)", 
     const sites = enumerateSites(files);
     const delParam = sites.filter((s) => s.operator === "DelParam");
     const addFalse = sites.filter((s) => s.operator === "AddFalseInfo");
-    // options.timeout is a real option (has a Type line); notAnOption is not.
     assert(delParam.some((s) => s.matchKeywords.includes("options.timeout")));
     assert(delParam.some((s) => s.matchKeywords.includes("timeout")));
     assert(!delParam.some((s) => s.matchKeywords.includes("notAnOption")));
     assert(addFalse.length >= 1, "heading option yields an AddFalseInfo site");
-    // `number` on the Type line is still an ObfuscateType site.
     assert(sites.some((s) => s.operator === "ObfuscateType" && s.description.includes("number")));
 });
 
@@ -267,11 +250,7 @@ Deno.test("generated mutants carry goalHints through from their site", () => {
     }
 });
 
-// ── planner COMPLETE event parsing ────────────────────────────────────────────
-
 Deno.test("parsePlannerComplete reads the report from the controller's `result` wrapper", () => {
-    // Exact shape emitted by PlannerController:
-    //   stream.writeln(JSON.stringify({ type: "COMPLETE", result }))
     const evt = {
         type: "COMPLETE",
         result: {
@@ -321,8 +300,6 @@ Deno.test("parsePlannerComplete yields empty id and 0% on an unrecognized event"
     assertEquals(outcome.gaps, []);
 });
 
-// ── scaling: exhaustive mode, occurrences, inventory ──────────────────────────
-
 Deno.test("perOperator 'all' generates one mutant per site", async () => {
     const { siteInventory } = await import("./mutation.ts");
     const inv = siteInventory(FILES);
@@ -337,12 +314,10 @@ Deno.test("multiple type occurrences on one line are distinct sites, replaced in
         content: "- `mix` (number, required): pairs a number with a boolean flag.\n",
     }];
     const sites = enumerateSites(files).filter((s) => s.operator === "ObfuscateType");
-    // "number" (parens) + "number" (prose) + "boolean" = three distinct sites.
     assertEquals(sites.length, 3);
 
     const boolSite = sites.find((s) => s.description.includes('"boolean"'))!;
     const { files: mutated } = applySite(files, boolSite);
-    // Only the boolean occurrence is replaced; both "number"s stay intact.
     assert(mutated[0].content.includes("(number, required)"));
     assert(mutated[0].content.includes("a number with"));
     assert(!mutated[0].content.includes("boolean"));

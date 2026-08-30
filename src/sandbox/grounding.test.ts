@@ -1,7 +1,3 @@
-/**
- * Unit tests for grounded-success enforcement. Pure — no infra.
- * Run with: deno test src/sandbox/grounding.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import {
     extractApiHosts,
@@ -14,8 +10,6 @@ import type * as types from "../types/index.ts";
 function entry(url: string, over: Partial<types.report.HttpTrafficEntry> = {}) {
     return { method: "GET", url, ...over } as types.report.HttpTrafficEntry;
 }
-
-// ── extractApiHosts ───────────────────────────────────────────────────────────
 
 Deno.test("extractApiHosts collects hostnames from URL values, including nested ones", () => {
     const hosts = extractApiHosts({
@@ -43,7 +37,7 @@ Deno.test("extractApiHosts ignores non-http schemes and malformed URLs", () => {
     const hosts = extractApiHosts({
         a: "ftp://files.example.com",
         b: "mongodb://db:27017",
-        c: "http://", // malformed
+        c: "http://",
     });
     assertEquals(hosts.size, 0);
 });
@@ -54,8 +48,6 @@ Deno.test("extractApiHosts survives circular contexts", () => {
     ctx.self = ctx;
     assertEquals(extractApiHosts(ctx), new Set(["api.local"]));
 });
-
-// ── isGrounded ────────────────────────────────────────────────────────────────
 
 Deno.test("isGrounded: no declared hosts -> always grounded (library testing)", () => {
     assert(isGrounded(new Set(), undefined));
@@ -87,8 +79,6 @@ Deno.test("isGrounded: calls only to undeclared hosts do not ground the run", ()
     const hosts = new Set(["api.local"]);
     assertEquals(isGrounded(hosts, [entry("https://example.com/mock")]), false);
 });
-
-// ── ungroundedSuccessError ────────────────────────────────────────────────────
 
 Deno.test("ungroundedSuccessError carries the marker and the declared hosts", () => {
     const msg = ungroundedSuccessError(new Set(["api.local", "db.local"]));

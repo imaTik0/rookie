@@ -34,8 +34,6 @@ export class Container extends IOC {
         this.register(App);
         this.register(MigrationManager);
         this.register(VectorCollectionFactory);
-        // Repositories live in src/db/mongo/ (the data-access layer), outside the
-        // auto-scanned src/service/ + src/api/ roots, so register them explicitly.
         this.register(TraceRepository);
         this.register(ProjectRepository);
         this.register(FileRepository);

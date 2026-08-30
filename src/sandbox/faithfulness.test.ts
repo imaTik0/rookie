@@ -1,7 +1,3 @@
-/**
- * Unit tests for the docs-faithfulness check. Pure — no infrastructure.
- * Run with: deno test src/sandbox/faithfulness.test.ts
- */
 import { assert, assertEquals } from "@std/assert";
 import { checkFaithfulness } from "./faithfulness.ts";
 
@@ -16,7 +12,7 @@ Deno.test("catches the dodge: expected execaCommand, code used execa()", () => {
 export default async () => { const r = await execa('git', ['status']); return { result: r }; };`;
     const r = checkFaithfulness(code, ["execaCommand", "parseCommandString"]);
     assertEquals(r.checked, true);
-    assertEquals(r.faithful, false); // used neither documented symbol
+    assertEquals(r.faithful, false);
     assertEquals(r.used, []);
     assert(r.missing.includes("execaCommand"));
 });

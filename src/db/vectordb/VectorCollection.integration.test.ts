@@ -1,9 +1,3 @@
-/**
- * Integration test for Qdrant connectivity + collection lifecycle. GATED: skips
- * when no Qdrant is reachable (ROOKIE_TEST_QDRANT_HOST/PORT, default 127.0.0.1:6333).
- * Uses the raw client for a create/list/delete cycle (no embedding model needed).
- * Run with: deno test --allow-all src/db/vectordb/VectorCollection.integration.test.ts
- */
 import { assert } from "@std/assert";
 import { VectorManager } from "./VectorManger.ts";
 import { qdrantAvailable, TEST_QDRANT_HOST, TEST_QDRANT_PORT } from "../../testing/infra.ts";

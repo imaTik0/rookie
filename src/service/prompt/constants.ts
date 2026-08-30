@@ -1,7 +1,5 @@
 import OpenAI from "@openai/openai";
 
-// ─── Tool Definitions ────────────────────────────────────────────────────────
-
 export const SEARCH_TOOL: OpenAI.Chat.ChatCompletionTool = {
     type: "function",
     function: {

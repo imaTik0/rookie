@@ -1,8 +1,3 @@
-/**
- * Unit tests for the feedback module (fragment verification, gap clustering,
- * docs patch generation). No infrastructure required.
- * Run with: deno test src/feedback/feedback.test.ts
- */
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import {
     corpusMentions,
@@ -39,8 +34,6 @@ It returns a new array of arrays and does not mutate the input.
 
 const CORPUS = [{ filename: "lodash.md", content: DOC }];
 
-// ─── fragmentVerify ──────────────────────────────────────────────────────────
-
 Deno.test("splitFragmentPrefix strips [file]: prefix", () => {
     const r = splitFragmentPrefix("[lodash.md]: Use `chunkArray(array, size)`");
     assertEquals(r.fileHint, "lodash.md");
@@ -61,7 +54,6 @@ Deno.test("verifyFragment finds exact quotes with line numbers", () => {
 });
 
 Deno.test("verifyFragment fuzzy-matches paraphrased quotes", () => {
-    // Paraphrase the doc line: different wording, same tokens.
     const v = verifyFragment(
         "[lodash.md]: chunkArray(array, size) splits an array into groups of size",
         CORPUS,
@@ -98,8 +90,6 @@ Deno.test("corpusMentions is case-insensitive", () => {
     assertEquals(corpusMentions(CORPUS, "LODASH"), true);
     assertEquals(corpusMentions(CORPUS, "sendgrid"), false);
 });
-
-// ─── gapAggregate ────────────────────────────────────────────────────────────
 
 function makeFinding(
     goal: string,
@@ -202,11 +192,8 @@ Deno.test("taxonomyOf and topFailingFunctionsOf are deterministic", () => {
     assertEquals(taxonomyOf(findings), { MISSING: 2, CONFIG: 1, UNKNOWN: 1 });
     const top = topFailingFunctionsOf(findings);
     assertEquals(top[0], { functionName: "fnX", count: 2, goals: ["a", "b"] });
-    // "unknown" excluded
     assertEquals(top.length, 2);
 });
-
-// ─── docsPatch ───────────────────────────────────────────────────────────────
 
 Deno.test("generateDocsPatch produces a unified diff for verified clusters", () => {
     const clusters = clusterGaps([

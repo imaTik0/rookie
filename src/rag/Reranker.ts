@@ -1,18 +1,3 @@
-/**
- * Optional reranking of retrieved chunks, applied AFTER hybrid (dense+BM25)
- * retrieval and BEFORE the results are handed to the LLM. A reranker improves
- * precision@k — directly addressing the "noise / too much irrelevant doc"
- * failure mode reported in the RAG literature.
- *
- * Three modes (config `reranker.mode`):
- *  - "off" : no-op (just truncate to `limit`). Default — keeps small setups fast.
- *  - "llm" : listwise rerank using the SAME chat model. Works with any backend
- *            (incl. small local models). Falls back to original order on any
- *            parse failure, so it can never make results worse than retrieval.
- *  - "api" : call a Jina/Cohere/TEI-compatible `/rerank` endpoint (cross-encoder).
- *
- * Generic over the result type; only needs a way to read each item's text.
- */
 import { Logger } from "../Logger.ts";
 
 export interface RerankConfig {
@@ -54,7 +39,6 @@ export async function rerankResults<T>(
         const reordered = order
             .filter((i) => i >= 0 && i < candidates.length)
             .map((i) => candidates[i]);
-        // Append any candidates the model omitted, preserving their original order.
         for (let i = 0; i < candidates.length; i++) {
             if (!order.includes(i)) reordered.push(candidates[i]);
         }
@@ -88,7 +72,6 @@ async function rerankViaLlm<T>(
 }
 
 function parseRanking(raw: string, n: number): number[] | null {
-    // Tolerate code fences / surrounding prose by extracting the first JSON object or array.
     const objMatch = raw.match(/\{[\s\S]*\}/);
     const arrMatch = raw.match(/\[[\s\S]*\]/);
     const text = objMatch?.[0] || arrMatch?.[0];
@@ -130,7 +113,6 @@ async function rerankViaApi<T>(
     });
     if (!res.ok) throw new Error(`rerank API ${res.status}: ${await res.text()}`);
     const data = await res.json();
-    // Jina/Cohere/TEI style: { results: [{ index, relevance_score }] }
     const arr = data.results || data.data || data;
     if (!Array.isArray(arr)) return null;
     return arr

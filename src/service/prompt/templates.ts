@@ -1,10 +1,3 @@
-/**
- * Prompt template strings for the 3-phase Agentic RAG pipeline.
- * Extracted from PromptService to keep the orchestration logic clean.
- */
-
-// ─── Phase 0: Legacy Test Scenario Prompt ────────────────────────────────────
-
 export function createSystemPrompt(mandatoryImports: string = ""): string {
     return `
 ### ROLE
@@ -174,8 +167,6 @@ Be thorough. Every missing piece of documentation will cause the generated code 
 `;
 }
 
-// ─── Phase 2: Verification ───────────────────────────────────────────────────
-
 export const VERIFICATION_SYSTEM_PROMPT = `### ROLE
 You are a Verification Agent. Your job is to write code that ACHIEVES the user's goal and prove it works by running it.
 CRITICAL: You MUST write ONLY in JavaScript/TypeScript for Node.js. ANY language other than JavaScript is STRICTLY FORBIDDEN and considered a critical failure.
@@ -251,7 +242,6 @@ export function createVerificationUserPrompt(
     userGoal: string,
     maxDocsChars: number = 50_000,
 ): string {
-    // Cap combined docs to prevent token overflow in verification phase
     const MAX_DOCS_CHARS = maxDocsChars;
     let combinedDocs =
         `#### Initial Documentation:\n${initialDocsContent}\n\n#### Researched Documentation:\n${contextFound}`;
@@ -271,8 +261,6 @@ ${userGoal}
 ### BEGIN
 Plan your first example, then test it. Share your reasoning at every step.`;
 }
-
-// ─── Phase 3: Generation ─────────────────────────────────────────────────────
 
 export const GENERATION_SYSTEM_PROMPT = `
 ### ROLE
@@ -395,8 +383,6 @@ Structure:
 }
 `;
 
-// ─── Coverage Extraction (post-research) ─────────────────────────────────────
-
 export const COVERAGE_EXTRACTION_SYSTEM_PROMPT = `
 ### ROLE
 You are a Documentation Coverage Auditor. A research agent just decomposed a user goal into
@@ -435,8 +421,6 @@ ${searchQueries.length ? searchQueries.map((q, i) => `${i + 1}. ${q}`).join("\n"
 
 Extract the coverage report as JSON.`;
 }
-
-// ─── Master Planner Prompts ──────────────────────────────────────────────────
 
 export const PLANNER_GOALS_SYSTEM_PROMPT = `
 ### ROLE
@@ -581,8 +565,6 @@ Analyze the data above and produce the comprehensive structured JSON quality rep
 `;
 }
 
-// ─── Phase 0.5: Execution Router / Planner ───────────────────────────────────
-
 export const ROUTER_SYSTEM_PROMPT = `
 ### ROLE
 You are an expert Execution Planner. Your job is to analyze a user's goal and formulate a clear, step-by-step research and execution plan for an Autonomous Agent.
@@ -631,8 +613,6 @@ Analyze the goal and the available initial context. Generate a structured execut
 `;
 }
 
-// ─── Search query refinement ──────────────────────────────────────────────────
-
 export function createRefineSearchQueryPrompt(error: string, context: string): string {
     return `You are a Search Specialist. Given a technical error and the context of what the code was trying to do, generate a single, highly effective search query to find relevant documentation in a knowledge base.
 
@@ -650,22 +630,8 @@ ${context}
 Generate ONLY the search query string, no explanation.`;
 }
 
-// ─── Execution environment (ctx) injection ────────────────────────────────────
-
-/** Context keys whose values must never be shown to the model verbatim. */
 const SECRET_KEY_RE = /token|key|secret|password|credential/i;
 
-/**
- * Render the runtime execution context as a CRITICAL prompt block so generated
- * code targets `ctx.apiBase` (etc.) instead of the literal hosts/ports that
- * documentation examples use (localhost:2019, 127.0.0.1:8080, …). Without this
- * block every network call in a containerised run dies with ECONNREFUSED and
- * the whole experiment degenerates to ENVIRONMENT failures.
- *
- * Returns "" for an empty/invalid context (library-only corpora) so prompts
- * are unchanged when there is no environment to describe. Secret-looking
- * values are masked — the model must reference them via `ctx`, never inline.
- */
 export function executionEnvironmentBlock(initialContext?: string): string {
     let ctx: unknown;
     try {

@@ -1,9 +1,3 @@
-/**
- * Retry with exponential backoff + jitter for transient LLM/embedding/API errors.
- * Retries on HTTP 429 / 5xx and common network errors; everything else is
- * re-thrown immediately. Keeps the system stable on rate-limited or flaky local
- * model servers (Ollama/vLLM) without masking genuine bugs.
- */
 export interface RetryLogger {
     log: (...args: any[]) => void;
     error: (...args: any[]) => void;
@@ -17,7 +11,6 @@ export interface RetryOptions {
     logger?: RetryLogger;
 }
 
-/** Marker for a 200-OK response whose completion body was empty/truncated. */
 export const EMPTY_COMPLETION = "empty completion";
 
 export function isRetryableError(err: unknown): boolean {
@@ -26,10 +19,6 @@ export function isRetryableError(err: unknown): boolean {
     if (status === 429 || status === 408) return true;
     if (typeof status === "number" && status >= 500 && status < 600) return true;
     const msg = String(e?.message ?? e ?? "").toLowerCase();
-    // `empty completion`: an overloaded model server often answers HTTP 200 with
-    // an empty (or cut-off) body. That is a transient capacity failure, not a
-    // malformed answer — retry it with backoff rather than asking the model to
-    // "repair" nothing, which would add load and amplify the overload.
     return /econnreset|etimedout|econnrefused|enotfound|fetch failed|network|socket|timeout|temporarily|overloaded|rate limit|empty completion/
         .test(msg);
 }
@@ -43,7 +32,6 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: RetryOptions): Pr
     const max = opts.maxDelayMs ?? 15_000;
     let attempt = 0;
 
-    // total tries = retries + 1
     while (true) {
         try {
             return await fn();

@@ -1,7 +1,3 @@
-/**
- * Unit tests for step-level (paired) drift analysis. Pure — no infrastructure.
- * Run with: deno test src/eval/stepDrift.test.ts
- */
 import { assertEquals } from "@std/assert";
 import { analyzeStepDrift, type GoalSteps } from "./stepDrift.ts";
 
@@ -20,11 +16,9 @@ Deno.test("computes step pass rates for both phases", () => {
 });
 
 Deno.test("detects drift that goal-level status HIDES (partial → partial)", () => {
-    // The eslint/marked case: the goal is PARTIAL_FAILURE in both phases, so goal
-    // status cannot move — yet a step genuinely regressed.
     const r = analyzeStepDrift(
-        [g("A", ["SUCCESS", "SUCCESS", "FAILED"])], // goal = PARTIAL
-        [g("A", ["SUCCESS", "FAILED", "FAILED"])], // goal = PARTIAL (unchanged)
+        [g("A", ["SUCCESS", "SUCCESS", "FAILED"])],
+        [g("A", ["SUCCESS", "FAILED", "FAILED"])],
     );
     assertEquals(r.regressions.length, 1);
     assertEquals(r.regressions[0].stepIndex, 2);
@@ -45,7 +39,7 @@ Deno.test("improvements are reported separately (frozen code ⇒ flakiness)", ()
 Deno.test("goals are matched by text, not position", () => {
     const r = analyzeStepDrift(
         [g("alpha", ["SUCCESS"]), g("beta", ["SUCCESS"])],
-        [g("beta", ["SUCCESS"]), g("alpha", ["FAILED"])], // reordered
+        [g("beta", ["SUCCESS"]), g("alpha", ["FAILED"])],
     );
     assertEquals(r.regressions.length, 1);
     assertEquals(r.regressions[0].goal, "alpha");
@@ -65,8 +59,6 @@ Deno.test("a goal missing from the experiment contributes only unpaired steps", 
     const r = analyzeStepDrift([g("A", ["SUCCESS"]), g("gone", ["SUCCESS", "SUCCESS"])], [
         g("A", ["SUCCESS"]),
     ]);
-    // "gone" falls back to positional match against index 1 — which does not
-    // exist — so its steps are unpaired rather than silently misaligned.
     assertEquals(r.unpaired, 2);
     assertEquals(r.regressions.length, 0);
 });

@@ -1,23 +1,3 @@
-/**
- * Generic agentic tool-calling loop used by both the Research and Verification phases.
- *
- * Context management strategy
- * ───────────────────────────
- * When the token budget is exceeded we apply three passes in order:
- *
- *  Pass 1 — Compact string content: replace long tool-response strings with
- *            a head+tail excerpt (fast, no LLM call, preserves structure).
- *
- *  Pass 2 — LLM distillation: extract all old tool-call groups (assistant
- *            message + its tool responses), summarise them with a dedicated
- *            LLM call, then replace the groups with a single dense factsheet.
- *            Falls back to a plain drop if the summarisation call fails.
- *            This preserves information density rather than discarding content.
- *
- *  Pass 3 — Initial-context truncation: if still over budget, compact the
- *            initial user/docs message (message[1]) with head+tail excerpts.
- *            The model can still query the RAG for details it needs.
- */
 import OpenAI from "@openai/openai";
 import { Logger } from "../../Logger.ts";
 import {
@@ -33,11 +13,6 @@ import { AgenticLoopConfig } from "./types.ts";
 import { withRetry } from "../../llm/retry.ts";
 import { countMessageTokens, countTokens } from "../../llm/tokens.ts";
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-// Minimal structural type covering the OpenAI message union without `any`.
 interface AgentMessage {
     role: string;
     content?: string | null;
@@ -55,18 +30,6 @@ function asAgentMsg(m: OpenAI.Chat.ChatCompletionMessageParam): AgentMessage {
     return m as unknown as AgentMessage;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Token counting
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Count tokens for the full API request: messages + tool definitions.
- *
- * Tool definitions are NOT part of the messages array but are included in
- * every API call. Anthropic serialises them as XML inside the system prompt,
- * so their actual token cost exceeds raw JSON. ×1.5 is a conservative
- * multiplier that avoids underestimating and hitting the model context limit.
- */
 function countContextTokens(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     tools?: OpenAI.Chat.ChatCompletionTool[],
@@ -79,10 +42,6 @@ function countContextTokens(
     return msgTokens + toolTokens;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Context helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 function compactExcerpt(text: string, head = 400, tail = 200): string {
     if (text.length <= head + tail + 40) return text;
     return `${text.slice(0, head)}\n…[${text.length - head - tail} chars trimmed]…\n${
@@ -90,11 +49,6 @@ function compactExcerpt(text: string, head = 400, tail = 200): string {
     }`;
 }
 
-/**
- * Walk messages[from..to) and extract contiguous tool-call groups.
- * A group = one assistant message with tool_calls + its matching tool responses.
- * Returns the structured groups AND the flat list of indices they occupy.
- */
 function extractToolGroups(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     from: number,
@@ -145,12 +99,6 @@ function extractToolGroups(
     return { groups, indices };
 }
 
-/**
- * Summarise an array of tool-call groups into a compact factsheet using the
- * LLM. The model understands API documentation structure and produces output
- * that is far more information-dense than any heuristic truncation strategy:
- * exact endpoint paths, parameter names and types, auth requirements, examples.
- */
 async function distillGroupsToSummary(
     openai: OpenAI,
     modelName: string,
@@ -189,10 +137,6 @@ async function distillGroupsToSummary(
                         `Distill the following research steps into a compact factsheet:\n\n${formatted}`,
                 },
             ],
-            // Headroom for "reasoning" models: they spend tokens on internal
-            // thinking before emitting content, so a tight cap here returned an
-            // EMPTY factsheet (silently degrading research quality). The output
-            // itself stays short — the extra budget only covers the thinking.
             max_tokens: 4000,
         },
         { signal: AbortSignal.timeout(callTimeoutMs) },
@@ -209,10 +153,6 @@ async function distillGroupsToSummary(
     return factsheet;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Pruning orchestrator
-// ─────────────────────────────────────────────────────────────────────────────
-
 async function pruneMessages(
     messages: OpenAI.Chat.ChatCompletionMessageParam[],
     tokenBudget: number,
@@ -224,17 +164,11 @@ async function pruneMessages(
     onProgress: ProgressCallback | undefined,
     tools?: OpenAI.Chat.ChatCompletionTool[],
 ): Promise<boolean> {
-    // ── Pass 0: hard per-message cap (ALL messages, including the tail) ─
-    // A single tool result (e.g. a whole-file read) can exceed the entire
-    // budget on its own and sit in the protected last-2 region where passes
-    // 1–3 never reach it. Compacting its CONTENT (not removing the message)
-    // is always safe — tool_call/tool pairing is preserved. Bounded by an
-    // absolute ceiling so many messages can't sum past the model hard limit.
     const perMsgTokenCap = Math.min(
         Math.max(1500, Math.floor((Number.isFinite(tokenBudget) ? tokenBudget : 8000) * 0.5)),
         8000,
     );
-    const perMsgCharCap = perMsgTokenCap * 3; // conservative ~3 chars/token
+    const perMsgCharCap = perMsgTokenCap * 3;
     for (let i = 1; i < messages.length; i++) {
         const m = asAgentMsg(messages[i]);
         if (typeof m.content === "string" && countTokens(m.content) > perMsgTokenCap) {
@@ -246,7 +180,6 @@ async function pruneMessages(
         }
     }
 
-    // ── Pass 1: compact string content in old messages ────────────────
     for (let i = 2; i < messages.length - 2; i++) {
         const m = asAgentMsg(messages[i]);
         if (typeof m.content === "string" && m.content.length > 300) {
@@ -255,7 +188,6 @@ async function pruneMessages(
         }
     }
 
-    // ── Pass 2: LLM distillation of old tool-call groups ─────────────
     if (countContextTokens(messages, tools) > tokenBudget && messages.length > 6) {
         const { groups, indices } = extractToolGroups(messages, 2, messages.length - 2);
 
@@ -282,10 +214,8 @@ async function pruneMessages(
                 );
             }
 
-            // Remove old groups (reverse so earlier indices stay valid)
             for (const idx of indices.sort((a, b) => b - a)) messages.splice(idx, 1);
 
-            // Insert the factsheet just after the initial system+user pair
             if (summary) {
                 messages.splice(2, 0, {
                     role: "user",
@@ -296,7 +226,6 @@ async function pruneMessages(
         }
     }
 
-    // ── Pass 3: truncate initial user/docs message as last resort ─────
     if (countContextTokens(messages, tools) > tokenBudget && messages.length > 1) {
         const userMsg = asAgentMsg(messages[1]);
         if (typeof userMsg.content === "string" && userMsg.content.length > 500) {
@@ -317,10 +246,6 @@ async function pruneMessages(
     return countContextTokens(messages, tools) <= tokenBudget;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Main loop
-// ─────────────────────────────────────────────────────────────────────────────
-
 function safeParse(json: string): unknown {
     try {
         return JSON.parse(json || "{}");
@@ -334,12 +259,6 @@ interface StreamedCompletion {
     usage?: OpenAI.Completions.CompletionUsage;
 }
 
-/**
- * Run one streaming chat completion, emitting each content delta as a `token`
- * event so clients can watch the model think in real time. Tool-call deltas are
- * accumulated across chunks and reassembled into a normal assistant message, so
- * the rest of the loop is unchanged.
- */
 async function streamCompletion(
     openai: OpenAI,
     modelName: string,
@@ -496,18 +415,12 @@ export async function runAgenticLoop(
 
         const am = asAgentMsg(message);
 
-        // Signal end-of-stream so clients collapse the live token view into a
-        // tidy summary. The full content is included for that summary.
         if (am.content) {
             logger.log(`${phaseLabel} Agent Thoughts: ${am.content}`);
             emitAssistantEnd(onProgress, am.content);
         }
 
         if (am.tool_calls && am.tool_calls.length > 0) {
-            // Execute all tool calls in the same turn concurrently — they are
-            // independent (the model already decided what to call before seeing
-            // any results). Order of tool_result messages must match tool_calls,
-            // so we keep the original index to reinsert in the right position.
             const toolResults = await Promise.all(
                 am.tool_calls.map(async (toolCall) => {
                     const handler = toolHandlers[toolCall.function.name];

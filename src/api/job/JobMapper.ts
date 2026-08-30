@@ -1,7 +1,6 @@
 import type { JobSchema as JobApi } from "./JobSchema.ts";
 import * as db from "../../db/mongo/Model.ts";
 
-/** Map a persisted job document to its API representation (dates → ISO strings). */
 export function mapJobToApi(job: db.JobModel): JobApi {
     return {
         id: job._id,

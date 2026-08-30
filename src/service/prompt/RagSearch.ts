@@ -1,9 +1,3 @@
-/**
- * Hybrid retrieval + reranking + relevance-aware truncation, extracted from
- * PromptService. Owns the BM25+dense search, optional rerank, the search-result
- * formatting, and the embedding-scored greedy packing used to keep documentation
- * within the model's token budget.
- */
 import OpenAI from "@openai/openai";
 import { Logger } from "../../Logger.ts";
 import { ConfigService } from "../ConfigService.ts";
@@ -21,7 +15,6 @@ export class RagSearch {
         private logger: Logger,
     ) {}
 
-    /** Hybrid (BM25 + dense) search over a project's vector collection, then rerank. */
     async search(
         collectionName: string,
         query: string,
@@ -38,7 +31,6 @@ export class RagSearch {
             const dense = await this.embeddingService.embed(query);
             const sparse = this.embeddingService.sparseEmbed(query);
 
-            // When reranking is enabled, over-fetch then let the reranker cut to `limit`.
             const rerankCfg = this.configService.values.reranker;
             const fetchLimit = rerankCfg.mode === "off" ? limit : Math.max(limit, rerankCfg.topN);
 
@@ -60,7 +52,6 @@ export class RagSearch {
         }
     }
 
-    /** Rerank hybrid-retrieval results (no-op unless `reranker.mode` is set). */
     async rerank(
         query: string,
         results: types.vector.SearchResult<types.file.FileShard>[],
@@ -94,17 +85,13 @@ export class RagSearch {
             .join("\n");
     }
 
-    /** Relevance-aware truncation: keep the chunks most similar to `query` under `maxChars`. */
     async rankAndFilterDocs(content: string, query: string, maxChars: number): Promise<string> {
         if (content.length <= maxChars) return content;
 
-        // Split by document markers (formatResults emits
-        // "--- DOCUMENT N (Score: x) ---", so match the trailing metadata too).
         const chunks = content.split(/--- DOCUMENT \d+[^\n]*---/).filter((c) =>
             c.trim().length > 0
         );
         if (chunks.length <= 1) {
-            // If no markers, fallback to double newlines
             const fallbackChunks = content.split("\n\n").filter((c) => c.trim().length > 0);
             if (fallbackChunks.length > 1) {
                 return this.rankAndFilterDocsByChunks(fallbackChunks, query, maxChars);
@@ -121,7 +108,6 @@ export class RagSearch {
         maxChars: number,
     ): Promise<string> {
         try {
-            // Single batched embeddings request for the query + all chunks.
             const inputs = [query, ...chunks.map((c) => c.substring(0, 3000))];
             const vectors = await this.embeddingService.embedBatch(inputs);
             const queryVector = vectors[0];
@@ -133,9 +119,6 @@ export class RagSearch {
 
             scoredChunks.sort((a, b) => b.score - a.score);
 
-            // Greedy best-first packing: iterate by descending score, include each
-            // chunk that still fits. Stop once the budget is fully consumed — later
-            // chunks are lower-relevance and skipping them would wrongly admit them.
             let result = "";
             for (const sc of scoredChunks) {
                 if ((result.length + sc.content.length) > maxChars) break;
@@ -162,7 +145,6 @@ export class RagSearch {
         return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
 
-    /** Shared chat closure used by the reranker; honours determinism config. */
     private buildLlmComplete(): LlmComplete {
         return async (system, user) => {
             const llm = this.configService.values.llm;

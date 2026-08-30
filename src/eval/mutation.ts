@@ -1,20 +1,3 @@
-/**
- * Documentation mutation engine — the four operators from the thesis protocol
- * (MuTAP-style, applied to DOCUMENTATION instead of code):
- *
- *   DelParam       remove a required parameter/header description  -> MISSING
- *   DelExmpl       remove a fenced request/response example block  -> MISSING
- *   ObfuscateType  replace a precise type with generic `string`    -> AMBIGUOUS
- *   AddFalseInfo   insert a plausible but nonexistent parameter    -> INCORRECT
- *
- * Given a gold-standard corpus, `generateMutants` produces first-order mutants
- * (exactly ONE mutation each) with ground-truth records: operator, expected gap
- * category, wound location in MUTATED-file coordinates, and match keywords.
- * Site selection is seeded-deterministic so runs are reproducible.
- *
- * Pure & dependency-free — unit-tested in mutation.test.ts. The infra-driving
- * orchestration lives in runMutation.ts.
- */
 import type { GapLabel } from "./metrics.ts";
 
 export type MutationOperator = "DelParam" | "DelExmpl" | "ObfuscateType" | "AddFalseInfo";
@@ -38,44 +21,28 @@ export interface DocFileIn {
     content: string;
 }
 
-/** A candidate location where an operator can be applied. */
 export interface MutationSite {
     operator: MutationOperator;
     file: string;
-    /** 1-based line range affected in the ORIGINAL file. */
     lineStart: number;
     lineEnd: number;
-    /** For ObfuscateType: which type occurrence on the line to replace (1-based). */
     occurrence?: number;
-    /** Human-readable description of what would change. */
     description: string;
-    /** Substrings expected to appear in a correct failure analysis. */
     matchKeywords: string[];
-    /**
-     * Hints for GOAL TARGETING only (section identifier / heading near the
-     * wound). Deliberately separate from `matchKeywords`, which define
-     * detection ground truth — mixing them would loosen MDS matching.
-     */
     goalHints?: string[];
 }
 
 export interface Mutant {
-    /** Stable id: <operator>-<file>-L<line>. */
     id: string;
     operator: MutationOperator;
     expectedGap: GapLabel;
     file: string;
-    /** 1-based wound location in the MUTATED file (where the gap now "lives"). */
     woundLine: number;
     description: string;
     matchKeywords: string[];
-    /** See MutationSite.goalHints — used only to pick relevant goals. */
     goalHints?: string[];
-    /** Full corpus with exactly this one mutation applied. */
     files: DocFileIn[];
 }
-
-// ── deterministic PRNG (mulberry32) ───────────────────────────────────────────
 
 function mulberry32(seed: number): () => number {
     let a = seed >>> 0;
@@ -88,7 +55,6 @@ function mulberry32(seed: number): () => number {
     };
 }
 
-/** Deterministic in-place shuffle. */
 function shuffle<T>(xs: T[], rand: () => number): T[] {
     const a = [...xs];
     for (let i = a.length - 1; i > 0; i--) {
@@ -98,20 +64,13 @@ function shuffle<T>(xs: T[], rand: () => number): T[] {
     return a;
 }
 
-// ── site enumeration ──────────────────────────────────────────────────────────
-
-/** `- \`name\` (string, required): …` or `* \`X-Header\` — required …` */
 const PARAM_LINE_RE =
     /^\s*[-*]\s+`([^`]+)`.*?(string|number|integer|boolean|required|optional|header|token)/i;
 
-/** Bold definition style: `**\`name\`** (type…): …` */
 const PARAM_BOLD_RE = /^\s*\*\*`([^`]+)`\*\*.*?(string|number|integer|boolean|required|optional)/i;
 
-/** Table row that looks like a parameter row: | `name` | type | ... */
 const PARAM_ROW_RE = /^\s*\|\s*`?(\w[\w-]*)`?\s*\|.*(string|number|integer|boolean|required)/i;
 
-// Covers parameter types AND return-value sentences ("Returns a number …") —
-// every occurrence outside code fences is a distinct ObfuscateType site.
 const PRECISE_TYPE_RE = /\b(number|integer|boolean|float|ISO[- ]?8601|timestamp|array of \w+)\b/;
 const PRECISE_TYPE_RE_G = new RegExp(PRECISE_TYPE_RE.source, "g");
 
@@ -140,7 +99,6 @@ function nearestHeading(lines: string[], idx: number): string | undefined {
     return undefined;
 }
 
-/** Goal-targeting hints for a site: the section's function ident, else the heading text. */
 function goalHintsFor(lines: string[], idx: number): string[] {
     const heading = nearestHeading(lines, idx);
     if (!heading) return [];
@@ -148,27 +106,20 @@ function goalHintsFor(lines: string[], idx: number): string[] {
     return ident ? [ident] : [heading];
 }
 
-/** Heading-style documented option, e.g. `#### options.timeout` or `### \`cwd\``. */
 const HEADING_OPT_RE = /^#{2,6}\s+`?([A-Za-z_$][\w$.]*)`?\s*$/;
-/** A "Type:" line (sindresorhus/execa style: `_Type:_ \`number\``, or `Type: \`x\``,
- *  or `**Type**: \`x\``) marking the heading above as a documented option. The
- *  markdown emphasis can wrap `Type:` (colon inside the italics), so underscores
- *  / asterisks may appear on both sides of the colon. */
 const TYPE_LINE_RE = /^\s*[_*]{0,2}(type|default)[_*]{0,2}\s*[:：][_*]{0,2}\s*`/i;
 
-/** True when one of the next few non-empty lines documents a type (⇒ the heading is a real option). */
 function headingIsOption(lines: string[], idx: number): boolean {
     let seen = 0;
     for (let j = idx + 1; j < lines.length && seen < 3; j++) {
         if (lines[j].trim() === "") continue;
         seen++;
         if (TYPE_LINE_RE.test(lines[j])) return true;
-        if (/^#{1,6}\s/.test(lines[j])) return false; // next heading ⇒ not an option block
+        if (/^#{1,6}\s/.test(lines[j])) return false;
     }
     return false;
 }
 
-/** Enumerate every applicable mutation site in the corpus. */
 export function enumerateSites(files: DocFileIn[]): MutationSite[] {
     const sites: MutationSite[] = [];
 
@@ -182,7 +133,6 @@ export function enumerateSites(files: DocFileIn[]): MutationSite[] {
             if (inFence(i)) continue;
             const line = lines[i];
 
-            // DelParam — a parameter/header description line (three styles).
             const pm = line.match(PARAM_LINE_RE) ?? line.match(PARAM_BOLD_RE) ??
                 line.match(PARAM_ROW_RE);
             if (pm) {
@@ -196,7 +146,6 @@ export function enumerateSites(files: DocFileIn[]): MutationSite[] {
                     matchKeywords: [pm[1]],
                     goalHints: hints,
                 });
-                // AddFalseInfo — insert a fake sibling parameter right after a real one.
                 sites.push({
                     operator: "AddFalseInfo",
                     file: file.filename,
@@ -208,8 +157,6 @@ export function enumerateSites(files: DocFileIn[]): MutationSite[] {
                 });
             }
 
-            // DelParam / AddFalseInfo — heading-style option docs common in real
-            // API references (`#### options.timeout` followed by a `Type:` line).
             const hm = line.match(HEADING_OPT_RE);
             if (hm && headingIsOption(lines, i)) {
                 const opt = hm[1];
@@ -235,9 +182,6 @@ export function enumerateSites(files: DocFileIn[]): MutationSite[] {
                 });
             }
 
-            // ObfuscateType — EVERY precise type mentioned outside code fences
-            // (multiple occurrences on one line are distinct sites), plus
-            // return-value sentences ("Returns a number …").
             const typeMatches = [...line.matchAll(PRECISE_TYPE_RE_G)];
             for (let occ = 0; occ < typeMatches.length; occ++) {
                 const param = line.match(/`([^`]+)`/)?.[1];
@@ -256,7 +200,6 @@ export function enumerateSites(files: DocFileIn[]): MutationSite[] {
             }
         }
 
-        // DelExmpl — every fenced example block (with its fences).
         for (const b of blocks) {
             const code = lines.slice(b.start + 1, b.end).join("\n");
             if (code.trim().length < 10) continue;
@@ -277,12 +220,9 @@ export function enumerateSites(files: DocFileIn[]): MutationSite[] {
     return sites;
 }
 
-// ── mutant generation ─────────────────────────────────────────────────────────
-
 const FAKE_PARAM_LINE =
     '- `xVerifyMode` (string, required): verification mode for this call — must be set to `"strict"`, otherwise the request is rejected.';
 
-/** Apply one site to the corpus; returns mutated files + wound line (mutated coords). */
 export function applySite(files: DocFileIn[], site: MutationSite): {
     files: DocFileIn[];
     woundLine: number;
@@ -296,7 +236,6 @@ export function applySite(files: DocFileIn[], site: MutationSite): {
         case "DelParam": {
             lines.splice(idx, 1);
             target.content = lines.join("\n");
-            // Wound sits where the line used to be (now the next line).
             return { files: out, woundLine: Math.min(site.lineStart, lines.length) };
         }
         case "DelExmpl": {
@@ -305,7 +244,6 @@ export function applySite(files: DocFileIn[], site: MutationSite): {
             return { files: out, woundLine: Math.min(site.lineStart, lines.length) };
         }
         case "ObfuscateType": {
-            // Replace exactly the site's occurrence (1-based) on the line.
             const wanted = site.occurrence ?? 1;
             let seen = 0;
             lines[idx] = lines[idx].replace(
@@ -324,13 +262,10 @@ export function applySite(files: DocFileIn[], site: MutationSite): {
 }
 
 export interface GenerateOptions {
-    /** PRNG seed — same seed + corpus => identical mutant set. */
     seed?: number;
-    /** Mutants per operator: a number, or "all" for one mutant per site (default 2). */
     perOperator?: number | "all";
 }
 
-/** Per-operator counts of applicable sites — the size of the potential mutant pool. */
 export function siteInventory(files: DocFileIn[]): Record<MutationOperator, number> & {
     total: number;
 } {
@@ -341,7 +276,6 @@ export function siteInventory(files: DocFileIn[]): Record<MutationOperator, numb
     return { ...counts, total: sites.length };
 }
 
-/** Generate a reproducible set of first-order mutants from a gold corpus. */
 export function generateMutants(files: DocFileIn[], opts: GenerateOptions = {}): Mutant[] {
     const seed = opts.seed ?? 1;
     const perOperator = opts.perOperator ?? 2;
@@ -372,8 +306,6 @@ export function generateMutants(files: DocFileIn[], opts: GenerateOptions = {}):
     return mutants;
 }
 
-// ── detection matching (shared by the driver and its tests) ───────────────────
-
 export interface ReportedGap {
     documentationGap: string;
     reasoning?: string;
@@ -385,14 +317,8 @@ export interface ReportedGap {
     verified?: boolean;
 }
 
-/** Line tolerance when matching a verified fragment to the wound. */
 export const WOUND_TOLERANCE_LINES = 8;
 
-/**
- * True when a reported gap matches the mutant's ground truth: either the
- * verified fragment overlaps the wound (same file, ±tolerance lines), or the
- * analysis text mentions one of the match keywords.
- */
 export function gapMatchesMutant(gap: ReportedGap, mutant: Mutant): boolean {
     if (
         gap.verified && gap.file === mutant.file &&
@@ -407,26 +333,11 @@ export function gapMatchesMutant(gap: ReportedGap, mutant: Mutant): boolean {
     return mutant.matchKeywords.some((k) => text.includes(k.toLowerCase()));
 }
 
-// ── goal targeting ────────────────────────────────────────────────────────────
-
-/** Case-insensitive match of `needle` at a word start ("chunk" matches "chunks"). */
 function containsToken(haystack: string, needle: string): boolean {
     const esc = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return new RegExp(`\\b${esc}`, "i").test(haystack);
 }
 
-/**
- * Map a mutant to the goal indices (0-based) that can plausibly exercise its
- * wounded fragment, so the driver can re-run ONLY those goals:
- *
- *   1. restrict to goals mentioning the wounded file's stem (library name),
- *   2. within that pool, prefer goals mentioning a `goalHints` token
- *      (the section's function identifier).
- *
- * Every stage falls back to the wider pool instead of returning an empty
- * selection — targeting reduces cost but must never remove the only goal that
- * could detect the wound.
- */
 export function relevantGoalIndices(
     mutant: Pick<Mutant, "file" | "goalHints">,
     goals: string[],
@@ -443,26 +354,13 @@ export function relevantGoalIndices(
     return byHint.length > 0 ? byHint : pool;
 }
 
-// ── planner COMPLETE event parsing ────────────────────────────────────────────
-
 export interface PlannerOutcome {
     masterPlanId: string;
     passRate: number;
     gaps: ReportedGap[];
-    /** Saved goal texts (`masterPlanGoals`) — used for mutant→goal targeting. */
     goals: string[];
 }
 
-/**
- * Parse the terminal NDJSON event of `/planner/run` / `/planner/rerun`.
- *
- * The controller emits `{ type: "COMPLETE", result: <master-plan report> }`
- * (see PlannerController: `stream.writeln(JSON.stringify({ type: "COMPLETE",
- * result }))`), so the report — with `_id` and `structuredSummary` — lives
- * under `result`. Reading the wrapper itself yields an empty masterPlanId and
- * a 0% pass rate; this function is unit-tested against the real shape to
- * prevent that regression.
- */
 export function parsePlannerComplete(evt: Record<string, unknown>): PlannerOutcome {
     const report = (evt.result ?? evt) as Record<string, unknown>;
     const summary = report.structuredSummary as Record<string, unknown> | undefined;

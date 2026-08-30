@@ -1,10 +1,3 @@
-/**
- * Documentation-gap failure classification, extracted from PromptService.
- *
- * `classify` runs a self-consistency vote (N independent LLM classifications,
- * majority on the gap category, fragment-verifiability tiebreak). `refineSearchQuery`
- * turns a crash + context into a better RAG query.
- */
 import OpenAI from "@openai/openai";
 import { Logger } from "../../Logger.ts";
 import { ConfigService } from "../ConfigService.ts";
@@ -48,16 +41,10 @@ export class FailureClassifier {
         relatedDocs: string,
         stepDescription: string,
         options: {
-            /**
-             * Scores a candidate's pinpointed fragment against the real docs corpus
-             * (0..1). Used to break ties between same-category candidates in favour
-             * of verifiable (non-hallucinated) quotes.
-             */
             fragmentScorer?: (fragment: string | undefined) => number;
         } = {},
         httpTrafficLog?: types.report.HttpTrafficEntry[],
     ): Promise<types.report.FailureAnalysis> {
-        // Format captured HTTP traffic as a concise classifier input section.
         const httpSection = httpTrafficLog && httpTrafficLog.length > 0
             ? `\n\n### HTTP TRAFFIC DURING EXECUTION\n` +
                 httpTrafficLog.slice(0, 20).map((e) =>
@@ -118,7 +105,6 @@ Respond with a JSON object:
 }`;
 
         const votes = this.configService.values.classifier.votes;
-        // Fire all votes concurrently — they are fully independent LLM calls.
         const settled = await Promise.allSettled(
             Array.from(
                 { length: votes },
@@ -146,9 +132,6 @@ Respond with a JSON object:
             };
         }
 
-        // Self-consistency: majority vote on the category; among candidates that
-        // agree with the winner, prefer the one whose pinpointed fragment best
-        // verifies against the actual documentation corpus.
         const winningGap = majorityVote(candidates.map((c) => c.documentationGap));
         const winners = candidates.filter((c) => c.documentationGap === winningGap);
         const scorer = options.fragmentScorer;

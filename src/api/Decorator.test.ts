@@ -1,7 +1,3 @@
-/**
- * Unit tests for the controller/route decorators and registerController.
- * Run with: deno test src/api/Decorator.test.ts
- */
 import "reflect-metadata";
 import { assert, assertEquals } from "@std/assert";
 import { createRoute, type OpenAPIHono, z } from "@hono/zod-openapi";
@@ -36,7 +32,6 @@ class ThingController {
     // deno-lint-ignore no-explicit-any
     create = (c: any) => c.json({ id: "1" });
 }
-// Apply decorators manually (class-field decorators differ across TS configs).
 Get(PingRoute)(ThingController.prototype, "ping");
 Post(CreateRoute)(ThingController.prototype, "create");
 
@@ -64,7 +59,6 @@ Deno.test("registerController mounts every route on the app and binds the handle
     registerController(fakeApp, new ThingController(), fakeLogger());
 
     assertEquals(captured.length, 2);
-    // Handlers are bound to the controller instance and delegate to its methods.
     // deno-lint-ignore no-explicit-any
     const fakeCtx = { json: (body: unknown) => body } as any;
     const results = await Promise.all(captured.map((c) => c.handler(fakeCtx)));

@@ -1,12 +1,3 @@
-/**
- * Pure, dependency-free metrics for evaluating Rookie's documentation-gap
- * detection and classification against a labelled fixture set.
- *
- * All functions here are deterministic and unit-testable without any infra
- * (see metrics.test.ts) — the heavy, infra-dependent orchestration lives in
- * runEval.ts.
- */
-
 export type GapLabel =
     | "MISSING"
     | "AMBIGUOUS"
@@ -35,12 +26,6 @@ function f1Of(precision: number, recall: number): number {
     return precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
 }
 
-/**
- * Binary detection metrics: did we flag a defect where one exists?
- * @param detected   number of true defects the system flagged (true positives)
- * @param totalGold  number of injected defects (TP + FN)
- * @param totalFlagged number of failures the system reported (TP + FP)
- */
 export function detectionMetrics(
     detected: number,
     totalGold: number,
@@ -53,7 +38,6 @@ export function detectionMetrics(
 
 export interface ConfusionMatrix {
     labels: GapLabel[];
-    /** matrix[gold][pred] counts. */
     matrix: number[][];
 }
 
@@ -76,7 +60,6 @@ export function confusionMatrix(
     return { labels, matrix };
 }
 
-/** Per-label precision/recall/F1 derived from a confusion matrix. */
 export function perLabelMetrics(cm: ConfusionMatrix): Record<string, PRF> {
     const { labels, matrix } = cm;
     const out: Record<string, PRF> = {};
@@ -112,10 +95,6 @@ export function accuracy(gold: GapLabel[], pred: GapLabel[]): number {
     return correct / gold.length;
 }
 
-/**
- * Cohen's kappa for categorical agreement between predicted and gold labels.
- * κ = (po - pe) / (1 - pe). Returns 1 for perfect agreement, 0 for chance.
- */
 export function cohenKappa(
     gold: GapLabel[],
     pred: GapLabel[],
@@ -142,35 +121,24 @@ export function cohenKappa(
     return pe === 1 ? 1 : (po - pe) / (1 - pe);
 }
 
-/** Arithmetic mean; 0 for an empty list. */
 export function mean(xs: number[]): number {
     if (xs.length === 0) return 0;
     return xs.reduce((s, x) => s + x, 0) / xs.length;
 }
 
 export interface LocalizationRecord {
-    /** File the injected defect lives in (ground truth). */
     expectedFile: string;
-    /** File the verified fragment points at (undefined when unverified). */
     predictedFile?: string;
-    /** Whether the system verified the fragment against the corpus at all. */
     verified: boolean;
 }
 
 export interface LocalizationStats {
-    /** Share of detected defects whose pinpointed fragment verified against the corpus. */
     verifiedRate: number;
-    /** Share of detected defects localized to the correct file (of all detected). */
     fileAccuracy: number;
-    /** Share of VERIFIED fragments that point at the correct file. */
     fileAccuracyOfVerified: number;
     support: number;
 }
 
-/**
- * Fragment-localization quality over the defects the system detected:
- * did the pinpointed fragment verify, and does it point at the right file?
- */
 export function localizationMetrics(records: LocalizationRecord[]): LocalizationStats {
     const support = records.length;
     if (support === 0) {
@@ -188,7 +156,6 @@ export function localizationMetrics(records: LocalizationRecord[]): Localization
     };
 }
 
-/** Plurality/majority vote over a list of labels. Ties resolved by first-seen order. */
 export function majorityVote(labels: GapLabel[]): GapLabel {
     if (labels.length === 0) return "UNKNOWN";
     const counts = new Map<GapLabel, number>();
